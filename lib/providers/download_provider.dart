@@ -1114,7 +1114,7 @@ class DownloadProvider extends ChangeNotifier {
       // (tracked in fetchedShowKeys) to avoid redundant requests in a loop.
       // A short await between episode requests prevents Plex rate-limiting.
       if (clientResolver != null) {
-        final client = clientResolver!(serverId);
+        final client = clientResolver(serverId);
         if (client != null) {
           await _downloadManager.downloadArtworkForMetadata(metadata, client);
           if (item.type == 'episode' && item.grandparentRatingKey?.isNotEmpty == true &&
