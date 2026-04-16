@@ -8,6 +8,8 @@ import '../models/plex_media_version.dart';
 import '../models/plex_metadata.dart';
 import '../utils/download_version_utils.dart';
 import '../services/download_manager_service.dart';
+// PlexSyncer
+import '../services/manifest_import_service.dart';
 import '../services/download_storage_service.dart';
 import '../services/storage_service.dart';
 import '../services/plex_api_cache.dart';
@@ -106,6 +108,7 @@ class DownloadProvider extends ChangeNotifier {
           progress: item.progress,
           downloadedBytes: item.downloadedBytes,
           totalBytes: item.totalBytes ?? 0,
+          errorMessage: item.errorMessage,
         );
 
         // Store Plex thumb path reference (file path computed from hash when needed)
@@ -983,6 +986,207 @@ class DownloadProvider extends ChangeNotifier {
   /// Get all items currently being deleted
   UnmodifiableMapView<String, DeletionProgress> get deletionProgress => UnmodifiableMapView(_deletionProgress);
 
+  // ─────────────────────────────────────────────────────────────────────────
+  // PlexSyncer: import externally-synced files from a manifest.json
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /// Read the PlexSyncer manifest from the SAF folder, then register every
+  /// resolved item as a completed download.
+  ///
+  /// Returns a brief summary string describing what happened, suitable for
+  /// display in a [SnackBar] or dialog.
+  Future<ImportSummary> importFromManifest({PlexClient? Function(String serverId)? clientResolver}) async {
+    // 1. Read + resolve the manifest (SAF/JSON only — no DB access here).
+    final readResult = await ManifestImportService.instance.readManifest();
+
+    if (readResult.hasError) {
+      return ImportSummary(error: readResult.error);
+    }
+
+    final serverId   = readResult.serverId;
+    final serverName = readResult.serverName;
+    int imported = 0;
+    int skipped  = 0;
+    // Track shows/seasons we've already stubbed and fetched artwork for.
+    // Both use the first episode's artwork paths — subsequent episodes of the
+    // same show/season may report different thumb URL timestamps from Plex.
+    final fetchedShowKeys  = <String>{};
+    final stubbedParentKeys = <String>{};
+
+    for (final item in readResult.resolved) {
+      final globalKey = buildGlobalKey(serverId, item.ratingKey);
+
+      // Skip items already in the database.
+      final existing = await _downloadManager.getDownloadedMedia(globalKey);
+      if (existing != null) {
+        skipped++;
+        continue;
+      }
+
+      // Build a PlexMetadata from the resolved item.
+      final metadata = PlexMetadata(
+        ratingKey:            item.ratingKey,
+        key:                  '/library/metadata/${item.ratingKey}',
+        type:                 item.type,
+        title:                item.title,
+        summary:              item.summary,
+        thumb:                item.thumb,
+        art:                  item.art,
+        duration:             item.duration,
+        year:                 item.type == 'movie' ? item.year : null,
+        grandparentTitle:     item.grandparentTitle,
+        grandparentThumb:     item.grandparentThumb,
+        grandparentRatingKey: item.grandparentRatingKey,
+        parentTitle:          item.parentTitle,
+        parentRatingKey:      item.parentRatingKey,
+        parentIndex:          item.seasonNumber,
+        index:                item.episodeNumber,
+        serverId:             serverId,
+        serverName:           serverName,
+      );
+
+      // For episodes, register show and season stubs once per unique key.
+      // stubbedParentKeys ensures the first episode's thumb URL is used
+      // consistently — Plex may return different timestamp variants per episode.
+      if (item.type == 'episode') {
+        // Show stub — only on first episode for this show
+        if (item.grandparentRatingKey != null &&
+            item.grandparentRatingKey!.isNotEmpty &&
+            stubbedParentKeys.add(item.grandparentRatingKey!)) {
+          await _downloadManager.registerSyncedParentStub(PlexMetadata(
+            ratingKey:  item.grandparentRatingKey!,
+            key:        '/library/metadata/${item.grandparentRatingKey}',
+            type:       'show',
+            title:      item.grandparentTitle,
+            thumb:      item.grandparentThumb,
+            art:        item.grandparentArt,
+            year:       item.grandparentYear,
+            serverId:   serverId,
+            serverName: serverName,
+          ));
+        }
+        // Season stub — only on first episode for this season
+        if (item.parentRatingKey != null &&
+            item.parentRatingKey!.isNotEmpty &&
+            stubbedParentKeys.add(item.parentRatingKey!)) {
+          await _downloadManager.registerSyncedParentStub(PlexMetadata(
+            ratingKey:            item.parentRatingKey!,
+            key:                  '/library/metadata/${item.parentRatingKey}',
+            type:                 'season',
+            title:                item.parentTitle,
+            thumb:                item.parentThumb ?? item.grandparentThumb,
+            parentIndex:          item.seasonNumber,
+            grandparentTitle:     item.grandparentTitle,
+            grandparentRatingKey: item.grandparentRatingKey,
+            serverId:             serverId,
+            serverName:           serverName,
+          ));
+        }
+      }
+
+      // Register the file and write to DB.
+      await _downloadManager.registerSyncedDownload(
+        metadata:  metadata,
+        fileUri:   item.fileUri,
+        thumbPath: item.thumb,
+      );
+
+      // Update local provider state immediately (same pattern as queueDownload).
+      _downloads[globalKey] = DownloadProgress(
+        globalKey: globalKey,
+        status:    DownloadStatus.completed,
+        progress:  100,
+      );
+      _metadata[globalKey]   = metadata;
+      _artworkPaths[globalKey] = DownloadedArtwork(thumbPath: item.thumb);
+
+      // Also populate the show-level artwork path so the TV Shows grid
+      // shows the poster immediately in this session (without a restart).
+      if (item.type == 'episode' && item.grandparentRatingKey != null &&
+          item.grandparentRatingKey!.isNotEmpty) {
+        final showKey = buildGlobalKey(serverId, item.grandparentRatingKey!);
+        if (!_artworkPaths.containsKey(showKey)) {
+          _artworkPaths[showKey] = DownloadedArtwork(thumbPath: item.grandparentThumb);
+        }
+      }
+
+      // Fetch artwork when online. Show poster is fetched once per unique show
+      // (tracked in fetchedShowKeys) to avoid redundant requests in a loop.
+      // A short await between episode requests prevents Plex rate-limiting.
+      if (clientResolver != null) {
+        final client = clientResolver(serverId);
+        if (client != null) {
+          await _downloadManager.downloadArtworkForMetadata(metadata, client);
+          if (item.type == 'episode' && item.grandparentRatingKey?.isNotEmpty == true &&
+              !fetchedShowKeys.contains(item.grandparentRatingKey)) {
+            fetchedShowKeys.add(item.grandparentRatingKey!);
+            await _downloadManager.downloadArtworkForMetadata(
+              PlexMetadata(
+                ratingKey:  item.grandparentRatingKey!,
+                key:        '/library/metadata/${item.grandparentRatingKey}',
+                type:       'show',
+                thumb:      item.grandparentThumb,
+                art:        item.grandparentArt,
+                serverId:   serverId,
+                serverName: serverName,
+              ),
+              client,
+            );
+          }
+        }
+      }
+
+      imported++;
+    }
+
+    // Prune stale PlexSyncer items — any DB entry whose videoFilePath is a
+    // SAF URI under the PlexSyncer folder but is no longer in the manifest
+    // was removed by PlexSyncer (watched, rotated out, or deselected).
+    // The file itself is already gone (removed by rclone / Round Sync).
+    int pruned = 0;
+    if (readResult.psRootUri.isNotEmpty) {
+      // Parse the document ID of the PlexSyncer root once.
+      // SAF child URIs have document IDs that start with the parent's document ID.
+      final psDocId = Uri.parse(readResult.psRootUri).pathSegments.last;
+
+      final allDownloads = await _downloadManager.getAllDownloads();
+      for (final row in allDownloads) {
+        final path = row.videoFilePath;
+        if (path == null || !path.startsWith('content://')) continue;
+
+        // Check if this file is under the PlexSyncer SAF folder.
+        final fileDocId = Uri.parse(path).pathSegments.last;
+        if (!fileDocId.startsWith(psDocId)) continue;
+
+        // It's a PlexSyncer file — is it still in the manifest?
+        if (readResult.manifestGlobalKeys.contains(row.globalKey)) continue;
+
+        // Orphaned: remove from DB and in-memory state.
+        // File is already gone so deleteDownload will find nothing to delete.
+        appLogger.i('PlexSyncer prune: removing stale row ${row.globalKey}');
+        try {
+          await _downloadManager.deleteDownload(row.globalKey);
+          _downloads.remove(row.globalKey);
+          _metadata.remove(row.globalKey);
+          _artworkPaths.remove(row.globalKey);
+          pruned++;
+        } catch (e) {
+          appLogger.w('PlexSyncer prune: failed to remove ${row.globalKey}', error: e);
+        }
+      }
+      if (pruned > 0) appLogger.i('PlexSyncer: pruned $pruned stale item(s)');
+    }
+
+    notifyListeners();
+
+    return ImportSummary(
+      imported: imported,
+      skipped:  skipped,
+      missing:  readResult.missing,
+      pruned:   pruned,
+    );
+  }
+
   /// Refresh the downloads list from database
   Future<void> refresh() async {
     await _loadPersistedDownloads();
@@ -1053,6 +1257,36 @@ class DownloadProvider extends ChangeNotifier {
     }
 
     return deletedTitles;
+  }
+}
+
+// PlexSyncer: summary returned by DownloadProvider.importFromManifest()
+class ImportSummary {
+  final int     imported;
+  final int     skipped;
+  final int     missing;
+  final int     pruned;
+  final String? error;
+
+  const ImportSummary({
+    this.imported = 0,
+    this.skipped  = 0,
+    this.missing  = 0,
+    this.pruned   = 0,
+    this.error,
+  });
+
+  bool get hasError => error != null;
+
+  String toUserMessage() {
+    if (hasError) return error!;
+    final buf = StringBuffer();
+    if (imported > 0) buf.write('$imported item(s) added.');
+    if (skipped  > 0) buf.write(' $skipped already present.');
+    if (pruned   > 0) buf.write(' $pruned item(s) removed.');
+    if (missing  > 0) buf.write(' $missing file(s) not yet on device.');
+    if (buf.isEmpty) buf.write('Everything up to date.');
+    return buf.toString();
   }
 }
 

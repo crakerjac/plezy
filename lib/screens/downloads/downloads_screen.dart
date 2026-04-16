@@ -41,6 +41,55 @@ class DownloadsScreenState extends State<DownloadsScreen> with TickerProviderSta
     initTabNavigation();
   }
 
+  // PlexSyncer: import synced files from the PlexSyncer manifest.json
+  Future<void> _importFromManifest() async {
+    if (!mounted) return;
+
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const AlertDialog(
+        content: Row(children: [
+          CircularProgressIndicator(),
+          SizedBox(width: 16),
+          Expanded(child: Text('Scanning sync folder…')),
+        ]),
+      ),
+    );
+
+    final serverProvider = context.read<MultiServerProvider>();
+    final summary = await context.read<DownloadProvider>().importFromManifest(
+      clientResolver: (id) => serverProvider.serverManager.getClient(id),
+    );
+
+    if (mounted) Navigator.of(context, rootNavigator: true).pop();
+    if (!mounted) return;
+
+    if (summary.hasError) {
+      showDialog<void>(
+        context: context,
+        builder: (_) => AlertDialog(
+          title: const Text('Scan failed'),
+          content: Text(summary.error!),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('OK'),
+            ),
+          ],
+        ),
+      );
+      return;
+    }
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(summary.toUserMessage()),
+        duration: const Duration(seconds: 5),
+      ),
+    );
+  }
+
   @override
   void dispose() {
     _queueTabChipFocusNode.dispose();
@@ -146,6 +195,14 @@ class DownloadsScreenState extends State<DownloadsScreen> with TickerProviderSta
             surfaceTintColor: Colors.transparent,
             shadowColor: Colors.transparent,
             scrolledUnderElevation: 0,
+            // PlexSyncer: scan button
+            actions: [
+              IconButton(
+                icon: const Icon(Symbols.sync_rounded),
+                tooltip: 'Scan PlexSyncer folder',
+                onPressed: _importFromManifest,
+              ),
+            ],
           ),
           SliverFillRemaining(
             child: Column(
