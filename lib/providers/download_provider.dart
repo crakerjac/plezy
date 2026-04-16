@@ -997,7 +997,15 @@ class DownloadProvider extends ChangeNotifier {
   /// display in a [SnackBar] or dialog.
   Future<ImportSummary> importFromManifest({PlexClient? Function(String serverId)? clientResolver}) async {
     // 1. Read + resolve the manifest (SAF/JSON only — no DB access here).
-    final readResult = await ManifestImportService.instance.readManifest();
+    // Bulk-load all existing downloads first so we can skip the SAF file-tree
+    // walk for items already registered. On slow SD card storage each getChild()
+    // call costs ~90ms — skipping it for known items is the main speed-up.
+    final allExisting = await _downloadManager.getAllDownloads();
+    final existingKeys = {for (final d in allExisting) d.globalKey};
+
+    final readResult = await ManifestImportService.instance.readManifest(
+      knownGlobalKeys: existingKeys,
+    );
 
     if (readResult.hasError) {
       return ImportSummary(error: readResult.error);
@@ -1006,19 +1014,23 @@ class DownloadProvider extends ChangeNotifier {
     final serverId   = readResult.serverId;
     final serverName = readResult.serverName;
     int imported = 0;
-    int skipped  = 0;
+    // Count items that readManifest skipped (already registered + in manifest).
+    int skipped = readResult.manifestGlobalKeys
+        .where(existingKeys.contains)
+        .length;
     // Track shows/seasons we've already stubbed and fetched artwork for.
     // Both use the first episode's artwork paths — subsequent episodes of the
     // same show/season may report different thumb URL timestamps from Plex.
-    final fetchedShowKeys  = <String>{};
+    final fetchedShowKeys   = <String>{};
     final stubbedParentKeys = <String>{};
 
     for (final item in readResult.resolved) {
       final globalKey = buildGlobalKey(serverId, item.ratingKey);
 
-      // Skip items already in the database.
-      final existing = await _downloadManager.getDownloadedMedia(globalKey);
-      if (existing != null) {
+      // readManifest already skipped known items via knownGlobalKeys,
+      // so resolved only contains genuinely new items.
+      // Guard remains for safety (e.g. duplicate ratingKeys in manifest).
+      if (existingKeys.contains(globalKey)) {
         skipped++;
         continue;
       }
@@ -1149,8 +1161,8 @@ class DownloadProvider extends ChangeNotifier {
       // SAF child URIs have document IDs that start with the parent's document ID.
       final psDocId = Uri.parse(readResult.psRootUri).pathSegments.last;
 
-      final allDownloads = await _downloadManager.getAllDownloads();
-      for (final row in allDownloads) {
+      // Reuse the bulk-loaded list from the import step above.
+      for (final row in allExisting) {
         final path = row.videoFilePath;
         if (path == null || !path.startsWith('content://')) continue;
 

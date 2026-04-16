@@ -113,7 +113,10 @@ class ManifestImportService {
   /// Returns a [ManifestReadResult] with an [error] string if something went
   /// wrong at the SAF or JSON level. Individual files that are not yet on the
   /// device are counted in [missing] but do not cause an error.
-  Future<ManifestReadResult> readManifest() async {
+  /// [knownGlobalKeys] — globalKeys already in the database (serverId:ratingKey).
+  /// Items in this set are included in [manifestGlobalKeys] for pruning but
+  /// skip the SAF tree walk, which is the main cost on slow SD card storage.
+  Future<ManifestReadResult> readManifest({Set<String>? knownGlobalKeys}) async {
     final storageService = DownloadStorageService.instance;
 
     if (!storageService.isUsingSaf) {
@@ -183,7 +186,12 @@ class ManifestImportService {
         continue;
       }
 
-      manifestGlobalKeys.add('$serverId:$ratingKey');
+      final itemGlobalKey = '$serverId:$ratingKey';
+      manifestGlobalKeys.add(itemGlobalKey);
+
+      // Skip SAF tree walk for items already registered — the file walk is
+      // the main cost on slow SD card storage (~90ms per getChild() call).
+      if (knownGlobalKeys != null && knownGlobalKeys.contains(itemGlobalKey)) continue;
 
       // Resolve the file to a SAF content:// URI.
       final fileUri = await _resolveToUri(saf, psRoot.uri, relativePath);
