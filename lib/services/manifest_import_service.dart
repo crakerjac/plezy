@@ -251,8 +251,6 @@ class ManifestImportService {
     if (manifestFile == null) throw Exception('manifest.json not found');
 
     final bytes = await SafStream().readFileBytes(manifestFile.uri);
-    if (bytes == null) throw Exception('Could not read manifest.json');
-
     return utf8.decode(bytes);
   }
 
