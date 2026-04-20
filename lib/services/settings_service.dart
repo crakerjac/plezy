@@ -66,6 +66,8 @@ class SettingsService extends BaseSharedPreferencesService {
   static const String _keySubtitleBackgroundOpacity = 'subtitle_background_opacity';
   static const String _keySubtitlePosition = 'subtitle_position';
   static const String _keySubAssOverride = 'sub_ass_override';
+  static const String _keySubtitleBold = 'subtitle_bold';
+  static const String _keySubtitleItalic = 'subtitle_italic';
   static const String _keyAppLocale = 'app_locale';
   static const String _keyRememberTrackSelections = 'remember_track_selections';
   static const String _keyClickVideoTogglesPlayback = 'click_video_toggles_playback';
@@ -75,10 +77,8 @@ class SettingsService extends BaseSharedPreferencesService {
   static const String _keyIntroPattern = 'intro_pattern';
   static const String _keyCreditsPattern = 'credits_pattern';
 
-  static const String defaultIntroPattern =
-      r'(?:^|\b)(?:intro(?:duction)?|opening)(?:\b|$)|^op(?:\s?\d+)?$';
-  static const String defaultCreditsPattern =
-      r'(?:^|\b)(?:outro|closing|credits?|ending)(?:\b|$)|^ed(?:\s?\d+)?$';
+  static const String defaultIntroPattern = r'(?:^|\b)(?:intro(?:duction)?|opening)(?:\b|$)|^op(?:\s?\d+)?$';
+  static const String defaultCreditsPattern = r'(?:^|\b)(?:outro|closing|credits?|ending)(?:\b|$)|^ed(?:\s?\d+)?$';
   static const String _keyCustomDownloadPath = 'custom_download_path';
   static const String _keyCustomDownloadPathType = 'custom_download_path_type';
   static const String _keyDownloadOnWifiOnly = 'download_on_wifi_only';
@@ -92,6 +92,8 @@ class SettingsService extends BaseSharedPreferencesService {
   static const String _keyMpvConfigPresets = 'mpv_config_presets';
   static const String _keyMaxVolume = 'max_volume';
   static const String _keyEnableDiscordRPC = 'enable_discord_rpc';
+  static const String _keyEnableTraktScrobble = 'enable_trakt_scrobble';
+  static const String _keyEnableTraktWatchedSync = 'enable_trakt_watched_sync';
   static const String _keyEnableCompanionRemoteServer = 'enable_companion_remote_server';
   static const String _keyAutoPip = 'auto_pip';
   static const String _keyMatchContentFrameRate = 'match_content_frame_rate';
@@ -110,6 +112,7 @@ class SettingsService extends BaseSharedPreferencesService {
   static const String _keySelectedExternalPlayer = 'selected_external_player';
   static const String _keyCustomExternalPlayers = 'custom_external_players';
   static const String _keyConfirmExitOnBack = 'confirm_exit_on_back';
+  static const String _keyForceTvMode = 'force_tv_mode';
   static const String _keyAmbientLighting = 'ambient_lighting';
   static const String _keyAudioPassthrough = 'audio_passthrough';
   static const String _keyAudioNormalization = 'audio_normalization';
@@ -463,6 +466,24 @@ class SettingsService extends BaseSharedPreferencesService {
 
   SubAssOverride getSubAssOverride() {
     return _getEnumValue(_keySubAssOverride, SubAssOverride.values, SubAssOverride.no);
+  }
+
+  // Bold subtitles
+  Future<void> setSubtitleBold(bool bold) async {
+    await prefs.setBool(_keySubtitleBold, bold);
+  }
+
+  bool getSubtitleBold() {
+    return prefs.getBool(_keySubtitleBold) ?? false;
+  }
+
+  // Italic subtitles
+  Future<void> setSubtitleItalic(bool italic) async {
+    await prefs.setBool(_keySubtitleItalic, italic);
+  }
+
+  bool getSubtitleItalic() {
+    return prefs.getBool(_keySubtitleItalic) ?? false;
   }
 
   // Keyboard Shortcuts (Legacy String-based)
@@ -1105,6 +1126,24 @@ class SettingsService extends BaseSharedPreferencesService {
     return prefs.getBool(_keyEnableDiscordRPC) ?? false; // Default disabled
   }
 
+  // Trakt Scrobbling (sends play/pause/stop during playback to Trakt)
+  Future<void> setEnableTraktScrobble(bool enabled) async {
+    await prefs.setBool(_keyEnableTraktScrobble, enabled);
+  }
+
+  bool getEnableTraktScrobble() {
+    return prefs.getBool(_keyEnableTraktScrobble) ?? true; // Default enabled when account is linked
+  }
+
+  // Trakt Watched-Status Sync (Plezy → Trakt only)
+  Future<void> setEnableTraktWatchedSync(bool enabled) async {
+    await prefs.setBool(_keyEnableTraktWatchedSync, enabled);
+  }
+
+  bool getEnableTraktWatchedSync() {
+    return prefs.getBool(_keyEnableTraktWatchedSync) ?? true; // Default enabled when account is linked
+  }
+
   // Companion Remote Server
   Future<void> setEnableCompanionRemoteServer(bool enabled) async {
     await prefs.setBool(_keyEnableCompanionRemoteServer, enabled);
@@ -1354,6 +1393,13 @@ class SettingsService extends BaseSharedPreferencesService {
     return prefs.getBool(_keyConfirmExitOnBack) ?? true; // Default: enabled
   }
 
+  // Force TV Mode (Android)
+  Future<void> setForceTvMode(bool value) async {
+    await prefs.setBool(_keyForceTvMode, value);
+  }
+
+  bool getForceTvMode() => prefs.getBool(_keyForceTvMode) ?? false;
+
   // Ambient Lighting
   Future<void> setAmbientLighting(bool enabled) async {
     await prefs.setBool(_keyAmbientLighting, enabled);
@@ -1425,6 +1471,8 @@ class SettingsService extends BaseSharedPreferencesService {
       prefs.remove(_keyMpvConfigText),
       prefs.remove(_keyMpvConfigPresets),
       prefs.remove(_keyEnableDiscordRPC),
+      prefs.remove(_keyEnableTraktScrobble),
+      prefs.remove(_keyEnableTraktWatchedSync),
       prefs.remove(_keyAutoPip),
       prefs.remove(_keyMatchContentFrameRate),
       prefs.remove(_keyTunneledPlayback),
@@ -1443,6 +1491,7 @@ class SettingsService extends BaseSharedPreferencesService {
       prefs.remove(_keySelectedExternalPlayer),
       prefs.remove(_keyCustomExternalPlayers),
       prefs.remove(_keyConfirmExitOnBack),
+      prefs.remove(_keyForceTvMode),
       prefs.remove(_keyAmbientLighting),
       prefs.remove(_keyAudioPassthrough),
       prefs.remove(_keyAudioNormalization),

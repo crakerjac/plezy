@@ -1,7 +1,7 @@
 name: plezy
 description: "A beautiful Plex client for Flutter"
 publish_to: "none"
-version: 1.33.1-PlexSyncer+70
+version: 1.34.2-PlexSyncer+73
 
 environment:
   sdk: ^3.8.1
@@ -116,6 +116,7 @@ flutter:
   assets:
     - assets/plezy.png
     - assets/plezy_adaptive_foreground.svg
+    - assets/trakt_circlemark.svg
     - assets/go-noto-current-regular.ttf
     - assets/shaders/nvscaler/
     - assets/shaders/anime4k/

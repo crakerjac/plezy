@@ -13,6 +13,7 @@ import 'package:provider/provider.dart';
 import '../../../models/shader_preset.dart';
 import '../../../mpv/mpv.dart';
 import '../../../providers/shader_provider.dart';
+import '../../../services/file_picker_service.dart';
 import '../../../services/settings_service.dart';
 import '../../../services/shader_service.dart';
 import '../../../services/sleep_timer_service.dart';
@@ -240,30 +241,32 @@ class _VideoSettingsSheetState extends State<VideoSettingsSheet> {
     // show() with new alignment replaces the current sheet (completing the
     // settings sheet future, which restarts the auto-hide timer via
     // whenComplete in track_chapter_controls). Cancel it again here.
-    controller.show(
-      alignment: Alignment.topCenter,
-      constraints: const BoxConstraints(maxHeight: 80, maxWidth: 900),
-      initialFocusNode: sliderFocusNode,
-      builder: (_) => _CompactSyncBar(
-        title: title,
-        icon: icon,
-        player: widget.player,
-        propertyName: propertyName,
-        initialOffset: initialOffset,
-        sliderFocusNode: sliderFocusNode,
-        onOffsetChanged: (offset) async {
-          final settings = await SettingsService.getInstance();
-          if (isSubtitle) {
-            await settings.setSubtitleSyncOffset(offset);
-          } else {
-            await settings.setAudioSyncOffset(offset);
-          }
-          widget.onSyncOffsetChanged?.call(propertyName, offset);
-        },
-      ),
-    ).whenComplete(() {
-      widget.onStartAutoHide?.call();
-    });
+    controller
+        .show(
+          alignment: Alignment.topCenter,
+          constraints: const BoxConstraints(maxHeight: 80, maxWidth: 900),
+          initialFocusNode: sliderFocusNode,
+          builder: (_) => _CompactSyncBar(
+            title: title,
+            icon: icon,
+            player: widget.player,
+            propertyName: propertyName,
+            initialOffset: initialOffset,
+            sliderFocusNode: sliderFocusNode,
+            onOffsetChanged: (offset) async {
+              final settings = await SettingsService.getInstance();
+              if (isSubtitle) {
+                await settings.setSubtitleSyncOffset(offset);
+              } else {
+                await settings.setAudioSyncOffset(offset);
+              }
+              widget.onSyncOffsetChanged?.call(propertyName, offset);
+            },
+          ),
+        )
+        .whenComplete(() {
+          widget.onStartAutoHide?.call();
+        });
 
     // Cancel auto-hide after show() — the previous sheet's whenComplete
     // fires as a microtask and restarts the timer, so schedule our cancel
@@ -316,11 +319,6 @@ class _VideoSettingsSheetState extends State<VideoSettingsSheet> {
     }
   }
 
-  String _formatSpeed(double speed) {
-    if (speed == 1.0) return 'Normal';
-    return '${speed.toStringAsFixed(2)}x';
-  }
-
   String _formatSleepTimer(SleepTimerService sleepTimer) {
     if (!sleepTimer.isActive) return 'Off';
     final remaining = sleepTimer.remainingTime;
@@ -344,7 +342,7 @@ class _VideoSettingsSheetState extends State<VideoSettingsSheet> {
               return _SettingsMenuItem(
                 icon: Symbols.speed_rounded,
                 title: t.videoSettings.playbackSpeed,
-                valueText: _formatSpeed(currentRate),
+                valueText: formatPlaybackRate(currentRate, normalAtOne: true),
                 onTap: () => _navigateTo(_SettingsView.speed),
               );
             },
@@ -386,7 +384,11 @@ class _VideoSettingsSheetState extends State<VideoSettingsSheet> {
         // HDR Toggle (iOS, macOS, and Windows)
         if (Platform.isIOS || Platform.isMacOS || Platform.isWindows)
           FocusableListTile(
-            leading: AppIcon(Symbols.hdr_strong_rounded, fill: 1, color: _enableHDR ? Colors.amber : tokens(context).textMuted),
+            leading: AppIcon(
+              Symbols.hdr_strong_rounded,
+              fill: 1,
+              color: _enableHDR ? Colors.amber : tokens(context).textMuted,
+            ),
             title: Text(t.videoSettings.hdr),
             trailing: Switch(value: _enableHDR, onChanged: (_) => _toggleHDR(), activeThumbColor: Colors.amber),
             onTap: _toggleHDR,
@@ -415,9 +417,7 @@ class _VideoSettingsSheetState extends State<VideoSettingsSheet> {
             initialData: widget.player.state.audioDevice,
             builder: (context, snapshot) {
               final currentDevice = snapshot.data ?? widget.player.state.audioDevice;
-              final deviceLabel = currentDevice.description.isEmpty
-                  ? currentDevice.name
-                  : currentDevice.description;
+              final deviceLabel = currentDevice.description.isEmpty ? currentDevice.name : currentDevice.description;
 
               return _SettingsMenuItem(
                 icon: Symbols.speaker_rounded,
@@ -522,6 +522,19 @@ class _VideoSettingsSheetState extends State<VideoSettingsSheet> {
               OverlaySheetController.of(context).close();
             },
           ),
+
+        if (kDebugMode)
+          FocusableListTile(
+            leading: AppIcon(Symbols.bug_report_rounded, fill: 1, color: tokens(context).textMuted),
+            title: const Text('Simulate HTTP 500 from server'),
+            onTap: () {
+              final player = widget.player;
+              OverlaySheetController.of(context).close();
+              if (player is PlayerBase) {
+                player.debugSimulateServer500();
+              }
+            },
+          ),
       ],
     );
   }
@@ -539,7 +552,7 @@ class _VideoSettingsSheetState extends State<VideoSettingsSheet> {
           itemBuilder: (context, index) {
             final speed = speeds[index];
             final isSelected = (currentRate - speed).abs() < 0.01;
-            final label = speed == 1.0 ? 'Normal' : '${speed.toStringAsFixed(2)}x';
+            final label = formatPlaybackRate(speed, normalAtOne: true);
 
             final primary = Theme.of(context).colorScheme.primary;
             return FocusableListTile(
@@ -564,7 +577,11 @@ class _VideoSettingsSheetState extends State<VideoSettingsSheet> {
   Widget _buildSleepView() {
     final sleepTimer = SleepTimerService();
 
-    return SleepTimerContent(player: widget.player, sleepTimer: sleepTimer, onCancel: () => OverlaySheetController.of(context).close());
+    return SleepTimerContent(
+      player: widget.player,
+      sleepTimer: sleepTimer,
+      onCancel: () => OverlaySheetController.of(context).close(),
+    );
   }
 
   // Audio/subtitle sync views are now opened as compact top bars via _openSyncBar()
@@ -731,10 +748,7 @@ class _VideoSettingsSheetState extends State<VideoSettingsSheet> {
   }
 
   Future<void> _importCustomShader(ShaderProvider shaderProvider) async {
-    final result = await FilePicker.platform.pickFiles(
-      type: FileType.custom,
-      allowedExtensions: ['glsl'],
-    );
+    final result = await FilePickerService.instance.pickFiles(type: FileType.custom, allowedExtensions: ['glsl']);
 
     if (result == null || result.files.isEmpty || !mounted) return;
 

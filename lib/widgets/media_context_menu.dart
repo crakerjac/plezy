@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:plezy/widgets/app_icon.dart';
@@ -10,6 +11,7 @@ import '../models/plex_playlist.dart';
 import '../utils/download_version_utils.dart';
 import '../utils/download_utils.dart';
 import '../utils/content_utils.dart';
+import '../utils/global_key_utils.dart';
 import '../providers/download_provider.dart';
 import '../providers/multi_server_provider.dart';
 import '../providers/offline_mode_provider.dart';
@@ -126,12 +128,7 @@ class MediaContextMenuState extends State<MediaContextMenu> {
     final mediaType = isPlaylist ? null : metadata!.mediaType;
     final isCollection = mediaType == PlexMediaType.collection;
 
-    final isPartiallyWatched =
-        !isPlaylist &&
-        metadata!.viewedLeafCount != null &&
-        metadata.leafCount != null &&
-        metadata.viewedLeafCount! > 0 &&
-        metadata.viewedLeafCount! < metadata.leafCount!;
+    final isPartiallyWatched = !isPlaylist && metadata!.isPartiallyWatched;
 
     final hasActiveProgress =
         mediaType != null &&
@@ -158,9 +155,27 @@ class MediaContextMenuState extends State<MediaContextMenu> {
       // Shuffle
       menuActions.add(_MenuAction(value: 'shuffle', icon: Symbols.shuffle_rounded, label: t.mediaMenu.shufflePlay));
 
-      // Download (video playlists only)
-      if (isPlaylist && (widget.item as PlexPlaylist).playlistType == 'video') {
-        menuActions.add(_MenuAction(value: 'download_playlist', icon: Symbols.download_rounded, label: t.downloads.downloadNow));
+      // Download + sync-rule management. Video playlists and any collection
+      // qualify — collections can contain movies, episodes, and shows.
+      final isVideoPlaylist = isPlaylist && (widget.item as PlexPlaylist).playlistType == 'video';
+      if (isVideoPlaylist || isCollection) {
+        final hasRule = Provider.of<DownloadProvider>(context, listen: false).hasSyncRule(_itemGlobalKey());
+        if (hasRule) {
+          menuActions.add(
+            _MenuAction(value: 'manage_sync', icon: Symbols.sync_rounded, label: t.downloads.manageSyncRule),
+          );
+          menuActions.add(
+            _MenuAction(value: 'remove_sync', icon: Symbols.sync_disabled_rounded, label: t.downloads.removeSyncRule),
+          );
+        } else {
+          menuActions.add(
+            _MenuAction(
+              value: isPlaylist ? 'download_playlist' : 'download_collection',
+              icon: Symbols.download_rounded,
+              label: t.downloads.downloadNow,
+            ),
+          );
+        }
       }
 
       // Delete
@@ -243,8 +258,9 @@ class MediaContextMenuState extends State<MediaContextMenu> {
           ? ancestorMeta.parentRatingKey
           : ancestorMeta?.ratingKey;
       // For episodes, the show key is grandparentRatingKey; for seasons, it's parentRatingKey
-      final itemSeriesKey =
-          mediaType == PlexMediaType.episode ? metadata.grandparentRatingKey : metadata.parentRatingKey;
+      final itemSeriesKey = mediaType == PlexMediaType.episode
+          ? metadata.grandparentRatingKey
+          : metadata.parentRatingKey;
       if ((mediaType == PlexMediaType.episode || mediaType == PlexMediaType.season) &&
           itemSeriesKey != null &&
           ancestorSeriesKey != itemSeriesKey) {
@@ -254,9 +270,7 @@ class MediaContextMenuState extends State<MediaContextMenu> {
       // Go to Season (for episodes) — hide if already viewing that season's MediaDetailScreen
       if (mediaType == PlexMediaType.episode &&
           metadata.parentTitle != null &&
-          !(ancestorMeta != null &&
-              ancestorMeta.isSeason &&
-              ancestorMeta.ratingKey == metadata.parentRatingKey)) {
+          !(ancestorMeta != null && ancestorMeta.isSeason && ancestorMeta.ratingKey == metadata.parentRatingKey)) {
         menuActions.add(
           _MenuAction(value: 'season', icon: Symbols.playlist_play_rounded, label: t.mediaMenu.goToSeason),
         );
@@ -302,8 +316,23 @@ class MediaContextMenuState extends State<MediaContextMenu> {
         final downloadProvider = Provider.of<DownloadProvider>(context, listen: false);
         final globalKey = metadata.globalKey;
         final isDownloaded = downloadProvider.isDownloaded(globalKey);
+        final hasSyncRule = downloadProvider.hasSyncRule(globalKey);
+        final hasAnyDownload = downloadProvider.getProgress(globalKey) != null;
 
-        if (isDownloaded) {
+        if (hasSyncRule) {
+          // Synced item: manage sync + delete options
+          menuActions.add(
+            _MenuAction(value: 'manage_sync', icon: Symbols.sync_rounded, label: t.downloads.manageSyncRule),
+          );
+          menuActions.add(
+            _MenuAction(value: 'remove_sync', icon: Symbols.sync_disabled_rounded, label: t.downloads.removeSyncRule),
+          );
+          if (hasAnyDownload) {
+            menuActions.add(
+              _MenuAction(value: 'delete_download', icon: Symbols.delete_rounded, label: t.downloads.deleteDownload),
+            );
+          }
+        } else if (isDownloaded) {
           // Show delete download option
           menuActions.add(
             _MenuAction(value: 'delete_download', icon: Symbols.delete_rounded, label: t.downloads.deleteDownload),
@@ -484,9 +513,7 @@ class MediaContextMenuState extends State<MediaContextMenu> {
           didNavigate = true;
           await _navigateToRelated(
             context,
-            metadata!.mediaType == PlexMediaType.season
-                ? metadata.parentRatingKey
-                : metadata.grandparentRatingKey,
+            metadata!.mediaType == PlexMediaType.season ? metadata.parentRatingKey : metadata.grandparentRatingKey,
             (metadata) => MediaDetailScreen(metadata: metadata),
             t.messages.errorLoadingSeries,
           );
@@ -543,12 +570,24 @@ class MediaContextMenuState extends State<MediaContextMenu> {
           await _handleDownloadPlaylist(context);
           break;
 
+        case 'download_collection':
+          await _handleDownloadCollection(context);
+          break;
+
         case 'download':
           await _handleDownload(context);
           break;
 
         case 'delete_download':
           await _handleDeleteDownload(context);
+          break;
+
+        case 'manage_sync':
+          await _handleManageSyncRule(context);
+          break;
+
+        case 'remove_sync':
+          await _handleRemoveSyncRule(context);
           break;
 
         case 'delete_media':
@@ -773,6 +812,7 @@ class MediaContextMenuState extends State<MediaContextMenu> {
             showSuccessSnackBar(context, t.playlists.itemAdded);
             // Trigger refresh of playlists tab
             LibraryRefreshNotifier().notifyPlaylistsChanged();
+            _triggerEagerSyncIfRuleExists(context, client.serverId, result);
           } else {
             appLogger.e('Failed to add item(s) to playlist $result - API returned false');
             showErrorSnackBar(context, t.playlists.errorAdding);
@@ -923,6 +963,7 @@ class MediaContextMenuState extends State<MediaContextMenu> {
               showSuccessSnackBar(context, t.collections.created);
               // Trigger refresh of collections tab
               LibraryRefreshNotifier().notifyCollectionsChanged();
+              _triggerEagerSyncIfRuleExists(context, client.serverId, newCollectionId);
             } else {
               appLogger.e('Failed to add item to new collection');
               showErrorSnackBar(context, t.collections.errorAddingToCollection);
@@ -945,6 +986,7 @@ class MediaContextMenuState extends State<MediaContextMenu> {
             showSuccessSnackBar(context, t.collections.addedToCollection);
             // Trigger refresh of collections tab
             LibraryRefreshNotifier().notifyCollectionsChanged();
+            _triggerEagerSyncIfRuleExists(context, client.serverId, result);
           } else {
             appLogger.e('Failed to add item(s) to collection $result - API returned false');
             showErrorSnackBar(context, t.collections.errorAddingToCollection);
@@ -1118,6 +1160,39 @@ class MediaContextMenuState extends State<MediaContextMenu> {
     await ExternalPlayerService.launch(context: context, metadata: metadata, client: client);
   }
 
+  /// Handle download collection action — opens the same sync/one-time dialog
+  /// as playlists, wired to [showCollectionDownloadOptionsAndQueue].
+  Future<void> _handleDownloadCollection(BuildContext context) async {
+    final collection = widget.item as PlexMetadata;
+    final downloadProvider = Provider.of<DownloadProvider>(context, listen: false);
+    final client = _getClientForItem();
+
+    try {
+      final items = await client.getCollectionItems(collection.ratingKey);
+      if (!context.mounted) return;
+
+      final result = await showCollectionDownloadOptionsAndQueue(
+        context,
+        collectionMetadata: collection,
+        items: items,
+        client: client,
+        downloadProvider: downloadProvider,
+      );
+      if (result == null || !context.mounted) return;
+
+      showSuccessSnackBar(context, result.toSnackBarMessage());
+    } on CellularDownloadBlockedException {
+      if (context.mounted) {
+        showErrorSnackBar(context, t.settings.cellularDownloadBlocked);
+      }
+    } catch (e) {
+      appLogger.e('Failed to queue collection download', error: e);
+      if (context.mounted) {
+        showErrorSnackBar(context, t.messages.errorLoading(error: e.toString()));
+      }
+    }
+  }
+
   /// Handle download playlist action
   Future<void> _handleDownloadPlaylist(BuildContext context) async {
     final playlist = widget.item as PlexPlaylist;
@@ -1128,16 +1203,25 @@ class MediaContextMenuState extends State<MediaContextMenu> {
       final items = await client.getPlaylist(playlist.ratingKey);
       if (!context.mounted) return;
 
-      final count = await showPlaylistDownloadOptionsAndQueue(
+      final playlistMetadata = PlexMetadata(
+        ratingKey: playlist.ratingKey,
+        type: ContentTypes.playlist,
+        title: playlist.title,
+        thumb: playlist.thumb,
+        serverId: playlist.serverId ?? client.serverId,
+        serverName: playlist.serverName,
+      );
+
+      final result = await showPlaylistDownloadOptionsAndQueue(
         context,
+        playlistMetadata: playlistMetadata,
         items: items,
         client: client,
         downloadProvider: downloadProvider,
       );
-      if (count == null || !context.mounted) return;
+      if (result == null || !context.mounted) return;
 
-      final message = count > 1 ? t.downloads.itemsQueued(count: count) : t.downloads.downloadQueued;
-      showSuccessSnackBar(context, message);
+      showSuccessSnackBar(context, result.toSnackBarMessage());
     } on CellularDownloadBlockedException {
       if (context.mounted) {
         showErrorSnackBar(context, t.settings.cellularDownloadBlocked);
@@ -1157,16 +1241,15 @@ class MediaContextMenuState extends State<MediaContextMenu> {
     final client = _getClientForItem();
 
     try {
-      final count = await showDownloadOptionsAndQueue(
+      final result = await showDownloadOptionsAndQueue(
         context,
         metadata: metadata,
         client: client,
         downloadProvider: downloadProvider,
       );
-      if (count == null || !context.mounted) return;
+      if (result == null || !context.mounted) return;
 
-      final message = count > 1 ? t.downloads.episodesQueued(count: count) : t.downloads.downloadQueued;
-      showSuccessSnackBar(context, message);
+      showSuccessSnackBar(context, result.toSnackBarMessage());
     } on CellularDownloadBlockedException {
       if (context.mounted) {
         showErrorSnackBar(context, t.settings.cellularDownloadBlocked);
@@ -1212,6 +1295,54 @@ class MediaContextMenuState extends State<MediaContextMenu> {
       }
     }
   }
+
+  /// Resolve the sync-rule global key for whatever the menu item is — works
+  /// for both PlexMetadata (shows/seasons/collections/movies/episodes) and
+  /// PlexPlaylist.
+  String _itemGlobalKey() {
+    final item = widget.item;
+    if (item is PlexPlaylist) {
+      final serverId = item.serverId ?? _getClientForItem().serverId;
+      return buildGlobalKey(serverId, item.ratingKey);
+    }
+    return (item as PlexMetadata).globalKey;
+  }
+
+  String _itemDisplayTitle() {
+    final item = widget.item;
+    if (item is PlexPlaylist) return item.title;
+    return (item as PlexMetadata).displayTitle;
+  }
+
+  Future<void> _handleManageSyncRule(BuildContext context) =>
+      manageSyncRule(context, downloadProvider: context.read<DownloadProvider>(), globalKey: _itemGlobalKey());
+
+  /// Fire-and-forget: if a sync rule exists for the target list, run it now so
+  /// newly-added items download immediately instead of waiting for the next
+  /// cooldown-gated general pass. Fails silently — errors are logged only.
+  static void _triggerEagerSyncIfRuleExists(BuildContext context, String serverId, String listId) {
+    try {
+      final downloadProvider = Provider.of<DownloadProvider>(context, listen: false);
+      final globalKey = buildGlobalKey(serverId, listId);
+      if (!downloadProvider.hasSyncRule(globalKey)) return;
+      final serverManager = Provider.of<MultiServerProvider>(context, listen: false).serverManager;
+      unawaited(
+        downloadProvider.executeSyncRuleFor(globalKey, serverManager).catchError((e) {
+          appLogger.w('Eager sync-rule run failed for $globalKey: $e');
+          return null;
+        }),
+      );
+    } catch (e) {
+      appLogger.w('Failed to schedule eager sync-rule run: $e');
+    }
+  }
+
+  Future<void> _handleRemoveSyncRule(BuildContext context) => removeSyncRuleAndSnack(
+    context,
+    downloadProvider: context.read<DownloadProvider>(),
+    globalKey: _itemGlobalKey(),
+    displayTitle: _itemDisplayTitle(),
+  );
 
   /// Handle delete media item action
   /// This permanently removes the media item and its associated files from the server

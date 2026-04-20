@@ -494,6 +494,8 @@ class ExoPlayerPlugin : FlutterPlugin, MethodChannel.MethodCallHandler,
         val bgColor = call.argument<String>("bgColor") ?: "#000000"
         val bgOpacity = call.argument<Number>("bgOpacity")?.toInt() ?: 0
         val subtitlePosition = call.argument<Number>("subtitlePosition")?.toInt() ?: 100
+        val bold = call.argument<Boolean>("bold") ?: false
+        val italic = call.argument<Boolean>("italic") ?: false
 
         if (usingMpvFallback) {
             // MPV fallback handles styling via setProperty, no-op here
@@ -501,7 +503,7 @@ class ExoPlayerPlugin : FlutterPlugin, MethodChannel.MethodCallHandler,
             return
         }
 
-        playerCore?.setSubtitleStyle(fontSize, textColor, borderSize, borderColor, bgColor, bgOpacity, subtitlePosition)
+        playerCore?.setSubtitleStyle(fontSize, textColor, borderSize, borderColor, bgColor, bgOpacity, subtitlePosition, bold, italic)
         result.success(null)
     }
 
@@ -512,6 +514,14 @@ class ExoPlayerPlugin : FlutterPlugin, MethodChannel.MethodCallHandler,
         if (name == null || value == null) {
             result.error("INVALID_ARGS", "Missing 'name' or 'value'", null)
             return
+        }
+
+        // Apply sync offsets to ExoPlayer when active
+        if (!usingMpvFallback) {
+            when (name) {
+                "audio-delay" -> playerCore?.setAudioDelay(value.toDoubleOrNull() ?: 0.0)
+                "sub-delay" -> playerCore?.setSubtitleDelay(value.toDoubleOrNull() ?: 0.0)
+            }
         }
 
         if (usingMpvFallback) {

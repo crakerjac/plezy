@@ -23,6 +23,8 @@ import '../widgets/plex_optimized_image.dart';
 import '../utils/plex_image_helper.dart';
 import '../../services/plex_client.dart';
 import '../services/plex_api_cache.dart';
+import '../services/offline_watch_sync_service.dart';
+import '../utils/plex_cache_parser.dart';
 import '../models/plex_metadata.dart';
 import '../models/plex_role.dart';
 import '../models/plex_video_playback_data.dart';
@@ -61,6 +63,8 @@ import 'actor_media_screen.dart';
 import '../widgets/focusable_tab_chip.dart';
 import '../widgets/hub_section.dart';
 import '../models/plex_hub.dart';
+
+enum _SyncRuleAction { edit, remove, delete }
 
 class MediaDetailScreen extends StatefulWidget {
   final PlexMetadata metadata;
@@ -116,7 +120,6 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
   // Context menu key for the three-dots button
   final _contextMenuKey = GlobalKey<MediaContextMenuState>();
 
-
   // Locked focus pattern for extras
   int _focusedExtraIndex = 0;
   late final FocusNode _extrasFocusNode;
@@ -133,6 +136,10 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
   final ScrollController _castScrollController = ScrollController();
   final _castSectionKey = GlobalKey();
   final _seasonsSectionKey = GlobalKey();
+
+  // Focus target for the trailing info rows (studio / contentRating)
+  late final FocusNode _infoRowsFocusNode;
+  final _infoRowsSectionKey = GlobalKey();
 
   @override
   PlexMetadata get serverBoundMetadata => widget.metadata;
@@ -354,6 +361,7 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
     _ratingChipFocusNode = FocusNode(debugLabel: 'rating_chip');
     _overviewFocusNode = FocusNode(debugLabel: 'overview');
     _castFocusNode = FocusNode(debugLabel: 'cast_row');
+    _infoRowsFocusNode = FocusNode(debugLabel: 'info_rows');
     _loadFullMetadata();
   }
 
@@ -371,6 +379,7 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
     _ratingChipFocusNode.dispose();
     _overviewFocusNode.dispose();
     _castFocusNode.dispose();
+    _infoRowsFocusNode.dispose();
     _castScrollController.dispose();
     _selectKeyTimer?.cancel();
     for (final node in _seasonTabFocusNodes) {
@@ -720,7 +729,26 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
 
                 // State 7: Partial Download (some episodes downloaded, not all)
                 if (progress?.status == DownloadStatus.partial) {
+                  final hasSyncRule = downloadProvider.hasSyncRule(globalKey);
                   final currentFile = progress?.currentFile;
+
+                  if (hasSyncRule) {
+                    // Synced partial — this is the normal state for sync rules
+                    final syncRule = downloadProvider.getSyncRule(globalKey);
+                    final isEnabled = syncRule?.enabled ?? true;
+                    final tooltip = currentFile != null
+                        ? '$currentFile (syncing ${t.downloads.keepNUnwatched(count: syncRule?.episodeCount.toString() ?? '?')})'
+                        : t.downloads.keepSynced;
+
+                    return IconButton.filledTonal(
+                      onPressed: () => _showSyncRuleActions(context, downloadProvider, metadata, globalKey),
+                      tooltip: tooltip,
+                      icon: AppIcon(isEnabled ? Symbols.sync_rounded : Symbols.sync_disabled_rounded, fill: 1),
+                      iconSize: 20,
+                      style: actionButtonStyle(foregroundColor: isEnabled ? Colors.teal : Colors.grey),
+                    );
+                  }
+
                   final tooltip = currentFile != null
                       ? 'Downloaded $currentFile - Click to complete'
                       : 'Partially downloaded - Click to complete';
@@ -755,6 +783,21 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
 
                 // State 8: Downloaded/Completed (can delete)
                 if (downloadProvider.isDownloaded(globalKey)) {
+                  final hasSyncRule = downloadProvider.hasSyncRule(globalKey);
+
+                  if (hasSyncRule) {
+                    // Synced + complete — show sync icon
+                    final syncRule = downloadProvider.getSyncRule(globalKey);
+                    final isEnabled = syncRule?.enabled ?? true;
+                    return IconButton.filledTonal(
+                      onPressed: () => _showSyncRuleActions(context, downloadProvider, metadata, globalKey),
+                      icon: AppIcon(isEnabled ? Symbols.sync_rounded : Symbols.sync_disabled_rounded, fill: 1),
+                      tooltip: t.downloads.keepNUnwatched(count: syncRule?.episodeCount.toString() ?? '?'),
+                      iconSize: 20,
+                      style: actionButtonStyle(foregroundColor: isEnabled ? Colors.teal : Colors.grey),
+                    );
+                  }
+
                   return IconButton.filledTonal(
                     onPressed: () async {
                       // Show delete download confirmation
@@ -785,18 +828,15 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
                     if (client == null) return;
 
                     try {
-                      final count = await showDownloadOptionsAndQueue(
+                      final result = await showDownloadOptionsAndQueue(
                         context,
                         metadata: metadata,
                         client: client,
                         downloadProvider: downloadProvider,
                       );
-                      if (count == null || !context.mounted) return;
+                      if (result == null || !context.mounted) return;
 
-                      final message = count > 1
-                          ? t.downloads.episodesQueued(count: count)
-                          : t.downloads.downloadQueued;
-                      showSuccessSnackBar(context, message);
+                      showSuccessSnackBar(context, result.toSnackBarMessage());
                     } on CellularDownloadBlockedException {
                       if (context.mounted) {
                         showErrorSnackBar(context, t.settings.cellularDownloadBlocked);
@@ -829,7 +869,7 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
                       context,
                       isWatched ? t.messages.markedAsUnwatchedOffline : t.messages.markedAsWatchedOffline,
                     );
-                    // Refresh offline OnDeck
+                    _updateWatchStateOffline();
                     _loadOfflineOnDeckEpisode();
                   }
                 } else {
@@ -838,15 +878,13 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
                   if (client == null) return;
 
                   if (isWatched) {
-                    await client.markAsUnwatched(metadata.ratingKey);
+                    await client.markAsUnwatched(metadata.ratingKey, metadata: metadata);
                   } else {
-                    await client.markAsWatched(metadata.ratingKey);
+                    await client.markAsWatched(metadata.ratingKey, metadata: metadata);
                   }
                   if (mounted) {
                     _watchStateChanged = true;
                     showSuccessSnackBar(context, isWatched ? t.messages.markedAsUnwatched : t.messages.markedAsWatched);
-                    // Update watch state without full rebuild
-                    _updateWatchState();
                   }
                 }
               } catch (e) {
@@ -1000,10 +1038,7 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
           duration: const Duration(milliseconds: 150),
           curve: Curves.easeOutCubic,
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-          decoration: BoxDecoration(
-            color: bgColor,
-            borderRadius: const BorderRadius.all(Radius.circular(100)),
-          ),
+          decoration: BoxDecoration(color: bgColor, borderRadius: const BorderRadius.all(Radius.circular(100))),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -1016,11 +1051,7 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
               const SizedBox(width: 4),
               Text(
                 hasRating ? formatRating(starValue) : t.mediaMenu.rate,
-                style: TextStyle(
-                  color: fgColor,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w500,
-                ),
+                style: TextStyle(color: fgColor, fontSize: 13, fontWeight: FontWeight.w500),
               ),
             ],
           ),
@@ -1039,13 +1070,21 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
           if (client == null) return;
           final plexRating = stars * 2.0; // Convert 0-5 stars to 0-10 scale
           final success = await client.rateItem(metadata.ratingKey, plexRating);
-          if (success) _updateWatchState();
+          if (success) {
+            setStateIfMounted(() {
+              _fullMetadata = _fullMetadata?.copyWith(userRating: plexRating);
+            });
+          }
         },
         onClear: () async {
           final client = _getClientForMetadata(this.context);
           if (client == null) return;
           final success = await client.rateItem(metadata.ratingKey, -1);
-          if (success) _updateWatchState();
+          if (success) {
+            setStateIfMounted(() {
+              _fullMetadata = _fullMetadata?.copyWith(userRating: 0);
+            });
+          }
         },
       ),
     );
@@ -1111,12 +1150,68 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
     PlexMetadata metadata,
     PlexClient client,
   ) {
-    return resolveDownloadVersion(
+    return resolveDownloadVersion(context, metadata, client, fallbackVersions: _fullMetadata?.mediaVersions);
+  }
+
+  /// Shows actions for a synced item: edit count, remove rule, delete downloads.
+  Future<void> _showSyncRuleActions(
+    BuildContext context,
+    DownloadProvider downloadProvider,
+    PlexMetadata metadata,
+    String globalKey,
+  ) async {
+    final syncRule = downloadProvider.getSyncRule(globalKey);
+    if (syncRule == null) return;
+
+    final selected = await showOptionPickerDialog<_SyncRuleAction>(
       context,
-      metadata,
-      client,
-      fallbackVersions: _fullMetadata?.mediaVersions,
+      title: t.downloads.manageSyncRule,
+      options: [
+        (icon: Symbols.edit_rounded, label: t.downloads.editSyncRule, value: _SyncRuleAction.edit),
+        (icon: Symbols.sync_disabled_rounded, label: t.downloads.removeSyncRule, value: _SyncRuleAction.remove),
+        (icon: Symbols.delete_rounded, label: t.downloads.deleteDownload, value: _SyncRuleAction.delete),
+      ],
     );
+
+    if (selected == null || !context.mounted) return;
+
+    switch (selected) {
+      case _SyncRuleAction.edit:
+        final updated = await editSyncRuleCount(
+          context,
+          downloadProvider: downloadProvider,
+          globalKey: globalKey,
+          currentCount: syncRule.episodeCount,
+        );
+        if (updated && context.mounted) {
+          showSuccessSnackBar(context, t.downloads.syncRuleUpdated);
+        }
+
+      case _SyncRuleAction.remove:
+        final removed = await confirmAndRemoveSyncRule(
+          context,
+          downloadProvider: downloadProvider,
+          globalKey: globalKey,
+          displayTitle: metadata.displayTitle,
+        );
+        if (removed && context.mounted) {
+          showSuccessSnackBar(context, t.downloads.syncRuleRemoved);
+        }
+
+      case _SyncRuleAction.delete:
+        final confirmed = await showDeleteConfirmation(
+          context,
+          title: t.downloads.deleteDownload,
+          message: t.downloads.deleteConfirm(title: metadata.displayTitle),
+        );
+        if (confirmed && context.mounted) {
+          await downloadProvider.deleteSyncRule(globalKey);
+          await downloadProvider.deleteDownload(globalKey);
+          if (context.mounted) {
+            showSuccessSnackBar(context, t.downloads.downloadDeleted);
+          }
+        }
+    }
   }
 
   Future<void> _loadFullMetadata() async {
@@ -1376,10 +1471,7 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
       for (final node in _seasonTabFocusNodes) {
         node.dispose();
       }
-      _seasonTabFocusNodes = List.generate(
-        count,
-        (i) => FocusNode(debugLabel: 'season_tab_$i'),
-      );
+      _seasonTabFocusNodes = List.generate(count, (i) => FocusNode(debugLabel: 'season_tab_$i'));
       _seasonContextMenuKeys.clear();
     }
   }
@@ -1537,6 +1629,29 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
     }
   }
 
+  bool get _hasInfoRows {
+    final metadata = _fullMetadata ?? widget.metadata;
+    return metadata.studio != null || metadata.contentRating != null;
+  }
+
+  /// Focus the trailing info rows (studio / contentRating) and scroll them into view.
+  void _focusInfoRows() {
+    _infoRowsFocusNode.requestFocus();
+    _scrollSectionIntoView(_infoRowsSectionKey);
+  }
+
+  /// Focus the first visible focusable section above info rows: related hubs → extras → cast → …
+  void _focusSectionAboveInfoRows() {
+    if (_relatedHubs.isNotEmpty) {
+      _relatedHubKeys.last.currentState?.requestFocusFromMemory();
+    } else if (_extras != null && _extras!.isNotEmpty) {
+      _extrasFocusNode.requestFocus();
+      _scrollSectionIntoView(_extrasSectionKey);
+    } else {
+      _focusSectionAboveExtras();
+    }
+  }
+
   /// Scroll the main scroll view so the section with the given key is centered
   void _scrollSectionIntoView(GlobalKey key) {
     scrollContextToCenter(key.currentContext);
@@ -1638,6 +1753,8 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
         _scrollSectionIntoView(_extrasSectionKey);
       } else if (_relatedHubs.isNotEmpty) {
         _relatedHubKeys.first.currentState?.requestFocusFromMemory();
+      } else if (_hasInfoRows) {
+        _focusInfoRows();
       }
       return KeyEventResult.handled;
     }
@@ -1679,10 +1796,7 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
         child: Row(
           children: List.generate(_seasons.length, (index) {
             final season = _seasons[index];
-            final contextMenuKey = _seasonContextMenuKeys.putIfAbsent(
-              index,
-              () => GlobalKey<MediaContextMenuState>(),
-            );
+            final contextMenuKey = _seasonContextMenuKeys.putIfAbsent(index, () => GlobalKey<MediaContextMenuState>());
             Offset? tapPosition;
             return Padding(
               padding: const EdgeInsets.only(right: 8),
@@ -1691,7 +1805,6 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
                 item: season,
                 onRefresh: (_) {
                   _watchStateChanged = true;
-                  _updateWatchState();
                 },
                 onListRefresh: () {
                   if (widget.isOffline) {
@@ -1793,7 +1906,12 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
     if (key.isLeftKey) {
       if (_focusedExtraIndex > 0) {
         setState(() => _focusedExtraIndex--);
-        scrollListToIndex(_extrasScrollController, _focusedExtraIndex, itemExtent: _getResponsiveCardWidth() + 4, leadingPadding: 0);
+        scrollListToIndex(
+          _extrasScrollController,
+          _focusedExtraIndex,
+          itemExtent: _getResponsiveCardWidth() + 4,
+          leadingPadding: 0,
+        );
       }
       return KeyEventResult.handled;
     }
@@ -1802,7 +1920,12 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
     if (key.isRightKey) {
       if (_focusedExtraIndex < _extras!.length - 1) {
         setState(() => _focusedExtraIndex++);
-        scrollListToIndex(_extrasScrollController, _focusedExtraIndex, itemExtent: _getResponsiveCardWidth() + 4, leadingPadding: 0);
+        scrollListToIndex(
+          _extrasScrollController,
+          _focusedExtraIndex,
+          itemExtent: _getResponsiveCardWidth() + 4,
+          leadingPadding: 0,
+        );
       }
       return KeyEventResult.handled;
     }
@@ -1812,10 +1935,12 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
       return KeyEventResult.handled;
     }
 
-    // DOWN: related hubs → consume
+    // DOWN: related hubs → info rows → consume
     if (key.isDownKey) {
       if (_relatedHubs.isNotEmpty) {
         _relatedHubKeys.first.currentState?.requestFocusFromMemory();
+      } else if (_hasInfoRows) {
+        _focusInfoRows();
       }
       return KeyEventResult.handled;
     }
@@ -1836,7 +1961,12 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
     if (key.isLeftKey) {
       if (_focusedCastIndex > 0) {
         setState(() => _focusedCastIndex--);
-        scrollListToIndex(_castScrollController, _focusedCastIndex, itemExtent: _getResponsiveCardWidth() + 6 + 4, leadingPadding: 0);
+        scrollListToIndex(
+          _castScrollController,
+          _focusedCastIndex,
+          itemExtent: _getResponsiveCardWidth() + 6 + 4,
+          leadingPadding: 0,
+        );
       }
       return KeyEventResult.handled;
     }
@@ -1845,7 +1975,12 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
     if (key.isRightKey) {
       if (_focusedCastIndex < roleCount - 1) {
         setState(() => _focusedCastIndex++);
-        scrollListToIndex(_castScrollController, _focusedCastIndex, itemExtent: _getResponsiveCardWidth() + 6 + 4, leadingPadding: 0);
+        scrollListToIndex(
+          _castScrollController,
+          _focusedCastIndex,
+          itemExtent: _getResponsiveCardWidth() + 6 + 4,
+          leadingPadding: 0,
+        );
       }
       return KeyEventResult.handled;
     }
@@ -1861,13 +1996,15 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
       return KeyEventResult.handled;
     }
 
-    // DOWN: extras → related hubs → consume
+    // DOWN: extras → related hubs → info rows → consume
     if (key.isDownKey) {
       if (_extras != null && _extras!.isNotEmpty) {
         _extrasFocusNode.requestFocus();
         _scrollSectionIntoView(_extrasSectionKey);
       } else if (_relatedHubs.isNotEmpty) {
         _relatedHubKeys.first.currentState?.requestFocusFromMemory();
+      } else if (_hasInfoRows) {
+        _focusInfoRows();
       }
       return KeyEventResult.handled;
     }
@@ -1900,11 +2037,28 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
 
     final targetIndex = isUp ? hubIndex - 1 : hubIndex + 1;
     if (targetIndex < 0 || targetIndex >= _relatedHubKeys.length) {
+      if (!isUp && _hasInfoRows) _focusInfoRows();
       return true; // at boundary, consume
     }
 
     _relatedHubKeys[targetIndex].currentState?.requestFocusFromMemory();
     return true;
+  }
+
+  /// Handle key events for the trailing info rows (studio / contentRating).
+  /// UP returns to the previous focusable section; all other directions consume.
+  KeyEventResult _handleInfoRowsKeyEvent(FocusNode _, KeyEvent event) {
+    final key = event.logicalKey;
+    if (key.isBackKey) return KeyEventResult.ignored;
+    if (!event.isActionable) return KeyEventResult.ignored;
+
+    if (key.isUpKey) {
+      _focusSectionAboveInfoRows();
+      return KeyEventResult.handled;
+    }
+
+    // DOWN / LEFT / RIGHT / SELECT: consume — info rows are the terminal row.
+    return KeyEventResult.handled;
   }
 
   IconData _getRelatedHubIcon(PlexHub hub) {
@@ -1939,8 +2093,8 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
           focusNode: index == 0
               ? _firstEpisodeFocusNode
               : index == _episodes.length - 1 && _episodes.length > 1
-                  ? _lastEpisodeFocusNode
-                  : null,
+              ? _lastEpisodeFocusNode
+              : null,
           onNavigateUp: index == 0
               ? () {
                   if (!_showEpisodesDirectly) {
@@ -1949,8 +2103,7 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
                     _overviewFocusNode.requestFocus();
                     _scrollSectionIntoView(_overviewSectionKey);
                   } else {
-                    _scrollController.animateTo(0,
-                        duration: const Duration(milliseconds: 200), curve: Curves.easeOut);
+                    _scrollController.animateTo(0, duration: const Duration(milliseconds: 200), curve: Curves.easeOut);
                     _playButtonFocusNode.requestFocus();
                   }
                 }
@@ -2021,9 +2174,7 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
     if (client == null) return;
     setStateIfMounted(() => _isLoadingEpisodes = true);
     try {
-      final episodeLists = await Future.wait(
-        _seasons.map((season) => client.getChildren(season.ratingKey)),
-      );
+      final episodeLists = await Future.wait(_seasons.map((season) => client.getChildren(season.ratingKey)));
       setStateIfMounted(() {
         _episodes = episodeLists.expand((e) => e).toList();
         _isLoadingEpisodes = false;
@@ -2046,50 +2197,39 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
     }
   }
 
-  /// Update watch state without full screen rebuild
-  /// This preserves scroll position and only updates watch-related data
-  Future<void> _updateWatchState() async {
-    // Skip in offline mode
-    if (widget.isOffline) return;
+  /// Offline: update viewCount in the API cache and re-read metadata from it.
+  Future<void> _updateWatchStateOffline() async {
+    final serverId = widget.metadata.serverId;
+    if (serverId == null) return;
 
-    try {
-      // Use server-specific client for this metadata
-      final client = _getClientForMetadata(context);
-      if (client == null) return;
+    final ratingKey = widget.metadata.ratingKey;
+    final cache = PlexApiCache.instance;
+    final syncService = context.read<OfflineWatchSyncService>();
 
-      final metadata = await client.getMetadataWithImages(widget.metadata.ratingKey);
+    final endpoint = '/library/metadata/$ratingKey';
+    final cached = await cache.get(serverId, endpoint);
+    final json = PlexCacheParser.extractFirstMetadata(cached);
+    if (json == null) return;
 
-      if (metadata != null) {
-        // Preserve serverId from original metadata
-        final metadataWithServerId = metadata.copyWith(
-          serverId: widget.metadata.serverId,
-          serverName: widget.metadata.serverName,
-        );
-
-        // For shows, also refetch seasons to update their watch counts
-        List<PlexMetadata>? updatedSeasons;
-        if (metadata.isShow) {
-          final seasons = await client.getChildren(widget.metadata.ratingKey);
-          // Preserve serverId for each season
-          updatedSeasons = seasons
-              .map(
-                (season) => season.copyWith(serverId: widget.metadata.serverId, serverName: widget.metadata.serverName),
-              )
-              .toList();
-        }
-
-        // Single setState to minimize rebuilds - scroll position is preserved by controller
-        setStateIfMounted(() {
-          _fullMetadata = metadataWithServerId;
-          if (updatedSeasons != null) {
-            _seasons = updatedSeasons;
-          }
-        });
-      }
-    } catch (e) {
-      appLogger.e('Failed to update watch state', error: e);
-      // Silently fail - user can manually refresh if needed
+    final localStatus = await syncService.getLocalWatchStatus('$serverId:$ratingKey');
+    if (localStatus == true) {
+      json['viewCount'] = 1;
+    } else if (localStatus == false) {
+      json['viewCount'] = 0;
+      json['viewOffset'] = 0;
     }
+
+    await cache.put(serverId, endpoint, {
+      'MediaContainer': {
+        'Metadata': [json],
+      },
+    });
+
+    setStateIfMounted(() {
+      _fullMetadata = PlexMetadata.fromJsonWithImages(
+        json,
+      ).copyWith(serverId: widget.metadata.serverId, serverName: widget.metadata.serverName);
+    });
   }
 
   Future<void> _playFirstEpisode() async {
@@ -2317,10 +2457,13 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
                                         heroArtPath,
                                       );
                                       if (localPath != null && File(localPath).existsSync()) {
-                                        return Image.file(
-                                          File(localPath),
+                                        return PlexOptimizedImage(
+                                          client: null,
+                                          imagePath: null,
+                                          localFilePath: localPath,
                                           fit: BoxFit.cover,
-                                          errorBuilder: (context, error, stackTrace) => const PlaceholderContainer(),
+                                          imageType: ImageType.art,
+                                          errorWidget: (context, url, error) => const PlaceholderContainer(),
                                         );
                                       }
                                       // Offline but no local file - show placeholder
@@ -2402,11 +2545,14 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
                                               metadata.clearLogo,
                                             );
                                             if (localPath != null && File(localPath).existsSync()) {
-                                              return Image.file(
-                                                File(localPath),
+                                              return PlexOptimizedImage(
+                                                client: null,
+                                                imagePath: null,
+                                                localFilePath: localPath,
                                                 fit: BoxFit.contain,
                                                 alignment: Alignment.centerLeft,
-                                                errorBuilder: (context, error, stackTrace) =>
+                                                imageType: ImageType.logo,
+                                                errorWidget: (context, url, error) =>
                                                     _buildTitleText(context, metadata.displayTitle),
                                               );
                                             }
@@ -2657,15 +2803,27 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
                             const SizedBox(height: 8),
                           ],
 
-                          // Additional info
-                          if (metadata.studio != null) ...[
-                            _buildInfoRow(t.discover.studio, metadata.studio!),
-                            const SizedBox(height: 12),
-                          ],
-                          if (metadata.contentRating != null) ...[
-                            _buildInfoRow(t.discover.rating, formatContentRating(metadata.contentRating!)),
-                            const SizedBox(height: 12),
-                          ],
+                          // Additional info — wrapped in Focus so DPAD DOWN from the
+                          // last focusable section lands here and scrolls it into view.
+                          if (_hasInfoRows)
+                            Focus(
+                              focusNode: _infoRowsFocusNode,
+                              onKeyEvent: _handleInfoRowsKeyEvent,
+                              child: Column(
+                                key: _infoRowsSectionKey,
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  if (metadata.studio != null) ...[
+                                    _buildInfoRow(t.discover.studio, metadata.studio!),
+                                    const SizedBox(height: 12),
+                                  ],
+                                  if (metadata.contentRating != null) ...[
+                                    _buildInfoRow(t.discover.rating, formatContentRating(metadata.contentRating!)),
+                                    const SizedBox(height: 12),
+                                  ],
+                                ],
+                              ),
+                            ),
                         ],
                       ),
                     ),
@@ -2959,4 +3117,3 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
     return Symbols.play_arrow_rounded; // Default play icon
   }
 }
-

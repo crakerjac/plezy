@@ -1,9 +1,9 @@
 import 'dart:io';
 
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:plezy/widgets/app_icon.dart';
 import 'package:material_symbols_icons/symbols.dart';
 import 'package:provider/provider.dart';
@@ -14,10 +14,13 @@ import '../../focus/input_mode_tracker.dart';
 import '../../i18n/strings.g.dart';
 import '../main_screen.dart';
 import '../../mixins/refreshable.dart';
+import '../../services/donation_service.dart';
 import '../../services/download_storage_service.dart';
+import '../../services/file_picker_service.dart';
 import '../../services/saf_storage_service.dart';
 import '../../providers/settings_provider.dart';
 import '../../providers/theme_provider.dart';
+import '../../providers/trakt_account_provider.dart';
 import '../../services/keyboard_shortcuts_service.dart';
 import '../../services/settings_service.dart' as settings;
 import '../../services/update_service.dart';
@@ -30,6 +33,7 @@ import 'appearance_settings_screen.dart';
 import 'keyboard_shortcuts_screen.dart';
 import 'logs_screen.dart';
 import 'playback_settings_screen.dart';
+import 'trakt_settings_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -43,8 +47,10 @@ class _SettingsScreenState extends State<SettingsScreen> with FocusableTab {
   late final FocusMemoryTracker _focusTracker;
 
   // Focus tracking keys
+  static const _kDonate = 'donate';
   static const _kAppearance = 'appearance';
   static const _kPlayback = 'playback';
+  static const _kTrakt = 'trakt';
   static const _kDownloadLocation = 'download_location';
   static const _kDownloadOnWifiOnly = 'download_on_wifi_only';
   static const _kAutoRemoveWatchedDownloads = 'auto_remove_watched_downloads';
@@ -96,7 +102,7 @@ class _SettingsScreenState extends State<SettingsScreen> with FocusableTab {
   @override
   void focusActiveTabIfReady() {
     if (InputModeTracker.isKeyboardMode(context)) {
-      _focusTracker.restoreFocus(fallbackKey: _kAppearance);
+      _focusTracker.restoreFocus(fallbackKey: DonationService.isEnabled ? _kDonate : _kAppearance);
     }
   }
 
@@ -145,27 +151,29 @@ class _SettingsScreenState extends State<SettingsScreen> with FocusableTab {
             ExcludeFocus(child: CustomAppBar(title: Text(t.settings.title), pinned: true)),
             SliverList(
               delegate: SliverChildListDelegate([
+                // --- Donate (non-store builds only) ---
+                if (DonationService.isEnabled) _buildDonateTile(),
+
                 // --- Appearance (navigation tile) ---
                 _buildAppearanceTile(),
 
                 // --- Playback (navigation tile) ---
                 _buildPlaybackTile(),
 
+                // --- Trakt.tv (navigation tile) ---
+                _buildTraktTile(),
+
                 // --- Downloads (inline) ---
                 _buildDownloadsSection(),
 
                 // --- Keyboard Shortcuts (inline, conditional) ---
-                if (_keyboardShortcutsSupported) ...[
-                  _buildKeyboardShortcutsSection(),
-                  ],
+                if (_keyboardShortcutsSupported) ...[_buildKeyboardShortcutsSection()],
 
                 // --- Advanced (inline) ---
                 _buildAdvancedSection(),
 
                 // --- Updates (conditional) ---
-                if (UpdateService.isUpdateCheckEnabled) ...[
-                  _buildUpdateSection(),
-                  ],
+                if (UpdateService.isUpdateCheckEnabled) ...[_buildUpdateSection()],
 
                 // --- About ---
                 ListTile(
@@ -187,10 +195,27 @@ class _SettingsScreenState extends State<SettingsScreen> with FocusableTab {
     );
   }
 
+  Widget _buildDonateTile() {
+    return ListTile(
+      focusNode: _focusTracker.get(_kDonate),
+      leading: const AppIcon(Symbols.favorite_rounded, fill: 1),
+      title: Text(t.settings.supportDeveloper),
+      subtitle: Text(t.settings.supportDeveloperDescription),
+      trailing: const AppIcon(Symbols.open_in_new_rounded, fill: 1),
+      onTap: () async {
+        final url = Uri.parse(DonationService.donationUrl);
+        if (await canLaunchUrl(url)) {
+          await launchUrl(url, mode: LaunchMode.externalApplication);
+        }
+      },
+    );
+  }
+
   Widget _buildAppearanceTile() {
     return Consumer2<ThemeProvider, SettingsProvider>(
       builder: (context, themeProvider, settingsProvider, child) {
-        final summary = '${themeProvider.themeModeDisplayName} · ${t.settings.libraryDensity} ${settingsProvider.libraryDensity}';
+        final summary =
+            '${themeProvider.themeModeDisplayName} · ${t.settings.libraryDensity} ${settingsProvider.libraryDensity}';
         return ListTile(
           focusNode: _focusTracker.get(_kAppearance),
           leading: const AppIcon(Symbols.palette_rounded, fill: 1),
@@ -210,10 +235,41 @@ class _SettingsScreenState extends State<SettingsScreen> with FocusableTab {
       focusNode: _focusTracker.get(_kPlayback),
       leading: const AppIcon(Symbols.play_circle_rounded, fill: 1),
       title: Text(t.settings.videoPlayback),
-      subtitle: Text(t.settings.subtitleStylingDescription),
+      subtitle: Text(t.settings.videoPlaybackDescription),
       trailing: const AppIcon(Symbols.chevron_right_rounded, fill: 1),
       onTap: () {
         Navigator.push(context, MaterialPageRoute(builder: (context) => const PlaybackSettingsScreen()));
+      },
+    );
+  }
+
+  Widget _buildTraktTile() {
+    return Consumer<TraktAccountProvider>(
+      builder: (context, account, _) {
+        final connected = account.isConnected;
+        final username = account.username;
+        final iconColor = IconTheme.of(context).color ?? Theme.of(context).colorScheme.onSurface;
+        return ListTile(
+          focusNode: _focusTracker.get(_kTrakt),
+          leading: SvgPicture.asset(
+            'assets/trakt_circlemark.svg',
+            width: 24,
+            height: 24,
+            colorFilter: ColorFilter.mode(iconColor, BlendMode.srcIn),
+          ),
+          title: Text(t.settings.trakt),
+          subtitle: Text(
+            connected && username != null ? t.trakt.connectedAs(username: username) : t.settings.traktDescription,
+          ),
+          trailing: const AppIcon(Symbols.chevron_right_rounded, fill: 1),
+          onTap: () {
+            if (account.isConnected) {
+              Navigator.push(context, MaterialPageRoute(builder: (context) => const TraktSettingsScreen()));
+            } else {
+              startTraktConnection(context);
+            }
+          },
+        );
       },
     );
   }
@@ -301,8 +357,6 @@ class _SettingsScreenState extends State<SettingsScreen> with FocusableTab {
       ],
     );
   }
-
-
 
   Widget _buildAdvancedSection() {
     return Column(
@@ -506,7 +560,7 @@ class _SettingsScreenState extends State<SettingsScreen> with FocusableTab {
           return;
         }
       } else {
-        final result = await FilePicker.platform.getDirectoryPath(dialogTitle: t.settings.selectFolder);
+        final result = await FilePickerService.instance.getDirectoryPath(dialogTitle: t.settings.selectFolder);
         selectedPath = result;
       }
 
@@ -560,10 +614,7 @@ class _SettingsScreenState extends State<SettingsScreen> with FocusableTab {
           title: Text(t.settings.watchTogetherRelay),
           content: TextField(
             controller: controller,
-            decoration: InputDecoration(
-              labelText: 'URL',
-              hintText: t.settings.watchTogetherRelayHint,
-            ),
+            decoration: InputDecoration(labelText: 'URL', hintText: t.settings.watchTogetherRelayHint),
             autofocus: true,
             textInputAction: TextInputAction.done,
             onEditingComplete: () => saveFocusNode.requestFocus(),

@@ -49,16 +49,21 @@ import '../widgets/companion_remote/remote_session_dialog.dart';
 import 'companion_remote/mobile_remote_screen.dart';
 
 class DiscoverScreen extends StatefulWidget {
-  final VoidCallback? onBecameVisible;
-
-  const DiscoverScreen({super.key, this.onBecameVisible});
+  const DiscoverScreen({super.key});
 
   @override
   State<DiscoverScreen> createState() => _DiscoverScreenState();
 }
 
 class _DiscoverScreenState extends State<DiscoverScreen>
-    with Refreshable, FullRefreshable, ItemUpdatable, WatchStateAware, TabVisibilityAware, FocusableTab, WidgetsBindingObserver {
+    with
+        Refreshable,
+        FullRefreshable,
+        ItemUpdatable,
+        WatchStateAware,
+        TabVisibilityAware,
+        FocusableTab,
+        WidgetsBindingObserver {
   static const Duration _heroAutoScrollDuration = Duration(seconds: 8);
   static const Duration _indicatorUpdateInterval = Duration(milliseconds: 200);
 
@@ -139,19 +144,10 @@ class _DiscoverScreenState extends State<DiscoverScreen>
   late FocusNode _heroFocusNode;
   final _actionBarKey = GlobalKey<FocusableActionBarState>();
 
-  /// Get the correct PlexClient for an item's server
-  PlexClient _getClientForItem(PlexMetadata? item) {
-    // Items should always have a serverId, but if not, fall back to first available server
+  PlexClient? _getClientForItem(PlexMetadata? item) {
     final serverId = item?.serverId;
-    if (serverId == null) {
-      final multiServerProvider = Provider.of<MultiServerProvider>(context, listen: false);
-      final fallbackId = multiServerProvider.onlineServerIds.firstOrNull;
-      if (fallbackId == null) {
-        throw Exception('No servers available');
-      }
-      return context.getClientForServer(fallbackId);
-    }
-    return context.getClientForServer(serverId);
+    if (serverId == null) return context.tryGetFirstAvailableClient();
+    return context.tryGetClientForServer(serverId);
   }
 
   /// Update hub keys when hubs list changes — reuse existing keys to avoid
@@ -318,8 +314,7 @@ class _DiscoverScreenState extends State<DiscoverScreen>
       if (Platform.isIOS || Platform.isAndroid) {
         _refreshContinueWatching();
       }
-    } else if (state == AppLifecycleState.inactive ||
-        state == AppLifecycleState.hidden) {
+    } else if (state == AppLifecycleState.inactive || state == AppLifecycleState.hidden) {
       // Stop animations to prevent scroll state corruption while backgrounded
       _autoScrollTimer?.cancel();
       _stopIndicatorProgress();
@@ -1001,8 +996,7 @@ class _DiscoverScreenState extends State<DiscoverScreen>
                         ),
                       ),
                       // Server Tasks
-                      if (PlatformDetector.isDesktop(context))
-                        const FocusableAction(child: ServerActivitiesButton()),
+                      if (PlatformDetector.isDesktop(context)) const FocusableAction(child: ServerActivitiesButton()),
                       // User menu
                       FocusableAction(
                         onPressed: () => _showUserMenu(context, userProvider),
@@ -1231,87 +1225,87 @@ class _DiscoverScreenState extends State<DiscoverScreen>
               ),
               // Page indicators with animated progress and pause/play button
               if (!InputModeTracker.isKeyboardMode(context))
-              Positioned(
-                bottom: 16,
-                left: -26,
-                right: 0,
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    // Pause/Play button
-                    GestureDetector(
-                      onTap: () {
-                        if (_isAutoScrollPaused) {
-                          _resumeAutoScroll();
-                        } else {
-                          _pauseAutoScroll();
-                        }
-                      },
-                      child: AppIcon(
-                        _isAutoScrollPaused ? Symbols.play_arrow_rounded : Symbols.pause_rounded,
-                        fill: 1,
-                        color: Theme.of(context).colorScheme.onSurface,
-                        size: 18,
-                        semanticLabel: '${_isAutoScrollPaused ? t.common.play : t.common.pause} auto-scroll',
+                Positioned(
+                  bottom: 16,
+                  left: -26,
+                  right: 0,
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      // Pause/Play button
+                      GestureDetector(
+                        onTap: () {
+                          if (_isAutoScrollPaused) {
+                            _resumeAutoScroll();
+                          } else {
+                            _pauseAutoScroll();
+                          }
+                        },
+                        child: AppIcon(
+                          _isAutoScrollPaused ? Symbols.play_arrow_rounded : Symbols.pause_rounded,
+                          fill: 1,
+                          color: Theme.of(context).colorScheme.onSurface,
+                          size: 18,
+                          semanticLabel: '${_isAutoScrollPaused ? t.common.play : t.common.pause} auto-scroll',
+                        ),
                       ),
-                    ),
-                    // Spacer to separate indicators from button
-                    const SizedBox(width: 8),
-                    // Page indicators (limited to 5 dots)
-                    ...() {
-                      final range = _getVisibleDotRange();
-                      return List.generate(range.end - range.start + 1, (i) {
-                        final index = range.start + i;
-                        final isActive = _currentHeroIndex == index;
-                        final dotSize = _getDotSize(index, range.start, range.end);
+                      // Spacer to separate indicators from button
+                      const SizedBox(width: 8),
+                      // Page indicators (limited to 5 dots)
+                      ...() {
+                        final range = _getVisibleDotRange();
+                        return List.generate(range.end - range.start + 1, (i) {
+                          final index = range.start + i;
+                          final isActive = _currentHeroIndex == index;
+                          final dotSize = _getDotSize(index, range.start, range.end);
 
-                        return isActive
-                            // Progress indicator for active page (~5fps via Timer)
-                            ? ValueListenableBuilder<double>(
-                                valueListenable: _indicatorProgress,
-                                builder: (context, progress, child) {
-                                  final maxWidth = dotSize * 3; // 24px for normal, 15px for small
-                                  final fillWidth = dotSize + ((maxWidth - dotSize) * progress);
-                                  final onSurface = Theme.of(context).colorScheme.onSurface;
-                                  return Container(
-                                    margin: const EdgeInsets.symmetric(horizontal: 4),
-                                    width: maxWidth,
-                                    height: dotSize,
-                                    decoration: BoxDecoration(
-                                      color: onSurface.withValues(alpha: 0.4),
-                                      borderRadius: BorderRadius.circular(dotSize / 2),
-                                    ),
-                                    child: Align(
-                                      alignment: Alignment.centerLeft,
-                                      child: Container(
-                                        width: fillWidth,
-                                        height: dotSize,
-                                        decoration: BoxDecoration(
-                                          color: onSurface,
-                                          borderRadius: BorderRadius.circular(dotSize / 2),
+                          return isActive
+                              // Progress indicator for active page (~5fps via Timer)
+                              ? ValueListenableBuilder<double>(
+                                  valueListenable: _indicatorProgress,
+                                  builder: (context, progress, child) {
+                                    final maxWidth = dotSize * 3; // 24px for normal, 15px for small
+                                    final fillWidth = dotSize + ((maxWidth - dotSize) * progress);
+                                    final onSurface = Theme.of(context).colorScheme.onSurface;
+                                    return Container(
+                                      margin: const EdgeInsets.symmetric(horizontal: 4),
+                                      width: maxWidth,
+                                      height: dotSize,
+                                      decoration: BoxDecoration(
+                                        color: onSurface.withValues(alpha: 0.4),
+                                        borderRadius: BorderRadius.circular(dotSize / 2),
+                                      ),
+                                      child: Align(
+                                        alignment: Alignment.centerLeft,
+                                        child: Container(
+                                          width: fillWidth,
+                                          height: dotSize,
+                                          decoration: BoxDecoration(
+                                            color: onSurface,
+                                            borderRadius: BorderRadius.circular(dotSize / 2),
+                                          ),
                                         ),
                                       ),
-                                    ),
-                                  );
-                                },
-                              )
-                            // Static indicator for inactive pages
-                            : AnimatedContainer(
-                                duration: tokens(context).slow,
-                                curve: Curves.easeInOut,
-                                margin: const EdgeInsets.symmetric(horizontal: 4),
-                                width: dotSize,
-                                height: dotSize,
-                                decoration: BoxDecoration(
-                                  color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.4),
-                                  borderRadius: BorderRadius.circular(dotSize / 2),
-                                ),
-                              );
-                      });
-                    }(),
-                  ],
+                                    );
+                                  },
+                                )
+                              // Static indicator for inactive pages
+                              : AnimatedContainer(
+                                  duration: tokens(context).slow,
+                                  curve: Curves.easeInOut,
+                                  margin: const EdgeInsets.symmetric(horizontal: 4),
+                                  width: dotSize,
+                                  height: dotSize,
+                                  decoration: BoxDecoration(
+                                    color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.4),
+                                    borderRadius: BorderRadius.circular(dotSize / 2),
+                                  ),
+                                );
+                        });
+                      }(),
+                    ],
+                  ),
                 ),
-              ),
             ],
           ),
         ),
@@ -1320,6 +1314,7 @@ class _DiscoverScreenState extends State<DiscoverScreen>
   }
 
   Widget _buildHeroItem(PlexMetadata heroItem, double heroHeight) {
+    final heroClient = _getClientForItem(heroItem);
     final isEpisode = heroItem.isEpisode;
     final showName = heroItem.grandparentTitle ?? heroItem.displayTitle;
     final screenWidth = MediaQuery.of(context).size.width;
@@ -1369,12 +1364,14 @@ class _DiscoverScreenState extends State<DiscoverScreen>
                     },
                     child: Builder(
                       builder: (context) {
-                        final client = _getClientForItem(heroItem);
+                        if (heroClient == null) {
+                          return Container(color: Theme.of(context).colorScheme.surfaceContainerHighest);
+                        }
                         final mediaQuery = MediaQuery.of(context);
                         final dpr = PlexImageHelper.effectiveDevicePixelRatio(context);
                         final containerAspect = screenWidth / heroHeight;
                         final imageUrl = PlexImageHelper.getOptimizedImageUrl(
-                          client: client,
+                          client: heroClient,
                           thumbPath: heroItem.heroArt(containerAspectRatio: containerAspect) ?? heroItem.grandparentArt,
                           maxWidth: mediaQuery.size.width,
                           maxHeight: mediaQuery.size.height * 0.7,
@@ -1443,10 +1440,10 @@ class _DiscoverScreenState extends State<DiscoverScreen>
                         width: 400,
                         child: Builder(
                           builder: (context) {
-                            final client = _getClientForItem(heroItem);
+                            if (heroClient == null) return const SizedBox.shrink();
                             final dpr = PlexImageHelper.effectiveDevicePixelRatio(context);
                             final logoUrl = PlexImageHelper.getOptimizedImageUrl(
-                              client: client,
+                              client: heroClient,
                               thumbPath: heroItem.clearLogo,
                               maxWidth: 400,
                               maxHeight: 120,
@@ -1574,7 +1571,10 @@ class _DiscoverScreenState extends State<DiscoverScreen>
                           ],
                         ),
                       ),
-                    ] else if (shouldHideSpoiler && isEpisode && heroItem.parentIndex != null && heroItem.index != null) ...[
+                    ] else if (shouldHideSpoiler &&
+                        isEpisode &&
+                        heroItem.parentIndex != null &&
+                        heroItem.index != null) ...[
                       const SizedBox(height: 12),
                       Text(
                         'S${heroItem.parentIndex}, E${heroItem.index}: ${heroItem.title}',

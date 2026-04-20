@@ -71,7 +71,7 @@ class PlayerNative extends PlayerBase {
       await observeProperty('audio-device-list', _nodeFormat);
       await observeProperty('audio-device', 'string');
     } catch (e) {
-      errorController.add('Initialization failed: $e');
+      errorController.add(PlayerError('Initialization failed: $e'));
       rethrow;
     }
   }
@@ -91,7 +91,12 @@ class PlayerNative extends PlayerBase {
   }
 
   @override
-  Future<void> open(Media media, {bool play = true, bool isLive = false, List<SubtitleTrack>? externalSubtitles}) async {
+  Future<void> open(
+    Media media, {
+    bool play = true,
+    bool isLive = false,
+    List<SubtitleTrack>? externalSubtitles,
+  }) async {
     if (disposed) return;
     await _ensureInitialized();
     setSeekable(false);

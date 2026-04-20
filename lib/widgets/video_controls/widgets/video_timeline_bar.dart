@@ -41,6 +41,10 @@ class VideoTimelineBar extends StatelessWidget {
   /// Optional callback that returns thumbnail image bytes for a given timestamp.
   final Uint8List? Function(Duration time)? thumbnailDataBuilder;
 
+  /// When true, show the preview thumbnail at the current playback position
+  /// (used during sustained dpad/keyboard key-repeat seeking).
+  final bool showKeyRepeatThumbnail;
+
   const VideoTimelineBar({
     super.key,
     required this.player,
@@ -55,6 +59,7 @@ class VideoTimelineBar extends StatelessWidget {
     this.enabled = true,
     this.showFinishTime = false,
     this.thumbnailDataBuilder,
+    this.showKeyRepeatThumbnail = false,
   });
 
   @override
@@ -87,7 +92,12 @@ class VideoTimelineBar extends StatelessWidget {
     );
   }
 
-  Widget _buildHorizontalLayout(Duration position, Duration duration, Duration remaining, List<BufferRange> bufferRanges) {
+  Widget _buildHorizontalLayout(
+    Duration position,
+    Duration duration,
+    Duration remaining,
+    List<BufferRange> bufferRanges,
+  ) {
     return Row(
       children: [
         _buildTimestamp(position),
@@ -99,7 +109,12 @@ class VideoTimelineBar extends StatelessWidget {
     );
   }
 
-  Widget _buildVerticalLayout(Duration position, Duration duration, Duration remaining, List<BufferRange> bufferRanges) {
+  Widget _buildVerticalLayout(
+    Duration position,
+    Duration duration,
+    Duration remaining,
+    List<BufferRange> bufferRanges,
+  ) {
     return Column(
       children: [
         _buildSlider(position, duration, bufferRanges),
@@ -114,7 +129,11 @@ class VideoTimelineBar extends StatelessWidget {
     );
   }
 
-  static const _timestampStyle = TextStyle(color: Colors.white, fontSize: 14, fontFeatures: [FontFeature.tabularFigures()]);
+  static const _timestampStyle = TextStyle(
+    color: Colors.white,
+    fontSize: 14,
+    fontFeatures: [FontFeature.tabularFigures()],
+  );
 
   Widget _buildTimestamp(Duration time) {
     return Text(formatDurationTimestamp(time), style: _timestampStyle);
@@ -129,7 +148,8 @@ class VideoTimelineBar extends StatelessWidget {
       initialData: player.state.rate,
       builder: (context, rateSnap) {
         final rate = rateSnap.data ?? 1.0;
-        final text = '${formatDurationTimestamp(remaining)} · ${formatFinishTime(remaining.abs(), rate: rate, is24Hour: MediaQuery.alwaysUse24HourFormatOf(context))}';
+        final text =
+            '${formatDurationTimestamp(remaining)} · ${formatFinishTime(remaining.abs(), rate: rate, is24Hour: MediaQuery.alwaysUse24HourFormatOf(context))}';
         return Text(text, style: _timestampStyle);
       },
     );
@@ -149,6 +169,7 @@ class VideoTimelineBar extends StatelessWidget {
       onFocusChange: onFocusChange,
       enabled: enabled,
       thumbnailDataBuilder: thumbnailDataBuilder,
+      showKeyRepeatThumbnail: showKeyRepeatThumbnail,
     );
   }
 }

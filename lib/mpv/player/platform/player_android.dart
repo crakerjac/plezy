@@ -82,7 +82,7 @@ class PlayerAndroid extends PlayerBase {
       await observeProperty('sid', 'string');
       await observeProperty('demuxer-cache-time', 'double');
     } catch (e) {
-      errorController.add('Initialization failed: $e');
+      errorController.add(PlayerError('Initialization failed: $e'));
       rethrow;
     }
   }
@@ -92,7 +92,12 @@ class PlayerAndroid extends PlayerBase {
   // ============================================
 
   @override
-  Future<void> open(Media media, {bool play = true, bool isLive = false, List<SubtitleTrack>? externalSubtitles}) async {
+  Future<void> open(
+    Media media, {
+    bool play = true,
+    bool isLive = false,
+    List<SubtitleTrack>? externalSubtitles,
+  }) async {
     if (disposed) return;
     await _ensureInitialized();
     setSeekable(false);
@@ -358,6 +363,8 @@ class PlayerAndroid extends PlayerBase {
     required String bgColor,
     required int bgOpacity,
     int subtitlePosition = 100,
+    bool bold = false,
+    bool italic = false,
   }) async {
     if (disposed || !initialized) return;
     await invoke('setSubtitleStyle', {
@@ -368,6 +375,8 @@ class PlayerAndroid extends PlayerBase {
       'bgColor': bgColor,
       'bgOpacity': bgOpacity,
       'subtitlePosition': subtitlePosition,
+      'bold': bold,
+      'italic': italic,
     });
   }
 

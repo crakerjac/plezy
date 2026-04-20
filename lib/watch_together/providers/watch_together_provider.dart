@@ -36,20 +36,22 @@ class WatchTogetherProvider with ChangeNotifier {
   // During Watch Together join, 4-5 notifications fire within milliseconds;
   // this batches them into one rebuild to avoid overwhelming low-end devices.
   bool _notifyScheduled = false;
+  bool _disposed = false;
 
   @override
   void notifyListeners() {
-    if (_notifyScheduled) return;
+    if (_disposed || _notifyScheduled) return;
     _notifyScheduled = true;
     scheduleMicrotask(() {
       _notifyScheduled = false;
-      super.notifyListeners();
+      if (!_disposed) super.notifyListeners();
     });
   }
 
   // Host reconnect grace period
   Timer? _hostReconnectTimer;
   bool _isWaitingForHostReconnect = false;
+  bool _hostIntentionallyLeft = false;
 
   // Debounce map for action events (peerId+type → last emission timestamp)
   final Map<String, int> _lastActionEventMs = {};
@@ -131,7 +133,6 @@ class WatchTogetherProvider with ChangeNotifier {
       role: session.role,
       controlMode: session.controlMode,
       state: session.state,
-      participants: session.participants,
       errorMessage: session.errorMessage,
       hostPeerId: session.hostPeerId,
     );
@@ -172,6 +173,14 @@ class WatchTogetherProvider with ChangeNotifier {
       appLogger.d('WatchTogether: Host peer unknown, broadcasting current playback snapshot request');
       _peerService!.broadcast(request);
     }
+  }
+
+  /// Wire up reconnection handler to re-announce join and readiness after reconnect
+  void _wireReconnectHandler() {
+    _peerService!.onReconnected = () {
+      _syncManager?.announceJoin(_displayName);
+      _syncManager?.reannounceReadyIfNeeded();
+    };
   }
 
   /// Wire up sync manager's state change callback to update provider state
@@ -227,6 +236,7 @@ class WatchTogetherProvider with ChangeNotifier {
       );
 
       _wireSyncStateChanges();
+      _wireReconnectHandler();
 
       notifyListeners();
       appLogger.d('WatchTogether: Session created: $createdSessionId');
@@ -276,6 +286,7 @@ class WatchTogetherProvider with ChangeNotifier {
       };
 
       _wireSyncStateChanges();
+      _wireReconnectHandler();
 
       // Add self to participants
       _participants.add(Participant(peerId: _peerService!.myPeerId!, displayName: _displayName, isHost: false));
@@ -298,26 +309,33 @@ class WatchTogetherProvider with ChangeNotifier {
   ///
   /// Returns `true` if the user became the host.
   Future<bool> enterRoom(String sessionId, {ControlMode controlMode = ControlMode.anyone, String? displayName}) async {
-    // Probe the relay to determine if the room exists, then delegate to
-    // the existing createSession / joinSession which handle all setup.
+    // Probe the relay with a lightweight peer service to check room occupancy,
+    // then do a single createSession or joinSession. This avoids the crash-prone
+    // join→teardown→create cycle on the provider.
     final customRelayUrl = SettingsService.instanceOrNull?.getCustomRelayUrl();
     final probe = WatchTogetherPeerService(customBaseUrl: customRelayUrl);
+    bool shouldBeHost;
     try {
-      final becameHost = await probe.joinOrCreateSession(sessionId);
-      await probe.disconnect();
-      probe.dispose();
-
-      if (becameHost) {
-        await createSession(controlMode: controlMode, displayName: displayName, sessionId: sessionId);
+      await probe.joinSession(sessionId);
+      shouldBeHost = probe.connectedPeers.isEmpty;
+    } on PeerError catch (e) {
+      if (e.serverCode == 'room_not_found') {
+        shouldBeHost = true;
       } else {
-        await joinSession(sessionId, displayName: displayName);
+        await probe.disconnect();
+        probe.dispose();
+        rethrow;
       }
-      return becameHost;
-    } catch (e) {
-      await probe.disconnect();
-      probe.dispose();
-      rethrow;
     }
+    await probe.disconnect();
+    probe.dispose();
+
+    if (shouldBeHost) {
+      await createSession(controlMode: controlMode, displayName: displayName, sessionId: sessionId);
+    } else {
+      await joinSession(sessionId, displayName: displayName);
+    }
+    return shouldBeHost;
   }
 
   /// Leave the current session
@@ -357,6 +375,7 @@ class WatchTogetherProvider with ChangeNotifier {
     _isDeferredPlay = false;
     _lastHandledCurrentPlaybackKey = null;
     _lastActionEventMs.clear();
+    _hostIntentionallyLeft = false;
 
     notifyListeners();
     appLogger.d('WatchTogether: Session left');
@@ -381,6 +400,11 @@ class WatchTogetherProvider with ChangeNotifier {
   void detachPlayer() {
     _syncManager?.detachPlayer();
     appLogger.d('WatchTogether: Player detached from sync manager');
+  }
+
+  /// Suppress position sync while the app is backgrounded.
+  void setBackgrounded(bool value) {
+    _syncManager?.setBackgrounded(value);
   }
 
   /// Set up listeners for peer service events
@@ -409,8 +433,9 @@ class WatchTogetherProvider with ChangeNotifier {
 
       _participants.removeWhere((p) => p.peerId == peerId);
 
-      // If host disconnected, start grace period for reconnection
-      if (!isHost && peerId == _session?.hostPeerId) {
+      // If host disconnected unexpectedly, start grace period for reconnection.
+      // Skip if the host already sent a deliberate leave message.
+      if (!isHost && peerId == _session?.hostPeerId && !_hostIntentionallyLeft) {
         _startHostReconnectGracePeriod();
       } else if (disconnectedName != null) {
         _participantEventController.add(
@@ -458,17 +483,16 @@ class WatchTogetherProvider with ChangeNotifier {
             _participantEventController.add(
               ParticipantEvent(displayName: message.displayName!, type: ParticipantEventType.joined),
             );
-          }
 
-          // If we're the host, send our join info back so the new peer
-          // adds us to their participant list. This is done at provider
-          // level (in addition to sync manager) so it works even when
-          // no player is attached yet.
-          if (isHost && _peerService != null) {
-            _peerService!.sendTo(
-              message.peerId!,
-              SyncMessage.join(peerId: _peerService!.myPeerId!, displayName: _displayName, isHost: true),
-            );
+            // Send our join info back so the new peer adds us to their
+            // participant list. Only reply to NEW peers to avoid an
+            // infinite join ping-pong (A→join→B→join→A→...).
+            if (_peerService != null) {
+              _peerService!.sendTo(
+                message.peerId!,
+                SyncMessage.join(peerId: _peerService!.myPeerId!, displayName: _displayName, isHost: isHost),
+              );
+            }
           }
 
           notifyListeners();
@@ -487,6 +511,14 @@ class WatchTogetherProvider with ChangeNotifier {
               ParticipantEvent(displayName: leavingName, type: ParticipantEventType.left),
             );
           }
+
+          // If the host deliberately left, end the session for everyone.
+          if (!isHost && message.peerId == _session?.hostPeerId) {
+            _hostIntentionallyLeft = true;
+            _handleHostExitedPlayer(message);
+            leaveSession();
+          }
+
           notifyListeners();
         }
         break;
@@ -739,6 +771,7 @@ class WatchTogetherProvider with ChangeNotifier {
 
   @override
   void dispose() {
+    _disposed = true;
     _cancelHostReconnectGracePeriod();
     _participantEventController.close();
     leaveSession();

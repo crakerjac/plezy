@@ -17,7 +17,6 @@ class DisplayModeService {
   bool _displayModeChanged = false;
   bool _hdrStateChanged = false;
 
-  bool get displayModeChanged => _displayModeChanged;
   bool get hdrStateChanged => _hdrStateChanged;
   bool get anyChangeApplied => _displayModeChanged || _hdrStateChanged;
 
@@ -25,12 +24,12 @@ class DisplayModeService {
 
   /// Apply display matching based on video properties. Returns the delay
   /// duration to wait before starting playback.
-  Future<Duration> applyDisplayMatching({
-    required double? fps,
-    required double? sigPeak,
-  }) async {
+  Future<Duration> applyDisplayMatching({required double? fps, required double? sigPeak}) async {
     if (!Platform.isWindows) return Duration.zero;
-    if (!_fullscreen.isFullscreen) return Duration.zero;
+    if (!_fullscreen.isFullscreen) {
+      appLogger.d('Display matching skipped: not in fullscreen');
+      return Duration.zero;
+    }
 
     bool anyChange = false;
 
@@ -123,9 +122,7 @@ class DisplayModeService {
     final alreadyEnabled = await _channel.invokeMethod<bool>('isHDREnabled');
     if (alreadyEnabled == true) return false;
 
-    final success = await _channel.invokeMethod<bool>('setSystemHDR', {
-      'enabled': true,
-    });
+    final success = await _channel.invokeMethod<bool>('setSystemHDR', {'enabled': true});
 
     if (success == true) {
       _hdrStateChanged = true;
@@ -137,12 +134,7 @@ class DisplayModeService {
 
   /// Find the best matching refresh rate for a video fps.
   /// Mirrors the C++ FindBestRefreshRate algorithm.
-  static int _findBestRefreshRate(
-    double videoFps,
-    List<Map> modes,
-    int currentWidth,
-    int currentHeight,
-  ) {
+  static int _findBestRefreshRate(double videoFps, List<Map> modes, int currentWidth, int currentHeight) {
     if (videoFps <= 0) return 0;
 
     // Collect unique refresh rates at current resolution.
@@ -172,9 +164,7 @@ class DisplayModeService {
       // Within 0.5% tolerance.
       if (deviation > 0.005) continue;
 
-      if (bestRate == 0 ||
-          multiplier < bestMultiplier ||
-          (multiplier == bestMultiplier && rate > bestRate)) {
+      if (bestRate == 0 || multiplier < bestMultiplier || (multiplier == bestMultiplier && rate > bestRate)) {
         bestRate = rate;
         bestMultiplier = multiplier;
       }

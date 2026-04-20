@@ -5,6 +5,7 @@ import android.app.ActivityManager
 import android.content.Context
 import android.graphics.Color
 import android.graphics.PixelFormat
+import android.graphics.Typeface
 import android.net.Uri
 import android.os.Build
 import android.os.Handler
@@ -36,10 +37,12 @@ import androidx.media3.datasource.HttpDataSource
 import androidx.media3.datasource.cronet.CronetDataSource
 import org.chromium.net.CronetEngine
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicLong
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.RenderersFactory
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.source.ProgressiveMediaSource
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
@@ -54,10 +57,9 @@ import com.edde746.plezy.shared.FlutterOverlayHelper
 import com.edde746.plezy.shared.FrameRateManager
 import io.github.peerless2012.ass.media.AssHandler
 
-import io.github.peerless2012.ass.media.factory.AssRenderersFactory
 import io.github.peerless2012.ass.media.parser.AssSubtitleParserFactory
 import io.github.peerless2012.ass.media.type.AssRenderType
-import io.github.peerless2012.ass.media.widget.AssSubtitleView
+import io.github.peerless2012.ass.media.widget.AssSubtitleSurfaceView
 
 interface ExoPlayerDelegate : com.edde746.plezy.shared.PlayerDelegate {
 
@@ -111,6 +113,8 @@ class ExoPlayerCore(private val activity: Activity) : Player.Listener {
     private var overlayLayoutListener: ViewTreeObserver.OnGlobalLayoutListener? = null
     private var lastVideoSize: VideoSize? = null
     private var exoPlayer: ExoPlayer? = null
+    private var renderersFactory: PlezyRenderersFactory? = null
+    private val subtitleDelayUs = AtomicLong(0L)
     private var httpDataSourceFactory: HttpDataSource.Factory? = null
     private var dataSourceFactory: DefaultDataSource.Factory? = null
     private var trackSelector: DefaultTrackSelector? = null
@@ -123,6 +127,7 @@ class ExoPlayerCore(private val activity: Activity) : Player.Listener {
     private var lastSeekable: Boolean? = null
     @Volatile private var disposing: Boolean = false
     private var pendingStartPositionMs: Long = 0L
+    private var pendingPlayWhenReady: Boolean? = null
 
     // Frame watchdog: detects black screen (audio plays but 0 video frames rendered)
     private var frameWatchdogRunnable: Runnable? = null
@@ -335,6 +340,10 @@ class ExoPlayerCore(private val activity: Activity) : Player.Listener {
                 setParameters(
                     buildUponParameters()
                         .setTunnelingEnabled(tunnelingUserEnabled)
+                        // Recover passthrough when HDMI capabilities flap (Shield refresh-rate / AVR link drop):
+                        // the sink temporarily falls back to PCM, and this flag lets the selector re-pick the
+                        // encoded audio track when capabilities come back. See androidx/media#2258.
+                        .setAllowInvalidateSelectionsOnRendererCapabilitiesChange(true)
                         .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
                         .setPreferredTextLanguage("en")
                 )
@@ -362,6 +371,7 @@ class ExoPlayerCore(private val activity: Activity) : Player.Listener {
                     }
                 }
             }
+            this.renderersFactory = renderersFactory
 
             // Cronet DataSource for HTTP/2 multiplexing — all range requests share one connection
             httpDataSourceFactory = CronetDataSource.Factory(getCronetEngine(activity), cronetExecutor)
@@ -415,7 +425,13 @@ class ExoPlayerCore(private val activity: Activity) : Player.Listener {
             val mediaSourceFactory = DefaultMediaSourceFactory(dataSourceFactory!!, wrappedExtractorsFactory)
                 .setSubtitleParserFactory(assParserFactory)
 
-            val wrappedRenderersFactory = AssRenderersFactory(handler, renderersFactory)
+            // Wrap text renderers with subtitle delay support
+            val wrappedRenderersFactory = RenderersFactory {
+                eventHandler, videoListener, audioListener, textOutput, metadataOutput ->
+                renderersFactory.createRenderers(eventHandler, videoListener, audioListener, textOutput, metadataOutput)
+                    .map { if (it.trackType == C.TRACK_TYPE_TEXT) SubtitleDelayRenderer(it, subtitleDelayUs) else it }
+                    .toTypedArray()
+            }
 
             // Compute memory-aware buffer limits to prevent CCodec OOM crashes
             val activityManager = activity.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
@@ -455,13 +471,34 @@ class ExoPlayerCore(private val activity: Activity) : Player.Listener {
                 .setRenderersFactory(wrappedRenderersFactory)
                 .build()
 
-            // Add ASS overlay view to SubtitleView for OVERLAY modes
+            // Add ASS overlay view to SubtitleView for OVERLAY modes.
+            // We use AssSubtitleSurfaceView directly (not AssSubtitleView) so we get a
+            // SurfaceFlinger-layer-backed overlay that eglPresentationTimeANDROID can
+            // vsync-pin. Z-order: default video SurfaceView < this MediaOverlay-flagged
+            // SurfaceView < Flutter TextureView in the window.
+            //
+            // Inserted at child index 0 so the SurfaceView's transparent punch runs BEFORE
+            // SubtitleView's built-in CanvasSubtitleOutput child renders non-ASS cues.
+            // Appending would punch away already-drawn SRT/VTT text.
+            var assSubtitleSurfaceView: AssSubtitleSurfaceView? = null
             subtitleView?.let { sv ->
-                val assView = AssSubtitleView(sv.context, handler)
-                sv.addView(assView)
+                val assView = AssSubtitleSurfaceView(sv.context, handler)
+                assSubtitleSurfaceView = assView
+                sv.addView(
+                    assView,
+                    0,
+                    FrameLayout.LayoutParams(
+                        FrameLayout.LayoutParams.MATCH_PARENT,
+                        FrameLayout.LayoutParams.MATCH_PARENT
+                    )
+                )
             }
 
-            // Initialize handler (registers as Player.Listener, creates Handler)
+            // Initialize handler (registers as Player.Listener, creates Handler).
+            // AssHandler.init calls player.setVideoFrameMetadataListener internally, but
+            // our own setVideoFrameMetadataListener below would overwrite it (ExoPlayer
+            // only keeps one listener). Skip AssHandler's wiring and invoke
+            // assView.requestRender directly from the listener below.
             handler.init(exoPlayer!!)
 
             // Suppress ass-media GL thread crash when EGL init partially fails (e.g. Tegra).
@@ -483,7 +520,8 @@ class ExoPlayerCore(private val activity: Activity) : Player.Listener {
 
             exoPlayer!!.addListener(this)
             exoPlayer!!.addAnalyticsListener(decoderHangListener)
-            exoPlayer!!.setVideoFrameMetadataListener { presentationTimeUs, _, _, _ ->
+            exoPlayer!!.setVideoFrameMetadataListener { presentationTimeUs, releaseTimeNs, _, _ ->
+                assSubtitleSurfaceView?.requestRender(presentationTimeUs, releaseTimeNs)
                 val count = fpsTimestampCount
                 if (count < FPS_SAMPLE_COUNT) {
                     fpsTimestamps[count] = presentationTimeUs
@@ -600,6 +638,7 @@ class ExoPlayerCore(private val activity: Activity) : Player.Listener {
 
     override fun onIsPlayingChanged(isPlaying: Boolean) {
         Log.d(TAG, "onIsPlayingChanged: $isPlaying")
+        if (isPlaying) pendingPlayWhenReady = null
         delegate?.onPropertyChange("pause", !isPlaying)
     }
 
@@ -628,6 +667,12 @@ class ExoPlayerCore(private val activity: Activity) : Player.Listener {
                         exoPlayer?.seekTo(pendingStartPositionMs)
                     }
                     pendingStartPositionMs = 0L
+                }
+                val pendingPlay = pendingPlayWhenReady
+                val currentPlayWhenReady = exoPlayer?.playWhenReady
+                if (pendingPlay != null && currentPlayWhenReady != pendingPlay) {
+                    emitLog("warn", "state", "playWhenReady lost (now $currentPlayWhenReady, expected $pendingPlay) — restoring")
+                    exoPlayer?.playWhenReady = pendingPlay
                 }
                 delegate?.onPropertyChange("paused-for-cache", false)
                 delegate?.onEvent("playback-restart", null)
@@ -700,6 +745,22 @@ class ExoPlayerCore(private val activity: Activity) : Player.Listener {
 
         // If native DV7 failed, retry with conversion before falling to MPV
         if (error.errorCode in 4001..4005 && retryWithDvConversion("decoder error ${error.errorCode}")) return
+
+        // Server returned HTTP 500 — typically a shared-user bandwidth/transcoding limit
+        // set by the server owner. MPV will hit the same rejection, so skip the fallback.
+        // Keep the "server-http-500" tag in sync with PlayerError.serverHttp500 in Dart.
+        val isHttp500 =
+            causeChain.contains("Response code: 500") ||
+            (error.message?.contains("Response code: 500") == true)
+        if (isHttp500) {
+            Log.w(TAG, "Server returned HTTP 500 - skipping MPV fallback (unrecoverable until server-side change)")
+            delegate?.onEvent("end-file", mapOf(
+                "reason" to "error",
+                "message" to (error.message ?: "HTTP 500"),
+                "cause" to "server-http-500"
+            ))
+            return
+        }
 
         if (currentMediaUri != null) {
             Log.w(TAG, "ExoPlayer error (code ${error.errorCode}) - attempting fallback to MPV")
@@ -1002,10 +1063,11 @@ class ExoPlayerCore(private val activity: Activity) : Player.Listener {
     private fun updateTunnelingState(reason: String) {
         val selector = trackSelector ?: return
         val player = exoPlayer ?: return
-        val shouldTunnel = tunnelingUserEnabled && (player.playbackParameters.speed == 1f) && !tunnelingDisabledForCodec
+        val audioDelayActive = (renderersFactory?.audioDelayUs?.get() ?: 0L) != 0L
+        val shouldTunnel = tunnelingUserEnabled && (player.playbackParameters.speed == 1f) && !tunnelingDisabledForCodec && !audioDelayActive
         if (shouldTunnel == currentTunneledPlayback) return
         currentTunneledPlayback = shouldTunnel
-        emitLog("info", "tunneling", "Toggling tunneling=$shouldTunnel (reason=$reason, user=$tunnelingUserEnabled, speed=${player.playbackParameters.speed}, audioCodecDisabled=$tunnelingDisabledForAudioCodec, videoCodecDisabled=$tunnelingDisabledForVideoCodec)")
+        emitLog("info", "tunneling", "Toggling tunneling=$shouldTunnel (reason=$reason, user=$tunnelingUserEnabled, speed=${player.playbackParameters.speed}, audioCodecDisabled=$tunnelingDisabledForAudioCodec, videoCodecDisabled=$tunnelingDisabledForVideoCodec, audioDelay=$audioDelayActive)")
         selector.setParameters(
             selector.buildUponParameters().setTunnelingEnabled(shouldTunnel)
         )
@@ -1231,6 +1293,7 @@ class ExoPlayerCore(private val activity: Activity) : Player.Listener {
         tunnelingDisabledForVideoCodec = false
         currentTunneledPlayback = tunnelingUserEnabled
         pendingStartPositionMs = startPositionMs
+        pendingPlayWhenReady = autoPlay
         trackSelector?.setParameters(
             trackSelector!!.buildUponParameters()
                 .setTunnelingEnabled(tunnelingUserEnabled)
@@ -1272,11 +1335,22 @@ class ExoPlayerCore(private val activity: Activity) : Player.Listener {
         emitLog("info", "media", "Opened: ${redactUri(uri)}, startPosition: ${startPositionMs}ms, autoPlay: $autoPlay, sessionTunneling=$currentTunneledPlayback, userTunneling=$tunnelingUserEnabled")
     }
 
+    fun setAudioDelay(seconds: Double) {
+        renderersFactory?.audioDelayUs?.set((seconds * 1_000_000).toLong())
+        updateTunnelingState("audio-delay")
+    }
+
+    fun setSubtitleDelay(seconds: Double) {
+        subtitleDelayUs.set((seconds * 1_000_000).toLong())
+    }
+
     fun play() {
+        pendingPlayWhenReady = null
         exoPlayer?.play()
     }
 
     fun pause() {
+        pendingPlayWhenReady = null
         exoPlayer?.pause()
     }
 
@@ -1339,22 +1413,69 @@ class ExoPlayerCore(private val activity: Activity) : Player.Listener {
     }
 
     fun addSubtitleTrack(uri: String, title: String?, language: String?, mimeType: String?, select: Boolean) {
-        val index = externalSubtitles.size
-        val subtitleConfig = MediaItem.SubtitleConfiguration.Builder(Uri.parse(uri))
-            .setId("external_$index")
-            .setLabel(title ?: "External")
-            .setLanguage(language)
-            .setMimeType(mimeType ?: detectSubtitleMimeType(uri))
-            .build()
+        val existingIndex = externalSubtitleUris.indexOf(uri)
+        val isNew = existingIndex < 0
+        val index = if (isNew) externalSubtitles.size else existingIndex
+        val formatId = "external_$index"
 
-        externalSubtitles.add(subtitleConfig)
-        externalSubtitleUris.add(uri)
+        if (isNew) {
+            // SELECTION_FLAG_DEFAULT marks this as the preferred text track so ExoPlayer's
+            // natural selection picks it on prepare. Avoids pinning the selector to a
+            // specific TrackGroup override — if the URL 404s (e.g. stale Plex stream key),
+            // ExoPlayer falls back to another available track (e.g. embedded SRT) instead
+            // of leaving text disabled.
+            val selectionFlags = if (select) C.SELECTION_FLAG_DEFAULT else 0
+            val subtitleConfig = MediaItem.SubtitleConfiguration.Builder(Uri.parse(uri))
+                .setId(formatId)
+                .setLabel(title ?: "External")
+                .setLanguage(language)
+                .setMimeType(mimeType ?: detectSubtitleMimeType(uri))
+                .setSelectionFlags(selectionFlags)
+                .build()
+            externalSubtitles.add(subtitleConfig)
+            externalSubtitleUris.add(uri)
+        }
 
-        // Note: ExoPlayer won't see these until the media is reloaded.
-        // On Android, external subs are normally passed at open() time.
-        // This path is only reached if the Flutter layer calls addSubtitleTrack
-        // while ExoPlayer (not MPV fallback) is active.
-        emitTrackList()
+        // Media3 only picks up MediaItem.SubtitleConfiguration at prepare() time
+        // (tracking issue androidx/media #1649). When the caller wants this subtitle
+        // activated immediately (e.g. after OpenSubtitles download), rebuild the
+        // MediaItem and re-prepare with the position preserved.
+        val player = exoPlayer
+        val mediaUri = currentMediaUri
+        if (select && player != null && mediaUri != null && !currentMediaIsLive) {
+            if (isNew) {
+                val savedPosition = player.currentPosition
+                val savedPlayWhenReady = player.playWhenReady
+
+                // Clear any stale text-type override (pointing at a pre-reload TrackGroup)
+                // and re-enable the text type — mirrors the reset done in open(). Without
+                // this, a previously-selected sub's override would either block the new
+                // DEFAULT-flagged sub from winning or, if the new sub fails to load, keep
+                // the text renderer stuck with no selection.
+                trackSelector?.let { selector ->
+                    selector.parameters = selector.buildUponParameters()
+                        .clearOverridesOfType(C.TRACK_TYPE_TEXT)
+                        .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
+                        .build()
+                }
+                selectedSubtitleTrackId = null
+
+                val mediaItem = buildMediaItem(mediaUri)
+                player.setMediaItem(mediaItem, savedPosition)
+                player.prepare()
+                player.playWhenReady = savedPlayWhenReady
+            } else {
+                // Already attached — select the existing track via override.
+                val trackId = subtitleTrackGroupMap.entries
+                    .firstOrNull { (_, group) -> group.getFormat(0).id == formatId }
+                    ?.key
+                if (trackId != null) {
+                    selectSubtitleTrack(trackId)
+                }
+            }
+        }
+
+        if (isNew) emitTrackList()
     }
 
     private fun detectSubtitleMimeType(uri: String): String {
@@ -1387,7 +1508,9 @@ class ExoPlayerCore(private val activity: Activity) : Player.Listener {
         borderColor: String,
         bgColor: String,
         bgOpacity: Int,
-        subtitlePosition: Int = 100
+        subtitlePosition: Int = 100,
+        bold: Boolean = false,
+        italic: Boolean = false
     ) {
         activity.runOnUiThread {
             // 1. Non-ASS subtitles: CaptionStyleCompat on SubtitleView
@@ -1400,13 +1523,22 @@ class ExoPlayerCore(private val activity: Activity) : Player.Listener {
             val edgeType = if (borderSize > 0) CaptionStyleCompat.EDGE_TYPE_OUTLINE
                            else CaptionStyleCompat.EDGE_TYPE_NONE
 
+            val typefaceStyle = when {
+                bold && italic -> Typeface.BOLD_ITALIC
+                bold -> Typeface.BOLD
+                italic -> Typeface.ITALIC
+                else -> Typeface.NORMAL
+            }
+            val typeface = if (typefaceStyle != Typeface.NORMAL)
+                Typeface.create(Typeface.DEFAULT, typefaceStyle) else null
+
             val style = CaptionStyleCompat(
                 fgColor,
                 bgColorInt,
                 Color.TRANSPARENT,
                 edgeType,
                 edgeColor,
-                null
+                typeface
             )
             subtitleView?.setStyle(style)
             // Font size: MPV sub-font-size is scaled pixels at 720p height
@@ -1443,7 +1575,7 @@ class ExoPlayerCore(private val activity: Activity) : Player.Listener {
                 Log.w(TAG, "Failed to set ASS font scale: ${e.message}")
             }
 
-            Log.d(TAG, "setSubtitleStyle: fontSize=$fontSize, textColor=$textColor, borderSize=$borderSize, bgOpacity=$bgOpacity, position=$subtitlePosition, assScale=$scale")
+            Log.d(TAG, "setSubtitleStyle: fontSize=$fontSize, textColor=$textColor, borderSize=$borderSize, bgOpacity=$bgOpacity, position=$subtitlePosition, bold=$bold, italic=$italic, assScale=$scale")
         }
     }
 
@@ -1627,6 +1759,7 @@ class ExoPlayerCore(private val activity: Activity) : Player.Listener {
         tunnelingDisabledForVideoCodec = false
         currentTunneledPlayback = false
         pendingStartPositionMs = 0L
+        pendingPlayWhenReady = null
         currentMediaIsLive = false
         currentVisible = false
         emitSeekable(false, force = true)
@@ -1638,6 +1771,7 @@ class ExoPlayerCore(private val activity: Activity) : Player.Listener {
         exoPlayer?.removeListener(this)
         exoPlayer?.release()
         exoPlayer = null
+        renderersFactory = null
         trackSelector = null
         httpDataSourceFactory = null
         dataSourceFactory = null

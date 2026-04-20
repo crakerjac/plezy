@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:material_symbols_icons/symbols.dart';
 import 'package:provider/provider.dart';
+import '../../focus/focusable_action_bar.dart';
 import '../../models/plex_metadata.dart';
 import '../../providers/download_provider.dart';
 import '../../providers/multi_server_provider.dart';
@@ -17,6 +18,7 @@ import '../../widgets/download_tree_view.dart';
 import '../main_screen.dart';
 import '../libraries/state_messages.dart';
 import '../../i18n/strings.g.dart';
+import 'sync_rules_screen.dart';
 
 class DownloadsScreen extends StatefulWidget {
   const DownloadsScreen({super.key});
@@ -30,6 +32,7 @@ class DownloadsScreenState extends State<DownloadsScreen> with TickerProviderSta
   final _queueTabChipFocusNode = FocusNode(debugLabel: 'tab_chip_queue');
   final _tvShowsTabChipFocusNode = FocusNode(debugLabel: 'tab_chip_tv_shows');
   final _moviesTabChipFocusNode = FocusNode(debugLabel: 'tab_chip_movies');
+  final _actionBarKey = GlobalKey<FocusableActionBarState>();
 
   @override
   List<FocusNode> get tabChipFocusNodes => [_queueTabChipFocusNode, _tvShowsTabChipFocusNode, _moviesTabChipFocusNode];
@@ -195,12 +198,26 @@ class DownloadsScreenState extends State<DownloadsScreen> with TickerProviderSta
             surfaceTintColor: Colors.transparent,
             shadowColor: Colors.transparent,
             scrolledUnderElevation: 0,
-            // PlexSyncer: scan button
+            // PlexSyncer + upstream: both actions in one FocusableActionBar
             actions: [
-              IconButton(
-                icon: const Icon(Symbols.sync_rounded),
-                tooltip: 'Scan PlexSyncer folder',
-                onPressed: _importFromManifest,
+              FocusableActionBar(
+                key: _actionBarKey,
+                onNavigateLeft: () => getTabChipFocusNode(tabCount - 1).requestFocus(),
+                onNavigateDown: _focusCurrentTab,
+                actions: [
+                  // PlexSyncer: scan button
+                  FocusableAction(
+                    icon: Icons.drive_file_move_rtl_outlined,
+                    tooltip: 'Scan PlexSyncer folder',
+                    onPressed: _importFromManifest,
+                  ),
+                  FocusableAction(
+                    icon: Symbols.sync_rounded,
+                    tooltip: t.downloads.activeSyncRules,
+                    onPressed: () =>
+                        Navigator.push(context, MaterialPageRoute(builder: (_) => const SyncRulesScreen())),
+                  ),
+                ],
               ),
             ],
           ),

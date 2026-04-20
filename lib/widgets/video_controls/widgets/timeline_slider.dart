@@ -37,6 +37,11 @@ class TimelineSlider extends StatefulWidget {
   /// Optional callback that returns thumbnail image bytes for a given timestamp.
   final Uint8List? Function(Duration time)? thumbnailDataBuilder;
 
+  /// When true, show the preview thumbnail at the current playback position.
+  /// Intended for sustained dpad/keyboard seeking where the decoder cannot
+  /// keep up with accumulated seeks. Single presses should leave this false.
+  final bool showKeyRepeatThumbnail;
+
   const TimelineSlider({
     super.key,
     required this.position,
@@ -51,6 +56,7 @@ class TimelineSlider extends StatefulWidget {
     this.onFocusChange,
     this.enabled = true,
     this.thumbnailDataBuilder,
+    this.showKeyRepeatThumbnail = false,
   });
 
   @override
@@ -77,7 +83,7 @@ class _TimelineSliderState extends State<TimelineSlider> {
     final tooltipTop = -(tooltipHeight + 2.0);
 
     // Center tooltip on cursor, clamped so it stays within the slider bounds
-    final left = (pixelX - tooltipWidth / 2).clamp(0.0, sliderWidth - tooltipWidth);
+    final left = (pixelX - tooltipWidth / 2).clamp(0.0, (sliderWidth - tooltipWidth).clamp(0.0, double.infinity));
 
     final timeLabel = Container(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
@@ -119,12 +125,7 @@ class _TimelineSliderState extends State<TimelineSlider> {
                       gaplessPlayback: true,
                       errorBuilder: (_, _, _) => const SizedBox.shrink(),
                     ),
-                    Positioned(
-                      bottom: 4,
-                      left: 0,
-                      right: 0,
-                      child: Center(child: timeLabel),
-                    ),
+                    Positioned(bottom: 4, left: 0, right: 0, child: Center(child: timeLabel)),
                   ],
                 ),
               )
@@ -158,6 +159,13 @@ class _TimelineSliderState extends State<TimelineSlider> {
             final fraction = ((_mousePosition! - _sliderPadding) / trackWidth).clamp(0.0, 1.0);
             final time = Duration(milliseconds: (fraction * durationMs).round());
             tooltip = _buildTooltip(sliderWidth, _mousePosition!, time);
+          } else if (widget.showKeyRepeatThumbnail && widget.thumbnailDataBuilder != null) {
+            // Preview thumbnail at the current playback position while the
+            // user holds a dpad/keyboard direction. The decoder lags behind
+            // rapid seeks, so the BIF thumbnail is the only live feedback.
+            final fraction = (widget.position.inMilliseconds / durationMs).clamp(0.0, 1.0);
+            final px = _sliderPadding + fraction * trackWidth;
+            tooltip = _buildTooltip(sliderWidth, px, widget.position);
           }
         }
 
@@ -191,9 +199,7 @@ class _TimelineSliderState extends State<TimelineSlider> {
                   overlayShape: const RoundSliderOverlayShape(overlayRadius: 0),
                   tickMarkShape: SliderTickMarkShape.noTickMark,
                   thumbSize: WidgetStatePropertyAll(
-                    (!InputModeTracker.isKeyboardMode(context) || _isFocused)
-                        ? const Size(4, 20)
-                        : Size.zero,
+                    (!InputModeTracker.isKeyboardMode(context) || _isFocused) ? const Size(4, 20) : Size.zero,
                   ),
                 ),
                 child: Semantics(

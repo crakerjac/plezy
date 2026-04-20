@@ -75,6 +75,7 @@ class TranslationsJa with BaseTranslations<AppLocale, Translations> implements T
 	@override late final _TranslationsExternalPlayerJa externalPlayer = _TranslationsExternalPlayerJa._(_root);
 	@override late final _TranslationsMetadataEditJa metadataEdit = _TranslationsMetadataEditJa._(_root);
 	@override late final _TranslationsServerTasksJa serverTasks = _TranslationsServerTasksJa._(_root);
+	@override late final _TranslationsTraktJa trakt = _TranslationsTraktJa._(_root);
 }
 
 // Path: app
@@ -128,7 +129,6 @@ class _TranslationsCommonJa implements TranslationsCommonEn {
 	@override String get shuffle => 'シャッフル';
 	@override String get addTo => '追加...';
 	@override String get createNew => '新規作成';
-	@override String get paste => '貼り付け';
 	@override String get connect => '接続';
 	@override String get disconnect => '切断';
 	@override String get play => '再生';
@@ -193,18 +193,18 @@ class _TranslationsSettingsJa implements TranslationsSettingsEn {
 
 	// Translations
 	@override String get title => '設定';
+	@override String get supportDeveloper => 'Plezy を支援';
+	@override String get supportDeveloperDescription => 'Liberapay で寄付して開発を支援';
 	@override String get language => '言語';
 	@override String get theme => 'テーマ';
 	@override String get appearance => '外観';
 	@override String get videoPlayback => '動画再生';
+	@override String get videoPlaybackDescription => '再生動作を設定';
 	@override String get advanced => '詳細';
 	@override String get episodePosterMode => 'エピソードポスタースタイル';
 	@override String get seriesPoster => 'シリーズポスター';
-	@override String get seriesPosterDescription => 'すべてのエピソードにシリーズポスターを表示';
 	@override String get seasonPoster => 'シーズンポスター';
-	@override String get seasonPosterDescription => 'エピソードにシーズン固有のポスターを表示';
 	@override String get episodeThumbnail => 'サムネイル';
-	@override String get episodeThumbnailDescription => '16:9のエピソードスクリーンショットサムネイルを表示';
 	@override String get showHeroSectionDescription => 'ホーム画面に注目コンテンツのカルーセルを表示';
 	@override String get secondsLabel => '秒';
 	@override String get minutesLabel => '分';
@@ -212,23 +212,15 @@ class _TranslationsSettingsJa implements TranslationsSettingsEn {
 	@override String get minutesShort => '分';
 	@override String durationHint({required Object min, required Object max}) => '時間を入力 (${min}-${max})';
 	@override String get systemTheme => 'システム';
-	@override String get systemThemeDescription => 'システム設定に従う';
 	@override String get lightTheme => 'ライト';
 	@override String get darkTheme => 'ダーク';
 	@override String get oledTheme => 'OLED';
-	@override String get oledThemeDescription => 'OLED画面向けの純粋な黒';
 	@override String get libraryDensity => 'ライブラリの密度';
 	@override String get compact => 'コンパクト';
-	@override String get compactDescription => '小さいカード、より多くのアイテムを表示';
-	@override String get normal => '標準';
-	@override String get normalDescription => 'デフォルトサイズ';
 	@override String get comfortable => 'ゆったり';
-	@override String get comfortableDescription => '大きいカード、表示アイテム数を減少';
 	@override String get viewMode => '表示モード';
 	@override String get gridView => 'グリッド';
-	@override String get gridViewDescription => 'グリッドレイアウトでアイテムを表示';
 	@override String get listView => 'リスト';
-	@override String get listViewDescription => 'リストレイアウトでアイテムを表示';
 	@override String get showHeroSection => 'ヒーローセクションを表示';
 	@override String get useGlobalHubs => 'Plex Homeレイアウトを使用';
 	@override String get useGlobalHubsDescription => '公式Plexクライアントのようにホームページのハブを表示。オフにすると、ライブラリごとのおすすめを表示。';
@@ -242,9 +234,7 @@ class _TranslationsSettingsJa implements TranslationsSettingsEn {
 	@override String get hideSpoilersDescription => 'まだ視聴していないエピソードのサムネイルをぼかし、説明を非表示';
 	@override String get playerBackend => 'プレーヤーバックエンド';
 	@override String get exoPlayer => 'ExoPlayer（推奨）';
-	@override String get exoPlayerDescription => 'より良いハードウェアサポートのAndroidネイティブプレーヤー';
 	@override String get mpv => 'mpv';
-	@override String get mpvDescription => 'より多くの機能とASS字幕サポートの高度なプレーヤー';
 	@override String get hardwareDecoding => 'ハードウェアデコード';
 	@override String get hardwareDecodingDescription => '利用可能な場合にハードウェアアクセラレーションを使用';
 	@override String get bufferSize => 'バッファサイズ';
@@ -256,7 +246,6 @@ class _TranslationsSettingsJa implements TranslationsSettingsEn {
 	@override String get smallSkipDuration => '短いスキップ時間';
 	@override String get largeSkipDuration => '長いスキップ時間';
 	@override String get rewindOnResume => '再開時に巻き戻し';
-	@override String get rewindOnResumeDescription => '再生再開時にこの秒数分巻き戻す';
 	@override String secondsUnit({required Object seconds}) => '${seconds}秒';
 	@override String get defaultSleepTimer => 'デフォルトスリープタイマー';
 	@override String minutesUnit({required Object minutes}) => '${minutes}分';
@@ -270,7 +259,6 @@ class _TranslationsSettingsJa implements TranslationsSettingsEn {
 	@override String get videoPlayerNavigation => '動画プレーヤーナビゲーション';
 	@override String get videoPlayerNavigationDescription => '矢印キーで動画プレーヤーコントロールを操作';
 	@override String get watchTogetherRelay => '一緒に視聴リレーサーバー';
-	@override String get watchTogetherRelayDefault => 'デフォルト';
 	@override String get watchTogetherRelayDescription => '一緒に視聴用のカスタムリレーサーバーを設定します。すべての参加者が同じサーバーを使用する必要があります。';
 	@override String get watchTogetherRelayHint => 'https://my-relay.example.com';
 	@override String get crashReporting => 'クラッシュレポート';
@@ -328,6 +316,10 @@ class _TranslationsSettingsJa implements TranslationsSettingsEn {
 	@override String maxVolumePercent({required Object percent}) => '${percent}%';
 	@override String get discordRichPresence => 'Discord Rich Presence';
 	@override String get discordRichPresenceDescription => 'Discordで視聴中の内容を表示';
+	@override String get trakt => 'Trakt';
+	@override String get traktDescription => '視聴履歴を Trakt と同期';
+	@override String get companionRemoteServer => 'コンパニオンリモートサーバー';
+	@override String get companionRemoteServerDescription => 'ネットワーク上のモバイルデバイスからこのアプリを操作できるようにする';
 	@override String get autoPip => '自動ピクチャーインピクチャー';
 	@override String get autoPipDescription => '再生中にアプリを離れると自動的にピクチャーインピクチャーに移行';
 	@override String get matchContentFrameRate => 'コンテンツのフレームレートに合わせる';
@@ -337,13 +329,14 @@ class _TranslationsSettingsJa implements TranslationsSettingsEn {
 	@override String get matchDynamicRange => 'ダイナミックレンジを合わせる';
 	@override String get matchDynamicRangeDescription => 'HDRコンテンツに対して自動的にHDRを有効にし、プレーヤーを閉じるとSDRに戻す';
 	@override String get displaySwitchDelay => 'ディスプレイ切り替え遅延';
-	@override String get displaySwitchDelayDescription => 'ディスプレイモード変更後、再生を開始するまでの待機秒数';
 	@override String get tunneledPlayback => 'トンネル再生';
 	@override String get tunneledPlaybackDescription => 'ハードウェアアクセラレーションされたビデオトンネリングを使用。HDRコンテンツで音声のみで画面が黒くなる場合は無効にしてください';
 	@override String get requireProfileSelectionOnOpen => 'アプリ起動時にプロフィールを確認';
 	@override String get requireProfileSelectionOnOpenDescription => 'アプリを開くたびにプロフィール選択を表示';
 	@override String get confirmExitOnBack => '終了前に確認';
 	@override String get confirmExitOnBackDescription => '戻るボタンでアプリを終了する際に確認ダイアログを表示';
+	@override String get forceTvMode => 'TVモードを強制';
+	@override String get forceTvModeDescription => '自動検出に関係なくTVレイアウトを使用します。leanback機能を報告しないAndroid TVデバイスで便利です。変更するとアプリが再起動されます。';
 	@override String get autoHidePerformanceOverlay => 'パフォーマンスオーバーレイを自動非表示';
 	@override String get autoHidePerformanceOverlayDescription => '再生コントロールと一緒にパフォーマンスオーバーレイをフェードする';
 	@override String get showNavBarLabels => 'ナビゲーションバーラベルを表示';
@@ -358,8 +351,6 @@ class _TranslationsSettingsJa implements TranslationsSettingsEn {
 	@override String get subtitlesAndConfig => 'Subtitles & Configuration';
 	@override String get seekAndTiming => 'Seek & Timing';
 	@override String get behavior => 'Behavior';
-	@override String get companionRemoteServer => 'コンパニオンリモートサーバー';
-	@override String get companionRemoteServerDescription => 'ネットワーク上のモバイルデバイスからこのアプリを操作できるようにする';
 }
 
 // Path: search
@@ -524,7 +515,6 @@ class _TranslationsVideoControlsJa implements TranslationsVideoControlsEn {
 	@override String get alwaysOnTopButton => '常に前面に表示';
 	@override String get rotationLockButton => '回転ロック';
 	@override String get lockScreen => '画面をロック';
-	@override String get unlockScreen => '画面のロックを解除';
 	@override String get screenLockButton => '画面ロック';
 	@override String get longPressToUnlock => '長押しでロック解除';
 	@override String get timelineSlider => '動画タイムライン';
@@ -596,6 +586,8 @@ class _TranslationsMessagesJa implements TranslationsMessagesEn {
 	@override String get failedToCreatePlayQueueNoItems => '再生キューの作成に失敗しました - アイテムがありません';
 	@override String failedPlayback({required Object action, required Object error}) => '${action}に失敗しました: ${error}';
 	@override String get switchingToCompatiblePlayer => '互換プレーヤーに切替中...';
+	@override String get serverLimitTitle => '再生に失敗しました';
+	@override String get serverLimitBody => 'サーバーからエラーが返されました (HTTP 500)。通常、これはサーバーの所有者が帯域幅またはトランスコードの制限を設定しており、セッションが拒否されていることを意味します。クライアント側でできることはありません — サーバーの所有者が設定を調整する必要があります。';
 	@override String get logsUploaded => 'ログをアップロードしました';
 	@override String get logsUploadFailed => 'ログのアップロードに失敗しました';
 	@override String get logId => 'ログID';
@@ -608,7 +600,6 @@ class _TranslationsSubtitlingStylingJa implements TranslationsSubtitlingStylingE
 	final TranslationsJa _root; // ignore: unused_field
 
 	// Translations
-	@override String get stylingOptions => 'スタイルオプション';
 	@override String get text => 'テキスト';
 	@override String get border => '枠線';
 	@override String get background => '背景';
@@ -620,6 +611,8 @@ class _TranslationsSubtitlingStylingJa implements TranslationsSubtitlingStylingE
 	@override String get backgroundColor => '背景色';
 	@override String get position => '位置';
 	@override String get assOverride => 'ASSオーバーライド';
+	@override String get bold => '太字';
+	@override String get italic => '斜体';
 }
 
 // Path: mpvConfig
@@ -1019,6 +1012,24 @@ class _TranslationsDownloadsJa implements TranslationsDownloadsEn {
 	@override String get customAmount => '数を指定...';
 	@override String get howManyEpisodes => '何エピソード？';
 	@override String itemsQueued({required Object count}) => '${count}件をダウンロードキューに追加';
+	@override String get keepSynced => '同期を維持';
+	@override String get downloadOnce => '一度だけダウンロード';
+	@override String keepNUnwatched({required Object count}) => '未視聴を${count}件保持';
+	@override String get editSyncRule => '同期ルールを編集';
+	@override String get removeSyncRule => '同期ルールを削除';
+	@override String removeSyncRuleConfirm({required Object title}) => '「${title}」の同期を停止しますか？ダウンロード済みのエピソードは保持されます。';
+	@override String syncRuleCreated({required Object count}) => '同期ルールを作成しました — 未視聴のエピソードを${count}件保持';
+	@override String get syncRuleUpdated => '同期ルールを更新しました';
+	@override String get syncRuleRemoved => '同期ルールを削除しました';
+	@override String syncedNewEpisodes({required Object title, required Object count}) => '${title}の新しいエピソードを${count}件同期しました';
+	@override String get activeSyncRules => '同期ルール';
+	@override String get noSyncRules => '同期ルールなし';
+	@override String get manageSyncRule => '同期を管理';
+	@override String get editEpisodeCount => 'エピソード数';
+	@override String get editSyncFilter => '同期フィルター';
+	@override String get syncAllItems => 'すべてのアイテムを同期中';
+	@override String get syncUnwatchedItems => '未視聴のアイテムを同期中';
+	@override String get syncRuleListCreated => '同期ルールを作成しました';
 }
 
 // Path: shaders
@@ -1050,11 +1061,6 @@ class _TranslationsCompanionRemoteJa implements TranslationsCompanionRemoteEn {
 
 	// Translations
 	@override String get title => 'コンパニオンリモート';
-	@override String get connectToDevice => 'デバイスに接続';
-	@override String get hostRemoteSession => 'リモートセッションをホスト';
-	@override String get controlThisDevice => 'スマートフォンでこのデバイスを操作';
-	@override String get remoteControl => 'リモコン';
-	@override String get controlDesktop => 'デスクトップデバイスを操作';
 	@override String connectedTo({required Object name}) => '${name}に接続中';
 	@override late final _TranslationsCompanionRemoteSessionJa session = _TranslationsCompanionRemoteSessionJa._(_root);
 	@override late final _TranslationsCompanionRemotePairingJa pairing = _TranslationsCompanionRemotePairingJa._(_root);
@@ -1199,6 +1205,30 @@ class _TranslationsServerTasksJa implements TranslationsServerTasksEn {
 	@override String get noTasks => '実行中のタスクはありません';
 }
 
+// Path: trakt
+class _TranslationsTraktJa implements TranslationsTraktEn {
+	_TranslationsTraktJa._(this._root);
+
+	final TranslationsJa _root; // ignore: unused_field
+
+	// Translations
+	@override String get title => 'Trakt';
+	@override String get connected => '接続済み';
+	@override String connectedAs({required Object username}) => '@${username} として接続済み';
+	@override String get disconnectConfirm => 'Trakt アカウントを切断しますか?';
+	@override String get disconnectConfirmBody => 'Plezy から Trakt への再生イベント送信が停止します。いつでも再接続できます。';
+	@override String get scrobble => 'リアルタイムのスクロブル';
+	@override String get scrobbleDescription => '再生中に再生・一時停止・停止イベントを Trakt に送信します。';
+	@override String get watchedSync => '視聴済みステータスを同期';
+	@override String get watchedSyncDescription => 'Plezy で項目を視聴済みにすると、Trakt でも視聴済みになります。';
+	@override String get deviceCodeTitle => 'Trakt で Plezy をアクティベート';
+	@override String deviceCodeBody({required Object url}) => '${url} を開き、このコードを入力してください:';
+	@override String get openTraktActivate => 'アクティベートするには Trakt を開く';
+	@override String get waitingForAuthorization => '認証を待機中…';
+	@override String get codeCopied => 'コードをコピーしました';
+	@override String get connectFailed => 'Trakt に接続できませんでした。もう一度お試しください。';
+}
+
 // Path: hotkeys.actions
 class _TranslationsHotkeysActionsJa implements TranslationsHotkeysActionsEn {
 	_TranslationsHotkeysActionsJa._(this._root);
@@ -1300,7 +1330,6 @@ class _TranslationsCompanionRemotePairingJa implements TranslationsCompanionRemo
 	final TranslationsJa _root; // ignore: unused_field
 
 	// Translations
-	@override String get pairWithDesktop => 'デスクトップに接続';
 	@override String get discoveryDescription => '同じPlexアカウントでPlezyを実行しているネットワーク上のデバイスが自動的に表示されます';
 	@override String get hostAddressHint => '192.168.1.100:48632';
 	@override String get connecting => '接続中...';
@@ -1329,8 +1358,6 @@ class _TranslationsCompanionRemoteRemoteJa implements TranslationsCompanionRemot
 	@override String get reconnecting => '再接続中...';
 	@override String attemptOf({required Object current}) => '試行 ${current}/5';
 	@override String get retryNow => '今すぐ再試行';
-	@override String get connectionError => '接続エラー';
-	@override String get notConnected => '未接続';
 	@override String get tabRemote => 'リモート';
 	@override String get tabPlay => '再生';
 	@override String get tabMore => 'その他';
@@ -1390,7 +1417,6 @@ extension on TranslationsJa {
 			'common.shuffle' => 'シャッフル',
 			'common.addTo' => '追加...',
 			'common.createNew' => '新規作成',
-			'common.paste' => '貼り付け',
 			'common.connect' => '接続',
 			'common.disconnect' => '切断',
 			'common.play' => '再生',
@@ -1428,18 +1454,18 @@ extension on TranslationsJa {
 			'update.latestVersion' => '最新バージョンです',
 			'update.checkFailed' => 'アップデートの確認に失敗しました',
 			'settings.title' => '設定',
+			'settings.supportDeveloper' => 'Plezy を支援',
+			'settings.supportDeveloperDescription' => 'Liberapay で寄付して開発を支援',
 			'settings.language' => '言語',
 			'settings.theme' => 'テーマ',
 			'settings.appearance' => '外観',
 			'settings.videoPlayback' => '動画再生',
+			'settings.videoPlaybackDescription' => '再生動作を設定',
 			'settings.advanced' => '詳細',
 			'settings.episodePosterMode' => 'エピソードポスタースタイル',
 			'settings.seriesPoster' => 'シリーズポスター',
-			'settings.seriesPosterDescription' => 'すべてのエピソードにシリーズポスターを表示',
 			'settings.seasonPoster' => 'シーズンポスター',
-			'settings.seasonPosterDescription' => 'エピソードにシーズン固有のポスターを表示',
 			'settings.episodeThumbnail' => 'サムネイル',
-			'settings.episodeThumbnailDescription' => '16:9のエピソードスクリーンショットサムネイルを表示',
 			'settings.showHeroSectionDescription' => 'ホーム画面に注目コンテンツのカルーセルを表示',
 			'settings.secondsLabel' => '秒',
 			'settings.minutesLabel' => '分',
@@ -1447,23 +1473,15 @@ extension on TranslationsJa {
 			'settings.minutesShort' => '分',
 			'settings.durationHint' => ({required Object min, required Object max}) => '時間を入力 (${min}-${max})',
 			'settings.systemTheme' => 'システム',
-			'settings.systemThemeDescription' => 'システム設定に従う',
 			'settings.lightTheme' => 'ライト',
 			'settings.darkTheme' => 'ダーク',
 			'settings.oledTheme' => 'OLED',
-			'settings.oledThemeDescription' => 'OLED画面向けの純粋な黒',
 			'settings.libraryDensity' => 'ライブラリの密度',
 			'settings.compact' => 'コンパクト',
-			'settings.compactDescription' => '小さいカード、より多くのアイテムを表示',
-			'settings.normal' => '標準',
-			'settings.normalDescription' => 'デフォルトサイズ',
 			'settings.comfortable' => 'ゆったり',
-			'settings.comfortableDescription' => '大きいカード、表示アイテム数を減少',
 			'settings.viewMode' => '表示モード',
 			'settings.gridView' => 'グリッド',
-			'settings.gridViewDescription' => 'グリッドレイアウトでアイテムを表示',
 			'settings.listView' => 'リスト',
-			'settings.listViewDescription' => 'リストレイアウトでアイテムを表示',
 			'settings.showHeroSection' => 'ヒーローセクションを表示',
 			'settings.useGlobalHubs' => 'Plex Homeレイアウトを使用',
 			'settings.useGlobalHubsDescription' => '公式Plexクライアントのようにホームページのハブを表示。オフにすると、ライブラリごとのおすすめを表示。',
@@ -1477,9 +1495,7 @@ extension on TranslationsJa {
 			'settings.hideSpoilersDescription' => 'まだ視聴していないエピソードのサムネイルをぼかし、説明を非表示',
 			'settings.playerBackend' => 'プレーヤーバックエンド',
 			'settings.exoPlayer' => 'ExoPlayer（推奨）',
-			'settings.exoPlayerDescription' => 'より良いハードウェアサポートのAndroidネイティブプレーヤー',
 			'settings.mpv' => 'mpv',
-			'settings.mpvDescription' => 'より多くの機能とASS字幕サポートの高度なプレーヤー',
 			'settings.hardwareDecoding' => 'ハードウェアデコード',
 			'settings.hardwareDecodingDescription' => '利用可能な場合にハードウェアアクセラレーションを使用',
 			'settings.bufferSize' => 'バッファサイズ',
@@ -1491,7 +1507,6 @@ extension on TranslationsJa {
 			'settings.smallSkipDuration' => '短いスキップ時間',
 			'settings.largeSkipDuration' => '長いスキップ時間',
 			'settings.rewindOnResume' => '再開時に巻き戻し',
-			'settings.rewindOnResumeDescription' => '再生再開時にこの秒数分巻き戻す',
 			'settings.secondsUnit' => ({required Object seconds}) => '${seconds}秒',
 			'settings.defaultSleepTimer' => 'デフォルトスリープタイマー',
 			'settings.minutesUnit' => ({required Object minutes}) => '${minutes}分',
@@ -1505,7 +1520,6 @@ extension on TranslationsJa {
 			'settings.videoPlayerNavigation' => '動画プレーヤーナビゲーション',
 			'settings.videoPlayerNavigationDescription' => '矢印キーで動画プレーヤーコントロールを操作',
 			'settings.watchTogetherRelay' => '一緒に視聴リレーサーバー',
-			'settings.watchTogetherRelayDefault' => 'デフォルト',
 			'settings.watchTogetherRelayDescription' => '一緒に視聴用のカスタムリレーサーバーを設定します。すべての参加者が同じサーバーを使用する必要があります。',
 			'settings.watchTogetherRelayHint' => 'https://my-relay.example.com',
 			'settings.crashReporting' => 'クラッシュレポート',
@@ -1563,6 +1577,10 @@ extension on TranslationsJa {
 			'settings.maxVolumePercent' => ({required Object percent}) => '${percent}%',
 			'settings.discordRichPresence' => 'Discord Rich Presence',
 			'settings.discordRichPresenceDescription' => 'Discordで視聴中の内容を表示',
+			'settings.trakt' => 'Trakt',
+			'settings.traktDescription' => '視聴履歴を Trakt と同期',
+			'settings.companionRemoteServer' => 'コンパニオンリモートサーバー',
+			'settings.companionRemoteServerDescription' => 'ネットワーク上のモバイルデバイスからこのアプリを操作できるようにする',
 			'settings.autoPip' => '自動ピクチャーインピクチャー',
 			'settings.autoPipDescription' => '再生中にアプリを離れると自動的にピクチャーインピクチャーに移行',
 			'settings.matchContentFrameRate' => 'コンテンツのフレームレートに合わせる',
@@ -1572,13 +1590,14 @@ extension on TranslationsJa {
 			'settings.matchDynamicRange' => 'ダイナミックレンジを合わせる',
 			'settings.matchDynamicRangeDescription' => 'HDRコンテンツに対して自動的にHDRを有効にし、プレーヤーを閉じるとSDRに戻す',
 			'settings.displaySwitchDelay' => 'ディスプレイ切り替え遅延',
-			'settings.displaySwitchDelayDescription' => 'ディスプレイモード変更後、再生を開始するまでの待機秒数',
 			'settings.tunneledPlayback' => 'トンネル再生',
 			'settings.tunneledPlaybackDescription' => 'ハードウェアアクセラレーションされたビデオトンネリングを使用。HDRコンテンツで音声のみで画面が黒くなる場合は無効にしてください',
 			'settings.requireProfileSelectionOnOpen' => 'アプリ起動時にプロフィールを確認',
 			'settings.requireProfileSelectionOnOpenDescription' => 'アプリを開くたびにプロフィール選択を表示',
 			'settings.confirmExitOnBack' => '終了前に確認',
 			'settings.confirmExitOnBackDescription' => '戻るボタンでアプリを終了する際に確認ダイアログを表示',
+			'settings.forceTvMode' => 'TVモードを強制',
+			'settings.forceTvModeDescription' => '自動検出に関係なくTVレイアウトを使用します。leanback機能を報告しないAndroid TVデバイスで便利です。変更するとアプリが再起動されます。',
 			'settings.autoHidePerformanceOverlay' => 'パフォーマンスオーバーレイを自動非表示',
 			'settings.autoHidePerformanceOverlayDescription' => '再生コントロールと一緒にパフォーマンスオーバーレイをフェードする',
 			'settings.showNavBarLabels' => 'ナビゲーションバーラベルを表示',
@@ -1593,8 +1612,6 @@ extension on TranslationsJa {
 			'settings.subtitlesAndConfig' => 'Subtitles & Configuration',
 			'settings.seekAndTiming' => 'Seek & Timing',
 			'settings.behavior' => 'Behavior',
-			'settings.companionRemoteServer' => 'コンパニオンリモートサーバー',
-			'settings.companionRemoteServerDescription' => 'ネットワーク上のモバイルデバイスからこのアプリを操作できるようにする',
 			'search.hint' => '映画、番組、音楽を検索...',
 			'search.tryDifferentTerm' => '別の検索語をお試しください',
 			'search.searchYourMedia' => 'メディアを検索',
@@ -1714,7 +1731,6 @@ extension on TranslationsJa {
 			'videoControls.alwaysOnTopButton' => '常に前面に表示',
 			'videoControls.rotationLockButton' => '回転ロック',
 			'videoControls.lockScreen' => '画面をロック',
-			'videoControls.unlockScreen' => '画面のロックを解除',
 			'videoControls.screenLockButton' => '画面ロック',
 			'videoControls.longPressToUnlock' => '長押しでロック解除',
 			'videoControls.timelineSlider' => '動画タイムライン',
@@ -1774,10 +1790,11 @@ extension on TranslationsJa {
 			'messages.failedToCreatePlayQueueNoItems' => '再生キューの作成に失敗しました - アイテムがありません',
 			'messages.failedPlayback' => ({required Object action, required Object error}) => '${action}に失敗しました: ${error}',
 			'messages.switchingToCompatiblePlayer' => '互換プレーヤーに切替中...',
+			'messages.serverLimitTitle' => '再生に失敗しました',
+			'messages.serverLimitBody' => 'サーバーからエラーが返されました (HTTP 500)。通常、これはサーバーの所有者が帯域幅またはトランスコードの制限を設定しており、セッションが拒否されていることを意味します。クライアント側でできることはありません — サーバーの所有者が設定を調整する必要があります。',
 			'messages.logsUploaded' => 'ログをアップロードしました',
 			'messages.logsUploadFailed' => 'ログのアップロードに失敗しました',
 			'messages.logId' => 'ログID',
-			'subtitlingStyling.stylingOptions' => 'スタイルオプション',
 			'subtitlingStyling.text' => 'テキスト',
 			'subtitlingStyling.border' => '枠線',
 			'subtitlingStyling.background' => '背景',
@@ -1789,6 +1806,8 @@ extension on TranslationsJa {
 			'subtitlingStyling.backgroundColor' => '背景色',
 			'subtitlingStyling.position' => '位置',
 			'subtitlingStyling.assOverride' => 'ASSオーバーライド',
+			'subtitlingStyling.bold' => '太字',
+			'subtitlingStyling.italic' => '斜体',
 			'mpvConfig.title' => 'mpv.conf',
 			'mpvConfig.description' => '高度な動画プレーヤー設定',
 			'mpvConfig.presets' => 'プリセット',
@@ -1876,8 +1895,6 @@ extension on TranslationsJa {
 			'libraries.groupings.seasons' => 'シーズン',
 			'libraries.groupings.episodes' => 'エピソード',
 			'libraries.groupings.folders' => 'フォルダ',
-			_ => null,
-		} ?? switch (path) {
 			'about.title' => 'アプリについて',
 			'about.openSourceLicenses' => 'オープンソースライセンス',
 			'about.versionLabel' => ({required Object version}) => 'バージョン ${version}',
@@ -1886,6 +1903,8 @@ extension on TranslationsJa {
 			'serverSelection.allServerConnectionsFailed' => 'どのサーバーにも接続できませんでした。ネットワークを確認してもう一度お試しください。',
 			'serverSelection.noServersFoundForAccount' => ({required Object username, required Object email}) => '${username} (${email})のサーバーが見つかりません',
 			'serverSelection.failedToLoadServers' => ({required Object error}) => 'サーバーの読み込みに失敗しました: ${error}',
+			_ => null,
+		} ?? switch (path) {
 			'hubDetail.title' => 'タイトル',
 			'hubDetail.releaseYear' => '公開年',
 			'hubDetail.dateAdded' => '追加日',
@@ -2055,6 +2074,24 @@ extension on TranslationsJa {
 			'downloads.customAmount' => '数を指定...',
 			'downloads.howManyEpisodes' => '何エピソード？',
 			'downloads.itemsQueued' => ({required Object count}) => '${count}件をダウンロードキューに追加',
+			'downloads.keepSynced' => '同期を維持',
+			'downloads.downloadOnce' => '一度だけダウンロード',
+			'downloads.keepNUnwatched' => ({required Object count}) => '未視聴を${count}件保持',
+			'downloads.editSyncRule' => '同期ルールを編集',
+			'downloads.removeSyncRule' => '同期ルールを削除',
+			'downloads.removeSyncRuleConfirm' => ({required Object title}) => '「${title}」の同期を停止しますか？ダウンロード済みのエピソードは保持されます。',
+			'downloads.syncRuleCreated' => ({required Object count}) => '同期ルールを作成しました — 未視聴のエピソードを${count}件保持',
+			'downloads.syncRuleUpdated' => '同期ルールを更新しました',
+			'downloads.syncRuleRemoved' => '同期ルールを削除しました',
+			'downloads.syncedNewEpisodes' => ({required Object title, required Object count}) => '${title}の新しいエピソードを${count}件同期しました',
+			'downloads.activeSyncRules' => '同期ルール',
+			'downloads.noSyncRules' => '同期ルールなし',
+			'downloads.manageSyncRule' => '同期を管理',
+			'downloads.editEpisodeCount' => 'エピソード数',
+			'downloads.editSyncFilter' => '同期フィルター',
+			'downloads.syncAllItems' => 'すべてのアイテムを同期中',
+			'downloads.syncUnwatchedItems' => '未視聴のアイテムを同期中',
+			'downloads.syncRuleListCreated' => '同期ルールを作成しました',
 			'shaders.title' => 'シェーダー',
 			'shaders.noShaderDescription' => '映像補正なし',
 			'shaders.nvscalerDescription' => 'よりシャープな映像のためのNVIDIA画像スケーリング',
@@ -2068,11 +2105,6 @@ extension on TranslationsJa {
 			'shaders.deleteShader' => 'シェーダーを削除',
 			'shaders.deleteShaderConfirm' => ({required Object name}) => '"${name}"を削除しますか？',
 			'companionRemote.title' => 'コンパニオンリモート',
-			'companionRemote.connectToDevice' => 'デバイスに接続',
-			'companionRemote.hostRemoteSession' => 'リモートセッションをホスト',
-			'companionRemote.controlThisDevice' => 'スマートフォンでこのデバイスを操作',
-			'companionRemote.remoteControl' => 'リモコン',
-			'companionRemote.controlDesktop' => 'デスクトップデバイスを操作',
 			'companionRemote.connectedTo' => ({required Object name}) => '${name}に接続中',
 			'companionRemote.session.startingServer' => 'リモートサーバーを起動中...',
 			'companionRemote.session.failedToCreate' => 'リモートサーバーの起動に失敗しました:',
@@ -2086,7 +2118,6 @@ extension on TranslationsJa {
 			'companionRemote.session.startServer' => 'サーバーを起動',
 			'companionRemote.session.stopServer' => 'サーバーを停止',
 			'companionRemote.session.minimize' => '最小化',
-			'companionRemote.pairing.pairWithDesktop' => 'デスクトップに接続',
 			'companionRemote.pairing.discoveryDescription' => '同じPlexアカウントでPlezyを実行しているネットワーク上のデバイスが自動的に表示されます',
 			'companionRemote.pairing.hostAddressHint' => '192.168.1.100:48632',
 			'companionRemote.pairing.connecting' => '接続中...',
@@ -2106,8 +2137,6 @@ extension on TranslationsJa {
 			'companionRemote.remote.reconnecting' => '再接続中...',
 			'companionRemote.remote.attemptOf' => ({required Object current}) => '試行 ${current}/5',
 			'companionRemote.remote.retryNow' => '今すぐ再試行',
-			'companionRemote.remote.connectionError' => '接続エラー',
-			'companionRemote.remote.notConnected' => '未接続',
 			'companionRemote.remote.tabRemote' => 'リモート',
 			'companionRemote.remote.tabPlay' => '再生',
 			'companionRemote.remote.tabMore' => 'その他',
@@ -2233,6 +2262,21 @@ extension on TranslationsJa {
 			'serverTasks.title' => 'サーバータスク',
 			'serverTasks.failedToLoad' => 'タスクの読み込みに失敗しました',
 			'serverTasks.noTasks' => '実行中のタスクはありません',
+			'trakt.title' => 'Trakt',
+			'trakt.connected' => '接続済み',
+			'trakt.connectedAs' => ({required Object username}) => '@${username} として接続済み',
+			'trakt.disconnectConfirm' => 'Trakt アカウントを切断しますか?',
+			'trakt.disconnectConfirmBody' => 'Plezy から Trakt への再生イベント送信が停止します。いつでも再接続できます。',
+			'trakt.scrobble' => 'リアルタイムのスクロブル',
+			'trakt.scrobbleDescription' => '再生中に再生・一時停止・停止イベントを Trakt に送信します。',
+			'trakt.watchedSync' => '視聴済みステータスを同期',
+			'trakt.watchedSyncDescription' => 'Plezy で項目を視聴済みにすると、Trakt でも視聴済みになります。',
+			'trakt.deviceCodeTitle' => 'Trakt で Plezy をアクティベート',
+			'trakt.deviceCodeBody' => ({required Object url}) => '${url} を開き、このコードを入力してください:',
+			'trakt.openTraktActivate' => 'アクティベートするには Trakt を開く',
+			'trakt.waitingForAuthorization' => '認証を待機中…',
+			'trakt.codeCopied' => 'コードをコピーしました',
+			'trakt.connectFailed' => 'Trakt に接続できませんでした。もう一度お試しください。',
 			_ => null,
 		};
 	}

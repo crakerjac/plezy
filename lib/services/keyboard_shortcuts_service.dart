@@ -8,7 +8,6 @@ import '../i18n/strings.g.dart';
 import '../mpv/mpv.dart';
 import 'settings_service.dart';
 import '../utils/player_utils.dart';
-import '../utils/snackbar_helper.dart';
 
 class KeyboardShortcutsService {
   static KeyboardShortcutsService? _instance;
@@ -140,6 +139,8 @@ class KeyboardShortcutsService {
     VoidCallback? onBack,
     VoidCallback? onToggleShader,
     VoidCallback? onSkipMarker,
+    int? currentPositionEpoch,
+    ValueChanged<int>? onLiveSeek,
   }) {
     if (event is! KeyDownEvent) return KeyEventResult.ignored;
 
@@ -217,6 +218,8 @@ class KeyboardShortcutsService {
           onPreviousChapter,
           onToggleShader: onToggleShader,
           onSkipMarker: onSkipMarker,
+          currentPositionEpoch: currentPositionEpoch,
+          onLiveSeek: onLiveSeek,
         );
         return KeyEventResult.handled;
       }
@@ -236,7 +239,18 @@ class KeyboardShortcutsService {
     VoidCallback? onPreviousChapter, {
     VoidCallback? onToggleShader,
     VoidCallback? onSkipMarker,
+    int? currentPositionEpoch,
+    ValueChanged<int>? onLiveSeek,
   }) {
+    void performSeek(int offsetSeconds) {
+      if (onLiveSeek != null && currentPositionEpoch != null) {
+        onLiveSeek(currentPositionEpoch + offsetSeconds);
+      } else {
+        final target = clampSeekPosition(player, player.state.position + Duration(seconds: offsetSeconds));
+        unawaited(player.seek(target));
+      }
+    }
+
     switch (action) {
       case 'play_pause':
         player.playOrPause();
@@ -252,20 +266,16 @@ class KeyboardShortcutsService {
         _settingsService.setVolume(newVolume);
         break;
       case 'seek_forward':
-        final fwdTarget = clampSeekPosition(player, player.state.position + Duration(seconds: _seekTimeSmall));
-        unawaited(player.seek(fwdTarget));
+        performSeek(_seekTimeSmall);
         break;
       case 'seek_backward':
-        final bwdTarget = clampSeekPosition(player, player.state.position - Duration(seconds: _seekTimeSmall));
-        unawaited(player.seek(bwdTarget));
+        performSeek(-_seekTimeSmall);
         break;
       case 'seek_forward_large':
-        final fwdLTarget = clampSeekPosition(player, player.state.position + Duration(seconds: _seekTimeLarge));
-        unawaited(player.seek(fwdLTarget));
+        performSeek(_seekTimeLarge);
         break;
       case 'seek_backward_large':
-        final bwdLTarget = clampSeekPosition(player, player.state.position - Duration(seconds: _seekTimeLarge));
-        unawaited(player.seek(bwdLTarget));
+        performSeek(-_seekTimeLarge);
         break;
       case 'fullscreen_toggle':
         onToggleFullscreen?.call();
@@ -294,18 +304,15 @@ class KeyboardShortcutsService {
         final newRateUp = (player.state.rate + 0.25).clamp(0.25, 3.0);
         player.setRate(newRateUp);
         _settingsService.setDefaultPlaybackSpeed(newRateUp);
-        showGlobalSnackBar(_formatSpeed(newRateUp));
         break;
       case 'speed_decrease':
         final newRateDown = (player.state.rate - 0.25).clamp(0.25, 3.0);
         player.setRate(newRateDown);
         _settingsService.setDefaultPlaybackSpeed(newRateDown);
-        showGlobalSnackBar(_formatSpeed(newRateDown));
         break;
       case 'speed_reset':
         player.setRate(1.0);
         _settingsService.setDefaultPlaybackSpeed(1.0);
-        showGlobalSnackBar(_formatSpeed(1.0));
         break;
       case 'sub_seek_next':
         player.command(['sub-seek', '1']);
@@ -390,10 +397,5 @@ class KeyboardShortcutsService {
     final bModifiers = Set.from(b.modifiers ?? []);
 
     return aModifiers.length == bModifiers.length && aModifiers.every((modifier) => bModifiers.contains(modifier));
-  }
-
-  String _formatSpeed(double speed) {
-    final s = speed.toStringAsFixed(2).replaceFirst(RegExp(r'\.?0+$'), '');
-    return '${s}x';
   }
 }
