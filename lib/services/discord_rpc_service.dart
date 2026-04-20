@@ -5,8 +5,9 @@ import 'package:dart_discord_presence/dart_discord_presence.dart';
 import 'package:http/http.dart' as http;
 
 import '../models/plex_metadata.dart';
-import '../utils/plex_http_client.dart';
 import '../utils/app_logger.dart';
+import '../utils/future_extensions.dart';
+import '../utils/plex_http_client.dart';
 import 'plex_client.dart';
 import 'settings_service.dart';
 
@@ -299,25 +300,18 @@ class DiscordRPCService {
       if (imageUrl.isEmpty) return null;
 
       // Fetch image data
-      final imageBytes = await httpClient.getBytes(
-        imageUrl,
-        timeout: const Duration(seconds: 10),
-      );
+      final imageBytes = await httpClient.getBytes(imageUrl, timeout: const Duration(seconds: 10));
       if (imageBytes.isEmpty) return null;
 
       // Upload to Litterbox
       final uploadRequest = http.MultipartRequest('POST', Uri.parse(_litterboxUrl))
         ..fields['reqtype'] = 'fileupload'
         ..fields['time'] = '1h'
-        ..files.add(http.MultipartFile.fromBytes(
-          'fileToUpload',
-          imageBytes,
-          filename: 'thumbnail.jpg',
-        ));
+        ..files.add(http.MultipartFile.fromBytes('fileToUpload', imageBytes, filename: 'thumbnail.jpg'));
 
       final uploadStreamed = await httpClient.inner
           .send(uploadRequest)
-          .timeout(const Duration(seconds: 15));
+          .namedTimeout(const Duration(seconds: 15), operation: 'Litterbox upload');
       final uploadedUrl = (await uploadStreamed.stream.bytesToString()).trim();
 
       if (uploadedUrl.startsWith('http')) {

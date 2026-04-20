@@ -12,12 +12,12 @@ import '../utils/global_key_utils.dart';
 part 'app_database.g.dart';
 
 // Simplified database with API cache for offline support
-@DriftDatabase(tables: [DownloadedMedia, DownloadQueue, ApiCache, OfflineWatchProgress])
+@DriftDatabase(tables: [DownloadedMedia, DownloadQueue, ApiCache, OfflineWatchProgress, SyncRules])
 class AppDatabase extends _$AppDatabase {
   AppDatabase() : super(_openConnection());
 
   @override
-  int get schemaVersion => 9; // Added mediaIndex column to DownloadedMedia
+  int get schemaVersion => 12;
 
   @override
   MigrationStrategy get migration {
@@ -44,6 +44,26 @@ class AppDatabase extends _$AppDatabase {
             await m.addColumn(downloadedMedia, downloadedMedia.mediaIndex);
           } catch (e) {
             appLogger.w('mediaIndex column may already exist: $e');
+          }
+        }
+        if (from < 10) {
+          appLogger.i('Adding SyncRules table (v10 migration)');
+          await m.createTable(syncRules);
+        }
+        if (from < 11) {
+          appLogger.i('Adding enabled column to SyncRules (v11 migration)');
+          try {
+            await m.addColumn(syncRules, syncRules.enabled);
+          } catch (e) {
+            appLogger.w('enabled column may already exist: $e');
+          }
+        }
+        if (from < 12) {
+          appLogger.i('Adding downloadFilter column to SyncRules (v12 migration)');
+          try {
+            await m.addColumn(syncRules, syncRules.downloadFilter);
+          } catch (e) {
+            appLogger.w('downloadFilter column may already exist: $e');
           }
         }
       },
@@ -202,6 +222,69 @@ class AppDatabase extends _$AppDatabase {
   }
 
   // ============================================================
+  // Sync Rules Operations
+  // ============================================================
+
+  Future<List<SyncRuleItem>> getSyncRules() {
+    return select(syncRules).get();
+  }
+
+  Future<SyncRuleItem?> getSyncRule(String globalKey) {
+    return (select(syncRules)..where((t) => t.globalKey.equals(globalKey))).getSingleOrNull();
+  }
+
+  Future<void> insertSyncRule({
+    required String serverId,
+    required String ratingKey,
+    required String globalKey,
+    required String targetType,
+    required int episodeCount,
+    int mediaIndex = 0,
+    String downloadFilter = 'unwatched',
+  }) async {
+    await into(syncRules).insertOnConflictUpdate(
+      SyncRulesCompanion.insert(
+        serverId: serverId,
+        ratingKey: ratingKey,
+        globalKey: globalKey,
+        targetType: targetType,
+        episodeCount: episodeCount,
+        createdAt: DateTime.now().millisecondsSinceEpoch,
+        mediaIndex: Value(mediaIndex),
+        downloadFilter: Value(downloadFilter),
+      ),
+    );
+  }
+
+  Future<void> updateSyncRuleCount(String globalKey, int episodeCount) async {
+    await (update(
+      syncRules,
+    )..where((t) => t.globalKey.equals(globalKey))).write(SyncRulesCompanion(episodeCount: Value(episodeCount)));
+  }
+
+  Future<void> updateSyncRuleFilter(String globalKey, String downloadFilter) async {
+    await (update(
+      syncRules,
+    )..where((t) => t.globalKey.equals(globalKey))).write(SyncRulesCompanion(downloadFilter: Value(downloadFilter)));
+  }
+
+  Future<void> updateSyncRuleEnabled(String globalKey, bool enabled) async {
+    await (update(
+      syncRules,
+    )..where((t) => t.globalKey.equals(globalKey))).write(SyncRulesCompanion(enabled: Value(enabled)));
+  }
+
+  Future<void> updateSyncRuleLastExecuted(String globalKey) async {
+    await (update(syncRules)..where((t) => t.globalKey.equals(globalKey))).write(
+      SyncRulesCompanion(lastExecutedAt: Value(DateTime.now().millisecondsSinceEpoch)),
+    );
+  }
+
+  Future<void> deleteSyncRule(String globalKey) async {
+    await (delete(syncRules)..where((t) => t.globalKey.equals(globalKey))).go();
+  }
+
+  // ============================================================
   // Downloaded Media Queries for Watch State Sync
   // ============================================================
 
@@ -233,9 +316,12 @@ LazyDatabase _openConnection() {
       }
     }
 
-    return NativeDatabase.createInBackground(file, setup: (db) {
-      db.execute('PRAGMA journal_mode=WAL');
-      db.execute('PRAGMA synchronous=NORMAL');
-    });
+    return NativeDatabase.createInBackground(
+      file,
+      setup: (db) {
+        db.execute('PRAGMA journal_mode=WAL');
+        db.execute('PRAGMA synchronous=NORMAL');
+      },
+    );
   });
 }

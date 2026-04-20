@@ -106,9 +106,6 @@ class DownloadManagerService {
   /// Public method to check if downloads should be blocked due to cellular-only setting
   /// Can be used by DownloadProvider to show user-friendly error
   static Future<bool> shouldBlockDownloadOnCellular() async {
-    final settings = await SettingsService.getInstance();
-    if (!settings.getDownloadOnWifiOnly()) return false;
-
     final List<ConnectivityResult> connectivity;
     try {
       connectivity = await Connectivity().checkConnectivity();
@@ -116,7 +113,16 @@ class DownloadManagerService {
       // connectivity_plus can throw PlatformException on Windows — don't block
       return false;
     }
-    // Block if on cellular and NOT on WiFi (allow if both are available)
+    return shouldBlockDownloadOnCellularWith(connectivity);
+  }
+
+  /// Same check as [shouldBlockDownloadOnCellular] but uses a pre-read
+  /// connectivity result so callers that already queried connectivity don't
+  /// pay for a second platform round-trip.
+  static Future<bool> shouldBlockDownloadOnCellularWith(List<ConnectivityResult> connectivity) async {
+    final settings = await SettingsService.getInstance();
+    if (!settings.getDownloadOnWifiOnly()) return false;
+    if (connectivity.isEmpty) return false;
     return connectivity.contains(ConnectivityResult.mobile) &&
         !connectivity.contains(ConnectivityResult.wifi) &&
         !connectivity.contains(ConnectivityResult.ethernet);
@@ -126,10 +132,13 @@ class DownloadManagerService {
   /// Await this before reading download state from the DB to avoid races.
   late final Future<void> recoveryFuture;
 
-  DownloadManagerService({required AppDatabase database, required DownloadStorageService storageService, PlexHttpClient? http})
-    : _database = database,
-      _storageService = storageService,
-      _http = http ?? httpClient;
+  DownloadManagerService({
+    required AppDatabase database,
+    required DownloadStorageService storageService,
+    PlexHttpClient? http,
+  }) : _database = database,
+       _storageService = storageService,
+       _http = http ?? httpClient;
 
   /// Register a callback to resolve the correct PlexClient for a given serverId.
   void setClientResolver(PlexClient? Function(String serverId) resolver) {
@@ -739,7 +748,8 @@ class DownloadManagerService {
 
     // DNS/connection errors fail instantly and exhaust native retries in milliseconds,
     // creating a retry storm. Treat them as permanent failures.
-    final isNetworkError = errorMessage.contains('Unable to resolve host') ||
+    final isNetworkError =
+        errorMessage.contains('Unable to resolve host') ||
         errorMessage.contains('No address associated with hostname') ||
         errorMessage.contains('Network is unreachable') ||
         errorMessage.contains('Connection refused');
@@ -770,9 +780,7 @@ class DownloadManagerService {
       if (isNetworkError) {
         appLogger.w('Network error for $globalKey, failing permanently (no auto-retry): $errorMessage');
       }
-      final userMessage = isServerError
-          ? t.downloads.serverErrorBitrate
-          : errorMessage;
+      final userMessage = isServerError ? t.downloads.serverErrorBitrate : errorMessage;
       await _onDownloadPermanentlyFailed(globalKey, userMessage);
     }
   }
@@ -1680,9 +1688,11 @@ class DownloadManagerService {
     try {
       final downloadsDir = await _storageService.getDownloadsDirectory();
       var current = dir;
-      while (current.path != downloadsDir.path &&
-             current.path.startsWith(downloadsDir.path)) {
-        if (!await current.exists()) { current = current.parent; continue; }
+      while (current.path != downloadsDir.path && current.path.startsWith(downloadsDir.path)) {
+        if (!await current.exists()) {
+          current = current.parent;
+          continue;
+        }
         final contents = await current.list().toList();
         if (contents.isEmpty) {
           await current.delete();
@@ -1704,9 +1714,7 @@ class DownloadManagerService {
     if (await seasonDir.exists()) {
       final contents = await seasonDir.list().toList();
       final hasVideos = contents.any(
-        (e) =>
-            _videoExtensions.any((ext) => e.path.endsWith(ext)) ||
-            e.path.contains('_subs'),
+        (e) => _videoExtensions.any((ext) => e.path.endsWith(ext)) || e.path.contains('_subs'),
       );
 
       if (!hasVideos) {
@@ -1815,11 +1823,6 @@ class DownloadManagerService {
     } catch (e, stack) {
       appLogger.e('Error in fallback deletion', error: e, stackTrace: stack);
     }
-  }
-
-  /// Get all downloads with a specific status
-  Stream<List<DownloadedMediaItem>> watchDownloadsByStatus(DownloadStatus status) {
-    return (_database.select(_database.downloadedMedia)..where((t) => t.status.equals(status.index))).watch();
   }
 
   /// Get all downloaded media items (for loading persisted data)
@@ -1934,18 +1937,6 @@ class DownloadManagerService {
 
     await _apiCache.put(serverId, endpoint, cachedResponse);
     await _apiCache.pinForOffline(serverId, ratingKey);
-  }
-
-  /// Cache children (seasons or episodes) in the API response format
-  Future<void> cacheChildrenForOffline(String serverId, String parentRatingKey, List<PlexMetadata> children) async {
-    final endpoint = '/library/metadata/$parentRatingKey/children';
-
-    // Build a response structure that matches the Plex API format
-    final cachedResponse = {
-      'MediaContainer': {'Metadata': children.map((c) => c.toJson()).toList()},
-    };
-
-    await _apiCache.put(serverId, endpoint, cachedResponse);
   }
 
   void dispose() {

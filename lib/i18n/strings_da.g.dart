@@ -75,6 +75,7 @@ class TranslationsDa with BaseTranslations<AppLocale, Translations> implements T
 	@override late final _TranslationsExternalPlayerDa externalPlayer = _TranslationsExternalPlayerDa._(_root);
 	@override late final _TranslationsMetadataEditDa metadataEdit = _TranslationsMetadataEditDa._(_root);
 	@override late final _TranslationsServerTasksDa serverTasks = _TranslationsServerTasksDa._(_root);
+	@override late final _TranslationsTraktDa trakt = _TranslationsTraktDa._(_root);
 }
 
 // Path: app
@@ -128,7 +129,6 @@ class _TranslationsCommonDa implements TranslationsCommonEn {
 	@override String get shuffle => 'Bland';
 	@override String get addTo => 'Tilføj til...';
 	@override String get createNew => 'Opret ny';
-	@override String get paste => 'Indsæt';
 	@override String get connect => 'Forbind';
 	@override String get disconnect => 'Afbryd';
 	@override String get play => 'Afspil';
@@ -193,18 +193,18 @@ class _TranslationsSettingsDa implements TranslationsSettingsEn {
 
 	// Translations
 	@override String get title => 'Indstillinger';
+	@override String get supportDeveloper => 'Støt Plezy';
+	@override String get supportDeveloperDescription => 'Doner via Liberapay for at finansiere udviklingen';
 	@override String get language => 'Sprog';
 	@override String get theme => 'Tema';
 	@override String get appearance => 'Udseende';
 	@override String get videoPlayback => 'Videoafspilning';
+	@override String get videoPlaybackDescription => 'Konfigurer afspilningsadfærd';
 	@override String get advanced => 'Avanceret';
 	@override String get episodePosterMode => 'Episodeplakatstil';
 	@override String get seriesPoster => 'Serieplakat';
-	@override String get seriesPosterDescription => 'Vis seriens plakat for alle episoder';
 	@override String get seasonPoster => 'Sæsonplakat';
-	@override String get seasonPosterDescription => 'Vis sæsonspecifik plakat for episoder';
 	@override String get episodeThumbnail => 'Miniature';
-	@override String get episodeThumbnailDescription => 'Vis 16:9 episodeskærmbilledeminiaturer';
 	@override String get showHeroSectionDescription => 'Vis karrusel med udvalgt indhold på startskærmen';
 	@override String get secondsLabel => 'Sekunder';
 	@override String get minutesLabel => 'Minutter';
@@ -212,23 +212,15 @@ class _TranslationsSettingsDa implements TranslationsSettingsEn {
 	@override String get minutesShort => 'm';
 	@override String durationHint({required Object min, required Object max}) => 'Indtast varighed (${min}-${max})';
 	@override String get systemTheme => 'System';
-	@override String get systemThemeDescription => 'Følg systemindstillinger';
 	@override String get lightTheme => 'Lys';
 	@override String get darkTheme => 'Mørk';
 	@override String get oledTheme => 'OLED';
-	@override String get oledThemeDescription => 'Ren sort for OLED-skærme';
 	@override String get libraryDensity => 'Bibliotekstæthed';
 	@override String get compact => 'Kompakt';
-	@override String get compactDescription => 'Mindre kort, flere synlige elementer';
-	@override String get normal => 'Normal';
-	@override String get normalDescription => 'Standardstørrelse';
 	@override String get comfortable => 'Komfortabel';
-	@override String get comfortableDescription => 'Større kort, færre synlige elementer';
 	@override String get viewMode => 'Visningstilstand';
 	@override String get gridView => 'Gitter';
-	@override String get gridViewDescription => 'Vis elementer i gitterlayout';
 	@override String get listView => 'Liste';
-	@override String get listViewDescription => 'Vis elementer i listelayout';
 	@override String get showHeroSection => 'Vis hero-sektion';
 	@override String get useGlobalHubs => 'Brug Plex Home-layout';
 	@override String get useGlobalHubsDescription => 'Vis startsidehubbe som den officielle Plex-klient. Når slået fra, vises anbefalinger per bibliotek.';
@@ -242,9 +234,7 @@ class _TranslationsSettingsDa implements TranslationsSettingsEn {
 	@override String get hideSpoilersDescription => 'Slør miniaturebilleder og skjul beskrivelser for episoder, du ikke har set endnu';
 	@override String get playerBackend => 'Afspillerbackend';
 	@override String get exoPlayer => 'ExoPlayer (Anbefalet)';
-	@override String get exoPlayerDescription => 'Android-native afspiller med bedre hardwareunderstøttelse';
 	@override String get mpv => 'mpv';
-	@override String get mpvDescription => 'Avanceret afspiller med flere funktioner og ASS-undertekstunderstøttelse';
 	@override String get hardwareDecoding => 'Hardwaredekodning';
 	@override String get hardwareDecodingDescription => 'Brug hardwareacceleration når tilgængelig';
 	@override String get bufferSize => 'Bufferstørrelse';
@@ -256,7 +246,6 @@ class _TranslationsSettingsDa implements TranslationsSettingsEn {
 	@override String get smallSkipDuration => 'Kort spring-varighed';
 	@override String get largeSkipDuration => 'Lang spring-varighed';
 	@override String get rewindOnResume => 'Spol tilbage ved genoptagelse';
-	@override String get rewindOnResumeDescription => 'Spol tilbage med denne mængde ved genoptagelse af afspilning';
 	@override String secondsUnit({required Object seconds}) => '${seconds} sekunder';
 	@override String get defaultSleepTimer => 'Standard sove-timer';
 	@override String minutesUnit({required Object minutes}) => '${minutes} minutter';
@@ -270,7 +259,6 @@ class _TranslationsSettingsDa implements TranslationsSettingsEn {
 	@override String get videoPlayerNavigation => 'Videoafspillernavigation';
 	@override String get videoPlayerNavigationDescription => 'Brug piletaster til at navigere videoafspillerkontroller';
 	@override String get watchTogetherRelay => 'Watch Together-relay';
-	@override String get watchTogetherRelayDefault => 'Standard';
 	@override String get watchTogetherRelayDescription => 'Angiv en brugerdefineret relay-server til Watch Together. Alle deltagere skal bruge den samme server.';
 	@override String get watchTogetherRelayHint => 'https://min-relay.eksempel.dk';
 	@override String get crashReporting => 'Fejlrapportering';
@@ -328,6 +316,10 @@ class _TranslationsSettingsDa implements TranslationsSettingsEn {
 	@override String maxVolumePercent({required Object percent}) => '${percent}%';
 	@override String get discordRichPresence => 'Discord Rich Presence';
 	@override String get discordRichPresenceDescription => 'Vis hvad du ser på Discord';
+	@override String get trakt => 'Trakt';
+	@override String get traktDescription => 'Synkroniser visningshistorik med Trakt';
+	@override String get companionRemoteServer => 'Companion Remote Server';
+	@override String get companionRemoteServerDescription => 'Tillad mobilenheder på dit netværk at styre denne app';
 	@override String get autoPip => 'Auto billede-i-billede';
 	@override String get autoPipDescription => 'Gå automatisk til billede-i-billede når du forlader appen under afspilning';
 	@override String get matchContentFrameRate => 'Match indholdets billedhastighed';
@@ -337,13 +329,14 @@ class _TranslationsSettingsDa implements TranslationsSettingsEn {
 	@override String get matchDynamicRange => 'Match dynamisk område';
 	@override String get matchDynamicRangeDescription => 'Aktiver automatisk HDR for HDR-indhold og gendan SDR når afspilleren lukkes';
 	@override String get displaySwitchDelay => 'Forsinkelse ved skærmskift';
-	@override String get displaySwitchDelayDescription => 'Sekunder der ventes efter et skærmskift før afspilning starter';
 	@override String get tunneledPlayback => 'Tunneleret afspilning';
 	@override String get tunneledPlaybackDescription => 'Brug hardwareaccelereret videotunneling. Deaktiver hvis du ser sort skærm med lyd på HDR-indhold';
 	@override String get requireProfileSelectionOnOpen => 'Spørg om profil ved åbning';
 	@override String get requireProfileSelectionOnOpenDescription => 'Vis profilvalg hver gang appen åbnes';
 	@override String get confirmExitOnBack => 'Bekræft før lukning';
 	@override String get confirmExitOnBackDescription => 'Vis bekræftelsesdialog ved tryk på tilbage for at lukke appen';
+	@override String get forceTvMode => 'Gennemtving TV-tilstand';
+	@override String get forceTvModeDescription => 'Brug TV-layoutet uanset automatisk registrering. Nyttigt på Android TV-enheder, der ikke rapporterer leanback-funktionen. Genstarter appen ved ændring.';
 	@override String get autoHidePerformanceOverlay => 'Skjul ydelses-overlay automatisk';
 	@override String get autoHidePerformanceOverlayDescription => 'Fade ydelses-overlayet med afspilningskontrollerne';
 	@override String get showNavBarLabels => 'Vis navigationsbarlabels';
@@ -358,8 +351,6 @@ class _TranslationsSettingsDa implements TranslationsSettingsEn {
 	@override String get subtitlesAndConfig => 'Subtitles & Configuration';
 	@override String get seekAndTiming => 'Seek & Timing';
 	@override String get behavior => 'Behavior';
-	@override String get companionRemoteServer => 'Companion Remote Server';
-	@override String get companionRemoteServerDescription => 'Tillad mobilenheder på dit netværk at styre denne app';
 }
 
 // Path: search
@@ -524,7 +515,6 @@ class _TranslationsVideoControlsDa implements TranslationsVideoControlsEn {
 	@override String get alwaysOnTopButton => 'Altid øverst';
 	@override String get rotationLockButton => 'Rotationslås';
 	@override String get lockScreen => 'Lås skærm';
-	@override String get unlockScreen => 'Lås skærm op';
 	@override String get screenLockButton => 'Skærmlås';
 	@override String get longPressToUnlock => 'Langt tryk for at låse op';
 	@override String get timelineSlider => 'Videotidslinje';
@@ -596,6 +586,8 @@ class _TranslationsMessagesDa implements TranslationsMessagesEn {
 	@override String get failedToCreatePlayQueueNoItems => 'Kunne ikke oprette afspilningskø — ingen elementer';
 	@override String failedPlayback({required Object action, required Object error}) => 'Kunne ikke ${action}: ${error}';
 	@override String get switchingToCompatiblePlayer => 'Skifter til kompatibel afspiller...';
+	@override String get serverLimitTitle => 'Afspilning mislykkedes';
+	@override String get serverLimitBody => 'Serveren returnerede en fejl (HTTP 500). Det betyder som regel, at serverejeren har sat en båndbredde- eller transkodningsgrænse, der afviser din session. Der er intet at gøre fra klienten — serverejeren skal justere sine indstillinger.';
 	@override String get logsUploaded => 'Logs uploadet';
 	@override String get logsUploadFailed => 'Kunne ikke uploade logs';
 	@override String get logId => 'Log-ID';
@@ -608,7 +600,6 @@ class _TranslationsSubtitlingStylingDa implements TranslationsSubtitlingStylingE
 	final TranslationsDa _root; // ignore: unused_field
 
 	// Translations
-	@override String get stylingOptions => 'Stilindstillinger';
 	@override String get text => 'Tekst';
 	@override String get border => 'Kant';
 	@override String get background => 'Baggrund';
@@ -620,6 +611,8 @@ class _TranslationsSubtitlingStylingDa implements TranslationsSubtitlingStylingE
 	@override String get backgroundColor => 'Baggrundsfarve';
 	@override String get position => 'Position';
 	@override String get assOverride => 'ASS-tilsidesættelse';
+	@override String get bold => 'Fed';
+	@override String get italic => 'Kursiv';
 }
 
 // Path: mpvConfig
@@ -1019,6 +1012,24 @@ class _TranslationsDownloadsDa implements TranslationsDownloadsEn {
 	@override String get customAmount => 'Angiv antal...';
 	@override String get howManyEpisodes => 'Hvor mange episoder?';
 	@override String itemsQueued({required Object count}) => '${count} elementer sat i kø til download';
+	@override String get keepSynced => 'Hold synkroniseret';
+	@override String get downloadOnce => 'Download én gang';
+	@override String keepNUnwatched({required Object count}) => 'Behold ${count} usete';
+	@override String get editSyncRule => 'Rediger synkroniseringsregel';
+	@override String get removeSyncRule => 'Fjern synkroniseringsregel';
+	@override String removeSyncRuleConfirm({required Object title}) => 'Stop synkronisering af "${title}"? Downloadede episoder beholdes.';
+	@override String syncRuleCreated({required Object count}) => 'Synkroniseringsregel oprettet — beholder ${count} usete episoder';
+	@override String get syncRuleUpdated => 'Synkroniseringsregel opdateret';
+	@override String get syncRuleRemoved => 'Synkroniseringsregel fjernet';
+	@override String syncedNewEpisodes({required Object count, required Object title}) => 'Synkroniserede ${count} nye episoder for ${title}';
+	@override String get activeSyncRules => 'Synkroniseringsregler';
+	@override String get noSyncRules => 'Ingen synkroniseringsregler';
+	@override String get manageSyncRule => 'Administrer synkronisering';
+	@override String get editEpisodeCount => 'Antal episoder';
+	@override String get editSyncFilter => 'Synkroniseringsfilter';
+	@override String get syncAllItems => 'Synkroniserer alle elementer';
+	@override String get syncUnwatchedItems => 'Synkroniserer usete elementer';
+	@override String get syncRuleListCreated => 'Synkroniseringsregel oprettet';
 }
 
 // Path: shaders
@@ -1050,11 +1061,6 @@ class _TranslationsCompanionRemoteDa implements TranslationsCompanionRemoteEn {
 
 	// Translations
 	@override String get title => 'Fjernbetjening';
-	@override String get connectToDevice => 'Forbind til enhed';
-	@override String get hostRemoteSession => 'Vært for fjernsession';
-	@override String get controlThisDevice => 'Styr denne enhed med din telefon';
-	@override String get remoteControl => 'Fjernbetjening';
-	@override String get controlDesktop => 'Styr en desktopenhed';
 	@override String connectedTo({required Object name}) => 'Forbundet til ${name}';
 	@override late final _TranslationsCompanionRemoteSessionDa session = _TranslationsCompanionRemoteSessionDa._(_root);
 	@override late final _TranslationsCompanionRemotePairingDa pairing = _TranslationsCompanionRemotePairingDa._(_root);
@@ -1199,6 +1205,30 @@ class _TranslationsServerTasksDa implements TranslationsServerTasksEn {
 	@override String get noTasks => 'Ingen opgaver kører';
 }
 
+// Path: trakt
+class _TranslationsTraktDa implements TranslationsTraktEn {
+	_TranslationsTraktDa._(this._root);
+
+	final TranslationsDa _root; // ignore: unused_field
+
+	// Translations
+	@override String get title => 'Trakt';
+	@override String get connected => 'Forbundet';
+	@override String connectedAs({required Object username}) => 'Forbundet som @${username}';
+	@override String get disconnectConfirm => 'Frakobl Trakt-konto?';
+	@override String get disconnectConfirmBody => 'Plezy stopper med at sende afspilningsbegivenheder til Trakt. Du kan genoprette forbindelse når som helst.';
+	@override String get scrobble => 'Realtids-scrobbling';
+	@override String get scrobbleDescription => 'Send afspil-, pause- og stop-begivenheder til Trakt under afspilning.';
+	@override String get watchedSync => 'Synkroniser sét-status';
+	@override String get watchedSyncDescription => 'Når du markerer ting som sét i Plezy, markeres de også på Trakt.';
+	@override String get deviceCodeTitle => 'Aktivér Plezy på Trakt';
+	@override String deviceCodeBody({required Object url}) => 'Besøg ${url} og indtast denne kode:';
+	@override String get openTraktActivate => 'Åbn Trakt for at aktivere';
+	@override String get waitingForAuthorization => 'Venter på godkendelse…';
+	@override String get codeCopied => 'Kode kopieret';
+	@override String get connectFailed => 'Kunne ikke forbinde til Trakt. Prøv igen.';
+}
+
 // Path: hotkeys.actions
 class _TranslationsHotkeysActionsDa implements TranslationsHotkeysActionsEn {
 	_TranslationsHotkeysActionsDa._(this._root);
@@ -1300,7 +1330,6 @@ class _TranslationsCompanionRemotePairingDa implements TranslationsCompanionRemo
 	final TranslationsDa _root; // ignore: unused_field
 
 	// Translations
-	@override String get pairWithDesktop => 'Opret forbindelse til computer';
 	@override String get discoveryDescription => 'Enheder på dit netværk, der kører Plezy med den samme Plex-konto, vises automatisk';
 	@override String get hostAddressHint => '192.168.1.100:48632';
 	@override String get connecting => 'Opretter forbindelse...';
@@ -1329,8 +1358,6 @@ class _TranslationsCompanionRemoteRemoteDa implements TranslationsCompanionRemot
 	@override String get reconnecting => 'Genopretter forbindelse...';
 	@override String attemptOf({required Object current}) => 'Forsøg ${current} af 5';
 	@override String get retryNow => 'Prøv igen nu';
-	@override String get connectionError => 'Forbindelsesfejl';
-	@override String get notConnected => 'Ikke forbundet';
 	@override String get tabRemote => 'Fjernbetjening';
 	@override String get tabPlay => 'Afspil';
 	@override String get tabMore => 'Mere';
@@ -1390,7 +1417,6 @@ extension on TranslationsDa {
 			'common.shuffle' => 'Bland',
 			'common.addTo' => 'Tilføj til...',
 			'common.createNew' => 'Opret ny',
-			'common.paste' => 'Indsæt',
 			'common.connect' => 'Forbind',
 			'common.disconnect' => 'Afbryd',
 			'common.play' => 'Afspil',
@@ -1428,18 +1454,18 @@ extension on TranslationsDa {
 			'update.latestVersion' => 'Du har den nyeste version',
 			'update.checkFailed' => 'Kunne ikke søge efter opdateringer',
 			'settings.title' => 'Indstillinger',
+			'settings.supportDeveloper' => 'Støt Plezy',
+			'settings.supportDeveloperDescription' => 'Doner via Liberapay for at finansiere udviklingen',
 			'settings.language' => 'Sprog',
 			'settings.theme' => 'Tema',
 			'settings.appearance' => 'Udseende',
 			'settings.videoPlayback' => 'Videoafspilning',
+			'settings.videoPlaybackDescription' => 'Konfigurer afspilningsadfærd',
 			'settings.advanced' => 'Avanceret',
 			'settings.episodePosterMode' => 'Episodeplakatstil',
 			'settings.seriesPoster' => 'Serieplakat',
-			'settings.seriesPosterDescription' => 'Vis seriens plakat for alle episoder',
 			'settings.seasonPoster' => 'Sæsonplakat',
-			'settings.seasonPosterDescription' => 'Vis sæsonspecifik plakat for episoder',
 			'settings.episodeThumbnail' => 'Miniature',
-			'settings.episodeThumbnailDescription' => 'Vis 16:9 episodeskærmbilledeminiaturer',
 			'settings.showHeroSectionDescription' => 'Vis karrusel med udvalgt indhold på startskærmen',
 			'settings.secondsLabel' => 'Sekunder',
 			'settings.minutesLabel' => 'Minutter',
@@ -1447,23 +1473,15 @@ extension on TranslationsDa {
 			'settings.minutesShort' => 'm',
 			'settings.durationHint' => ({required Object min, required Object max}) => 'Indtast varighed (${min}-${max})',
 			'settings.systemTheme' => 'System',
-			'settings.systemThemeDescription' => 'Følg systemindstillinger',
 			'settings.lightTheme' => 'Lys',
 			'settings.darkTheme' => 'Mørk',
 			'settings.oledTheme' => 'OLED',
-			'settings.oledThemeDescription' => 'Ren sort for OLED-skærme',
 			'settings.libraryDensity' => 'Bibliotekstæthed',
 			'settings.compact' => 'Kompakt',
-			'settings.compactDescription' => 'Mindre kort, flere synlige elementer',
-			'settings.normal' => 'Normal',
-			'settings.normalDescription' => 'Standardstørrelse',
 			'settings.comfortable' => 'Komfortabel',
-			'settings.comfortableDescription' => 'Større kort, færre synlige elementer',
 			'settings.viewMode' => 'Visningstilstand',
 			'settings.gridView' => 'Gitter',
-			'settings.gridViewDescription' => 'Vis elementer i gitterlayout',
 			'settings.listView' => 'Liste',
-			'settings.listViewDescription' => 'Vis elementer i listelayout',
 			'settings.showHeroSection' => 'Vis hero-sektion',
 			'settings.useGlobalHubs' => 'Brug Plex Home-layout',
 			'settings.useGlobalHubsDescription' => 'Vis startsidehubbe som den officielle Plex-klient. Når slået fra, vises anbefalinger per bibliotek.',
@@ -1477,9 +1495,7 @@ extension on TranslationsDa {
 			'settings.hideSpoilersDescription' => 'Slør miniaturebilleder og skjul beskrivelser for episoder, du ikke har set endnu',
 			'settings.playerBackend' => 'Afspillerbackend',
 			'settings.exoPlayer' => 'ExoPlayer (Anbefalet)',
-			'settings.exoPlayerDescription' => 'Android-native afspiller med bedre hardwareunderstøttelse',
 			'settings.mpv' => 'mpv',
-			'settings.mpvDescription' => 'Avanceret afspiller med flere funktioner og ASS-undertekstunderstøttelse',
 			'settings.hardwareDecoding' => 'Hardwaredekodning',
 			'settings.hardwareDecodingDescription' => 'Brug hardwareacceleration når tilgængelig',
 			'settings.bufferSize' => 'Bufferstørrelse',
@@ -1491,7 +1507,6 @@ extension on TranslationsDa {
 			'settings.smallSkipDuration' => 'Kort spring-varighed',
 			'settings.largeSkipDuration' => 'Lang spring-varighed',
 			'settings.rewindOnResume' => 'Spol tilbage ved genoptagelse',
-			'settings.rewindOnResumeDescription' => 'Spol tilbage med denne mængde ved genoptagelse af afspilning',
 			'settings.secondsUnit' => ({required Object seconds}) => '${seconds} sekunder',
 			'settings.defaultSleepTimer' => 'Standard sove-timer',
 			'settings.minutesUnit' => ({required Object minutes}) => '${minutes} minutter',
@@ -1505,7 +1520,6 @@ extension on TranslationsDa {
 			'settings.videoPlayerNavigation' => 'Videoafspillernavigation',
 			'settings.videoPlayerNavigationDescription' => 'Brug piletaster til at navigere videoafspillerkontroller',
 			'settings.watchTogetherRelay' => 'Watch Together-relay',
-			'settings.watchTogetherRelayDefault' => 'Standard',
 			'settings.watchTogetherRelayDescription' => 'Angiv en brugerdefineret relay-server til Watch Together. Alle deltagere skal bruge den samme server.',
 			'settings.watchTogetherRelayHint' => 'https://min-relay.eksempel.dk',
 			'settings.crashReporting' => 'Fejlrapportering',
@@ -1563,6 +1577,10 @@ extension on TranslationsDa {
 			'settings.maxVolumePercent' => ({required Object percent}) => '${percent}%',
 			'settings.discordRichPresence' => 'Discord Rich Presence',
 			'settings.discordRichPresenceDescription' => 'Vis hvad du ser på Discord',
+			'settings.trakt' => 'Trakt',
+			'settings.traktDescription' => 'Synkroniser visningshistorik med Trakt',
+			'settings.companionRemoteServer' => 'Companion Remote Server',
+			'settings.companionRemoteServerDescription' => 'Tillad mobilenheder på dit netværk at styre denne app',
 			'settings.autoPip' => 'Auto billede-i-billede',
 			'settings.autoPipDescription' => 'Gå automatisk til billede-i-billede når du forlader appen under afspilning',
 			'settings.matchContentFrameRate' => 'Match indholdets billedhastighed',
@@ -1572,13 +1590,14 @@ extension on TranslationsDa {
 			'settings.matchDynamicRange' => 'Match dynamisk område',
 			'settings.matchDynamicRangeDescription' => 'Aktiver automatisk HDR for HDR-indhold og gendan SDR når afspilleren lukkes',
 			'settings.displaySwitchDelay' => 'Forsinkelse ved skærmskift',
-			'settings.displaySwitchDelayDescription' => 'Sekunder der ventes efter et skærmskift før afspilning starter',
 			'settings.tunneledPlayback' => 'Tunneleret afspilning',
 			'settings.tunneledPlaybackDescription' => 'Brug hardwareaccelereret videotunneling. Deaktiver hvis du ser sort skærm med lyd på HDR-indhold',
 			'settings.requireProfileSelectionOnOpen' => 'Spørg om profil ved åbning',
 			'settings.requireProfileSelectionOnOpenDescription' => 'Vis profilvalg hver gang appen åbnes',
 			'settings.confirmExitOnBack' => 'Bekræft før lukning',
 			'settings.confirmExitOnBackDescription' => 'Vis bekræftelsesdialog ved tryk på tilbage for at lukke appen',
+			'settings.forceTvMode' => 'Gennemtving TV-tilstand',
+			'settings.forceTvModeDescription' => 'Brug TV-layoutet uanset automatisk registrering. Nyttigt på Android TV-enheder, der ikke rapporterer leanback-funktionen. Genstarter appen ved ændring.',
 			'settings.autoHidePerformanceOverlay' => 'Skjul ydelses-overlay automatisk',
 			'settings.autoHidePerformanceOverlayDescription' => 'Fade ydelses-overlayet med afspilningskontrollerne',
 			'settings.showNavBarLabels' => 'Vis navigationsbarlabels',
@@ -1593,8 +1612,6 @@ extension on TranslationsDa {
 			'settings.subtitlesAndConfig' => 'Subtitles & Configuration',
 			'settings.seekAndTiming' => 'Seek & Timing',
 			'settings.behavior' => 'Behavior',
-			'settings.companionRemoteServer' => 'Companion Remote Server',
-			'settings.companionRemoteServerDescription' => 'Tillad mobilenheder på dit netværk at styre denne app',
 			'search.hint' => 'Søg film, serier, musik...',
 			'search.tryDifferentTerm' => 'Prøv en anden søgning',
 			'search.searchYourMedia' => 'Søg i dine medier',
@@ -1714,7 +1731,6 @@ extension on TranslationsDa {
 			'videoControls.alwaysOnTopButton' => 'Altid øverst',
 			'videoControls.rotationLockButton' => 'Rotationslås',
 			'videoControls.lockScreen' => 'Lås skærm',
-			'videoControls.unlockScreen' => 'Lås skærm op',
 			'videoControls.screenLockButton' => 'Skærmlås',
 			'videoControls.longPressToUnlock' => 'Langt tryk for at låse op',
 			'videoControls.timelineSlider' => 'Videotidslinje',
@@ -1774,10 +1790,11 @@ extension on TranslationsDa {
 			'messages.failedToCreatePlayQueueNoItems' => 'Kunne ikke oprette afspilningskø — ingen elementer',
 			'messages.failedPlayback' => ({required Object action, required Object error}) => 'Kunne ikke ${action}: ${error}',
 			'messages.switchingToCompatiblePlayer' => 'Skifter til kompatibel afspiller...',
+			'messages.serverLimitTitle' => 'Afspilning mislykkedes',
+			'messages.serverLimitBody' => 'Serveren returnerede en fejl (HTTP 500). Det betyder som regel, at serverejeren har sat en båndbredde- eller transkodningsgrænse, der afviser din session. Der er intet at gøre fra klienten — serverejeren skal justere sine indstillinger.',
 			'messages.logsUploaded' => 'Logs uploadet',
 			'messages.logsUploadFailed' => 'Kunne ikke uploade logs',
 			'messages.logId' => 'Log-ID',
-			'subtitlingStyling.stylingOptions' => 'Stilindstillinger',
 			'subtitlingStyling.text' => 'Tekst',
 			'subtitlingStyling.border' => 'Kant',
 			'subtitlingStyling.background' => 'Baggrund',
@@ -1789,6 +1806,8 @@ extension on TranslationsDa {
 			'subtitlingStyling.backgroundColor' => 'Baggrundsfarve',
 			'subtitlingStyling.position' => 'Position',
 			'subtitlingStyling.assOverride' => 'ASS-tilsidesættelse',
+			'subtitlingStyling.bold' => 'Fed',
+			'subtitlingStyling.italic' => 'Kursiv',
 			'mpvConfig.title' => 'mpv.conf',
 			'mpvConfig.description' => 'Avancerede videoafspillerindstillinger',
 			'mpvConfig.presets' => 'Forudindstillinger',
@@ -1876,8 +1895,6 @@ extension on TranslationsDa {
 			'libraries.groupings.seasons' => 'Sæsoner',
 			'libraries.groupings.episodes' => 'Episoder',
 			'libraries.groupings.folders' => 'Mapper',
-			_ => null,
-		} ?? switch (path) {
 			'about.title' => 'Om',
 			'about.openSourceLicenses' => 'Open source-licenser',
 			'about.versionLabel' => ({required Object version}) => 'Version ${version}',
@@ -1886,6 +1903,8 @@ extension on TranslationsDa {
 			'serverSelection.allServerConnectionsFailed' => 'Kunne ikke forbinde til nogen servere. Tjek dit netværk og prøv igen.',
 			'serverSelection.noServersFoundForAccount' => ({required Object username, required Object email}) => 'Ingen servere fundet for ${username} (${email})',
 			'serverSelection.failedToLoadServers' => ({required Object error}) => 'Kunne ikke indlæse servere: ${error}',
+			_ => null,
+		} ?? switch (path) {
 			'hubDetail.title' => 'Titel',
 			'hubDetail.releaseYear' => 'Udgivelsesår',
 			'hubDetail.dateAdded' => 'Tilføjelsesdato',
@@ -2055,6 +2074,24 @@ extension on TranslationsDa {
 			'downloads.customAmount' => 'Angiv antal...',
 			'downloads.howManyEpisodes' => 'Hvor mange episoder?',
 			'downloads.itemsQueued' => ({required Object count}) => '${count} elementer sat i kø til download',
+			'downloads.keepSynced' => 'Hold synkroniseret',
+			'downloads.downloadOnce' => 'Download én gang',
+			'downloads.keepNUnwatched' => ({required Object count}) => 'Behold ${count} usete',
+			'downloads.editSyncRule' => 'Rediger synkroniseringsregel',
+			'downloads.removeSyncRule' => 'Fjern synkroniseringsregel',
+			'downloads.removeSyncRuleConfirm' => ({required Object title}) => 'Stop synkronisering af "${title}"? Downloadede episoder beholdes.',
+			'downloads.syncRuleCreated' => ({required Object count}) => 'Synkroniseringsregel oprettet — beholder ${count} usete episoder',
+			'downloads.syncRuleUpdated' => 'Synkroniseringsregel opdateret',
+			'downloads.syncRuleRemoved' => 'Synkroniseringsregel fjernet',
+			'downloads.syncedNewEpisodes' => ({required Object count, required Object title}) => 'Synkroniserede ${count} nye episoder for ${title}',
+			'downloads.activeSyncRules' => 'Synkroniseringsregler',
+			'downloads.noSyncRules' => 'Ingen synkroniseringsregler',
+			'downloads.manageSyncRule' => 'Administrer synkronisering',
+			'downloads.editEpisodeCount' => 'Antal episoder',
+			'downloads.editSyncFilter' => 'Synkroniseringsfilter',
+			'downloads.syncAllItems' => 'Synkroniserer alle elementer',
+			'downloads.syncUnwatchedItems' => 'Synkroniserer usete elementer',
+			'downloads.syncRuleListCreated' => 'Synkroniseringsregel oprettet',
 			'shaders.title' => 'Shadere',
 			'shaders.noShaderDescription' => 'Ingen videoforbedring',
 			'shaders.nvscalerDescription' => 'NVIDIA-billedskalering for skarpere video',
@@ -2068,11 +2105,6 @@ extension on TranslationsDa {
 			'shaders.deleteShader' => 'Slet shader',
 			'shaders.deleteShaderConfirm' => ({required Object name}) => 'Slet "${name}"?',
 			'companionRemote.title' => 'Fjernbetjening',
-			'companionRemote.connectToDevice' => 'Forbind til enhed',
-			'companionRemote.hostRemoteSession' => 'Vært for fjernsession',
-			'companionRemote.controlThisDevice' => 'Styr denne enhed med din telefon',
-			'companionRemote.remoteControl' => 'Fjernbetjening',
-			'companionRemote.controlDesktop' => 'Styr en desktopenhed',
 			'companionRemote.connectedTo' => ({required Object name}) => 'Forbundet til ${name}',
 			'companionRemote.session.startingServer' => 'Starter fjernserver...',
 			'companionRemote.session.failedToCreate' => 'Kunne ikke starte fjernserver:',
@@ -2086,7 +2118,6 @@ extension on TranslationsDa {
 			'companionRemote.session.startServer' => 'Start server',
 			'companionRemote.session.stopServer' => 'Stop server',
 			'companionRemote.session.minimize' => 'Minimér',
-			'companionRemote.pairing.pairWithDesktop' => 'Opret forbindelse til computer',
 			'companionRemote.pairing.discoveryDescription' => 'Enheder på dit netværk, der kører Plezy med den samme Plex-konto, vises automatisk',
 			'companionRemote.pairing.hostAddressHint' => '192.168.1.100:48632',
 			'companionRemote.pairing.connecting' => 'Opretter forbindelse...',
@@ -2106,8 +2137,6 @@ extension on TranslationsDa {
 			'companionRemote.remote.reconnecting' => 'Genopretter forbindelse...',
 			'companionRemote.remote.attemptOf' => ({required Object current}) => 'Forsøg ${current} af 5',
 			'companionRemote.remote.retryNow' => 'Prøv igen nu',
-			'companionRemote.remote.connectionError' => 'Forbindelsesfejl',
-			'companionRemote.remote.notConnected' => 'Ikke forbundet',
 			'companionRemote.remote.tabRemote' => 'Fjernbetjening',
 			'companionRemote.remote.tabPlay' => 'Afspil',
 			'companionRemote.remote.tabMore' => 'Mere',
@@ -2233,6 +2262,21 @@ extension on TranslationsDa {
 			'serverTasks.title' => 'Serveropgaver',
 			'serverTasks.failedToLoad' => 'Kunne ikke indlæse opgaver',
 			'serverTasks.noTasks' => 'Ingen opgaver kører',
+			'trakt.title' => 'Trakt',
+			'trakt.connected' => 'Forbundet',
+			'trakt.connectedAs' => ({required Object username}) => 'Forbundet som @${username}',
+			'trakt.disconnectConfirm' => 'Frakobl Trakt-konto?',
+			'trakt.disconnectConfirmBody' => 'Plezy stopper med at sende afspilningsbegivenheder til Trakt. Du kan genoprette forbindelse når som helst.',
+			'trakt.scrobble' => 'Realtids-scrobbling',
+			'trakt.scrobbleDescription' => 'Send afspil-, pause- og stop-begivenheder til Trakt under afspilning.',
+			'trakt.watchedSync' => 'Synkroniser sét-status',
+			'trakt.watchedSyncDescription' => 'Når du markerer ting som sét i Plezy, markeres de også på Trakt.',
+			'trakt.deviceCodeTitle' => 'Aktivér Plezy på Trakt',
+			'trakt.deviceCodeBody' => ({required Object url}) => 'Besøg ${url} og indtast denne kode:',
+			'trakt.openTraktActivate' => 'Åbn Trakt for at aktivere',
+			'trakt.waitingForAuthorization' => 'Venter på godkendelse…',
+			'trakt.codeCopied' => 'Kode kopieret',
+			'trakt.connectFailed' => 'Kunne ikke forbinde til Trakt. Prøv igen.',
 			_ => null,
 		};
 	}

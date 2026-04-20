@@ -23,7 +23,7 @@ val downloadLibmpv by tasks.registering {
     }
 }
 
-val assVersion = "safety-2"
+val assVersion = "fp-3"
 val assDir = layout.buildDirectory.dir("libass").get().asFile
 val assAars = listOf("lib_ass-release.aar", "lib_ass_kt-release.aar", "lib_ass_media-release.aar")
 
@@ -176,6 +176,7 @@ dependencies {
 
     // Media3 ExoPlayer for Android
     implementation("androidx.media3:media3-exoplayer:1.9.2")
+    implementation("androidx.media3:media3-exoplayer-hls:1.9.2")
     implementation("androidx.media3:media3-ui:1.9.2")
     implementation("androidx.media3:media3-common:1.9.2")
 

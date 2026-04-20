@@ -1,19 +1,22 @@
 import 'dart:async';
-import 'dart:io';
 import 'dart:collection';
+import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:plezy/utils/content_utils.dart';
 import '../models/download_models.dart';
 import '../models/plex_media_version.dart';
 import '../models/plex_metadata.dart';
 import '../utils/download_version_utils.dart';
+import '../database/app_database.dart';
 import '../services/download_manager_service.dart';
 // PlexSyncer
 import '../services/manifest_import_service.dart';
 import '../services/download_storage_service.dart';
+import '../services/multi_server_manager.dart';
 import '../services/storage_service.dart';
 import '../services/plex_api_cache.dart';
 import '../services/plex_client.dart';
+import '../services/sync_rule_executor.dart';
 import '../utils/app_logger.dart';
 import '../utils/global_key_utils.dart';
 
@@ -39,6 +42,8 @@ class DownloadedArtwork {
 /// Provider for managing download state and operations.
 class DownloadProvider extends ChangeNotifier {
   final DownloadManagerService _downloadManager;
+  final AppDatabase _database;
+  final SyncRuleExecutor _syncRuleExecutor;
   StreamSubscription<DownloadProgress>? _progressSubscription;
   StreamSubscription<DeletionProgress>? _deletionProgressSubscription;
   late final Future<void> _initFuture;
@@ -62,7 +67,13 @@ class DownloadProvider extends ChangeNotifier {
   // Key: globalKey (serverId:ratingKey), Value: total episode count
   final Map<String, int> _totalEpisodeCounts = {};
 
-  DownloadProvider({required DownloadManagerService downloadManager}) : _downloadManager = downloadManager {
+  // Persistent sync rules: globalKey -> SyncRuleItem
+  final Map<String, SyncRuleItem> _syncRules = {};
+
+  DownloadProvider({required DownloadManagerService downloadManager, required AppDatabase database})
+    : _downloadManager = downloadManager,
+      _database = database,
+      _syncRuleExecutor = SyncRuleExecutor(database: database) {
     // Listen to progress updates from the download manager
     _progressSubscription = _downloadManager.progressStream.listen(_onProgressUpdate);
 
@@ -130,9 +141,12 @@ class DownloadProvider extends ChangeNotifier {
       // Load total episode counts from StorageService
       await _loadTotalEpisodeCounts();
 
+      // Load sync rules from database
+      await _loadSyncRules();
+
       appLogger.i(
         'Loaded ${_downloads.length} downloads, ${_metadata.length} metadata entries, '
-        'and ${_totalEpisodeCounts.length} episode counts',
+        '${_totalEpisodeCounts.length} episode counts, and ${_syncRules.length} sync rules',
       );
       notifyListeners();
     } catch (e) {
@@ -232,34 +246,6 @@ class DownloadProvider extends ChangeNotifier {
   /// All metadata for downloads
   Map<String, PlexMetadata> get metadata => Map.unmodifiable(_metadata);
 
-  /// Get all queued/downloading items (for Queue tab)
-  List<DownloadProgress> get queuedDownloads {
-    return _downloads.values
-        .where(
-          (p) =>
-              p.status == DownloadStatus.queued ||
-              p.status == DownloadStatus.downloading ||
-              p.status == DownloadStatus.paused,
-        )
-        .toList();
-  }
-
-  /// Get all completed downloads
-  List<DownloadProgress> get completedDownloads {
-    return _downloads.values.where((p) => p.status == DownloadStatus.completed).toList();
-  }
-
-  /// Get completed TV episode downloads (individual episodes)
-  List<PlexMetadata> get downloadedEpisodes {
-    return _metadata.entries
-        .where((entry) {
-          final progress = _downloads[entry.key];
-          return progress?.status == DownloadStatus.completed && entry.value.type == 'episode';
-        })
-        .map((entry) => entry.value)
-        .toList();
-  }
-
   /// Get unique TV shows that have downloaded episodes
   /// Returns stored show metadata, or synthesizes from episode metadata as fallback
   List<PlexMetadata> get downloadedShows {
@@ -338,10 +324,7 @@ class DownloadProvider extends ChangeNotifier {
   }
 
   /// Get episode downloads filtered by show and/or season ratingKey.
-  List<DownloadProgress> _getEpisodeDownloads({
-    String? showRatingKey,
-    String? seasonRatingKey,
-  }) {
+  List<DownloadProgress> _getEpisodeDownloads({String? showRatingKey, String? seasonRatingKey}) {
     return _downloads.entries
         .where((entry) {
           final meta = _metadata[entry.key];
@@ -479,13 +462,6 @@ class DownloadProvider extends ChangeNotifier {
       currentFile: '$completedCount/$totalEpisodes episodes',
     );
   }
-
-  /// Whether there are any downloads (active or completed)
-  bool get hasDownloads => _downloads.isNotEmpty;
-
-  /// Whether there are any active downloads
-  bool get hasActiveDownloads =>
-      _downloads.values.any((p) => p.status == DownloadStatus.downloading || p.status == DownloadStatus.queued);
 
   /// Get download progress for a specific item
   /// For shows/seasons, returns aggregate progress of all child episodes
@@ -642,25 +618,59 @@ class DownloadProvider extends ChangeNotifier {
     }
   }
 
-  /// Queue all video items from a playlist for download.
-  /// Returns the number of items queued.
-  Future<int> queuePlaylistDownload(
+  /// Queue every playable item from a collection/playlist for download.
+  ///
+  /// Movies and episodes are queued directly. Shows and seasons are expanded
+  /// into their episodes (when [expandShows] is true). Music items, nested
+  /// collections/playlists, and unknown types are skipped.
+  Future<int> queueListDownload(
     List<PlexMetadata> items,
     PlexClient client, {
     DownloadFilter filter = DownloadFilter.all,
+    bool expandShows = true,
   }) async {
     if (await DownloadManagerService.shouldBlockDownloadOnCellular()) {
       throw CellularDownloadBlockedException();
     }
 
+    final unwatchedOnly = filter == DownloadFilter.unwatched;
     int count = 0;
-    for (final item in items) {
-      final mt = item.mediaType;
-      if (mt != PlexMediaType.movie && mt != PlexMediaType.episode) continue;
-      if (filter == DownloadFilter.unwatched && item.isWatched && !item.hasActiveProgress) continue;
 
+    Future<void> queueItem(PlexMetadata item) async {
+      if (unwatchedOnly && item.isWatched && !item.hasActiveProgress) return;
       final queued = await _queueSingleDownload(item, client);
       if (queued) count++;
+    }
+
+    Future<void> expandSeason(String seasonRatingKey) async {
+      final episodes = await client.getChildren(seasonRatingKey);
+      for (final ep in episodes) {
+        if (ep.type != ContentTypes.episode) continue;
+        await queueItem(ep);
+      }
+    }
+
+    for (final item in items) {
+      final mt = item.mediaType;
+      switch (mt) {
+        case PlexMediaType.movie:
+        case PlexMediaType.episode:
+          await queueItem(item);
+        case PlexMediaType.show:
+          if (!expandShows) break;
+          final seasons = await client.getChildren(item.ratingKey);
+          for (final season in seasons) {
+            if (season.type == ContentTypes.season) {
+              await expandSeason(season.ratingKey);
+            }
+          }
+        case PlexMediaType.season:
+          if (!expandShows) break;
+          await expandSeason(item.ratingKey);
+        default:
+          // Skip music, clips, nested collections/playlists, unknown types.
+          break;
+      }
     }
     return count;
   }
@@ -782,8 +792,13 @@ class DownloadProvider extends ChangeNotifier {
   }
 
   /// Queue all episodes from a TV show for download
-  Future<int> _queueShowDownload(PlexMetadata show, PlexClient client,
-      {DownloadVersionConfig? versionConfig, DownloadFilter filter = DownloadFilter.all, int? maxCount}) async {
+  Future<int> _queueShowDownload(
+    PlexMetadata show,
+    PlexClient client, {
+    DownloadVersionConfig? versionConfig,
+    DownloadFilter filter = DownloadFilter.all,
+    int? maxCount,
+  }) async {
     int count = 0;
     final seasons = await client.getChildren(show.ratingKey);
 
@@ -794,8 +809,13 @@ class DownloadProvider extends ChangeNotifier {
       if (season.type == 'season') {
         if (remaining != null && remaining <= 0) break;
         final seasonWithServer = _ensureServerId(season, show.serverId);
-        final queued = await _queueSeasonDownload(seasonWithServer, client,
-            versionConfig: versionConfig, filter: filter, maxCount: remaining);
+        final queued = await _queueSeasonDownload(
+          seasonWithServer,
+          client,
+          versionConfig: versionConfig,
+          filter: filter,
+          maxCount: remaining,
+        );
         count += queued;
         if (remaining != null) remaining -= queued;
       }
@@ -805,8 +825,13 @@ class DownloadProvider extends ChangeNotifier {
   }
 
   /// Queue all episodes from a season for download
-  Future<int> _queueSeasonDownload(PlexMetadata season, PlexClient client,
-      {DownloadVersionConfig? versionConfig, DownloadFilter filter = DownloadFilter.all, int? maxCount}) async {
+  Future<int> _queueSeasonDownload(
+    PlexMetadata season,
+    PlexClient client, {
+    DownloadVersionConfig? versionConfig,
+    DownloadFilter filter = DownloadFilter.all,
+    int? maxCount,
+  }) async {
     int count = 0;
     final episodes = await client.getChildren(season.ratingKey);
 
@@ -846,8 +871,11 @@ class DownloadProvider extends ChangeNotifier {
   }
 
   /// Queue missing episodes for a show
-  Future<int> _queueMissingShowEpisodes(PlexMetadata show, PlexClient client,
-      {DownloadVersionConfig? versionConfig}) async {
+  Future<int> _queueMissingShowEpisodes(
+    PlexMetadata show,
+    PlexClient client, {
+    DownloadVersionConfig? versionConfig,
+  }) async {
     int queuedCount = 0;
 
     final seasons = await client.getChildren(show.ratingKey);
@@ -864,8 +892,11 @@ class DownloadProvider extends ChangeNotifier {
   }
 
   /// Queue missing episodes for a season
-  Future<int> _queueMissingSeasonEpisodes(PlexMetadata season, PlexClient client,
-      {DownloadVersionConfig? versionConfig}) async {
+  Future<int> _queueMissingSeasonEpisodes(
+    PlexMetadata season,
+    PlexClient client, {
+    DownloadVersionConfig? versionConfig,
+  }) async {
     int queuedCount = 0;
 
     final episodes = await client.getChildren(season.ratingKey);
@@ -976,9 +1007,6 @@ class DownloadProvider extends ChangeNotifier {
     }
     notifyListeners();
   }
-
-  /// Check if an item is being deleted
-  bool isDeleting(String globalKey) => _deletionProgress.containsKey(globalKey);
 
   /// Get deletion progress for an item
   DeletionProgress? getDeletionProgress(String globalKey) => _deletionProgress[globalKey];
@@ -1245,7 +1273,8 @@ class DownloadProvider extends ChangeNotifier {
   /// Auto-delete downloaded episodes/movies that are now marked as watched.
   ///
   /// Only deletes individual episodes and movies, never show/season containers.
-  Future<List<String>> autoDeleteWatchedDownloads() async {
+  /// [activeRatingKey] is excluded from deletion to protect the currently playing item.
+  Future<List<String>> autoDeleteWatchedDownloads({String? activeRatingKey}) async {
     final deletedTitles = <String>[];
 
     final completedKeys = _downloads.entries
@@ -1259,6 +1288,9 @@ class DownloadProvider extends ChangeNotifier {
       if (!meta.isEpisode && !meta.isMovie) continue;
       if (!meta.isWatched) continue;
 
+      // Don't delete the episode that's currently playing
+      if (activeRatingKey != null && meta.ratingKey == activeRatingKey) continue;
+
       try {
         appLogger.i('Auto-deleting watched download: ${meta.title} ($globalKey)');
         await deleteDownload(globalKey);
@@ -1269,6 +1301,152 @@ class DownloadProvider extends ChangeNotifier {
     }
 
     return deletedTitles;
+  }
+
+  // ============================================================
+  // Sync Rules
+  // ============================================================
+
+  /// All sync rules (globalKey -> SyncRuleItem)
+  Map<String, SyncRuleItem> get syncRules => Map.unmodifiable(_syncRules);
+
+  /// Check if a sync rule exists for the given item
+  bool hasSyncRule(String globalKey) => _syncRules.containsKey(globalKey);
+
+  /// Get a sync rule for the given item
+  SyncRuleItem? getSyncRule(String globalKey) => _syncRules[globalKey];
+
+  /// Create (or upsert) a sync rule for a show, season, collection, or playlist.
+  ///
+  /// [targetMetadata], when provided, is stored in the in-memory metadata map so
+  /// the Sync Rules screen shows the item's title immediately instead of a bare
+  /// rating key — useful for collection/playlist rules where no underlying
+  /// episode download would otherwise populate it.
+  Future<void> createSyncRule({
+    required String serverId,
+    required String ratingKey,
+    required String targetType,
+    required int episodeCount,
+    int mediaIndex = 0,
+    String downloadFilter = SyncRuleFilter.unwatched,
+    PlexMetadata? targetMetadata,
+  }) async {
+    final globalKey = buildGlobalKey(serverId, ratingKey);
+    await _database.insertSyncRule(
+      serverId: serverId,
+      ratingKey: ratingKey,
+      globalKey: globalKey,
+      targetType: targetType,
+      episodeCount: episodeCount,
+      mediaIndex: mediaIndex,
+      downloadFilter: downloadFilter,
+    );
+
+    if (targetMetadata != null) {
+      final withServer = targetMetadata.serverId != null ? targetMetadata : targetMetadata.copyWith(serverId: serverId);
+      _metadata[globalKey] = withServer;
+    }
+
+    // Reload to get the full row with id/timestamps
+    final rule = await _database.getSyncRule(globalKey);
+    if (rule != null) {
+      _syncRules[globalKey] = rule;
+      notifyListeners();
+    }
+    appLogger.i('Created sync rule: $globalKey ($targetType, filter=$downloadFilter, keep $episodeCount)');
+  }
+
+  /// Update the episode count for an existing show/season sync rule.
+  Future<void> updateSyncRuleCount(String globalKey, int episodeCount) async {
+    await _database.updateSyncRuleCount(globalKey, episodeCount);
+    final existing = _syncRules[globalKey];
+    if (existing != null) {
+      _syncRules[globalKey] = existing.copyWith(episodeCount: episodeCount);
+      notifyListeners();
+    }
+    appLogger.i('Updated sync rule $globalKey: keep $episodeCount');
+  }
+
+  /// Update the download filter for an existing collection/playlist sync rule.
+  Future<void> updateSyncRuleFilter(String globalKey, String downloadFilter) async {
+    await _database.updateSyncRuleFilter(globalKey, downloadFilter);
+    final existing = _syncRules[globalKey];
+    if (existing != null) {
+      _syncRules[globalKey] = existing.copyWith(downloadFilter: downloadFilter);
+      notifyListeners();
+    }
+    appLogger.i('Updated sync rule $globalKey: filter=$downloadFilter');
+  }
+
+  /// Toggle a sync rule's enabled state.
+  Future<void> setSyncRuleEnabled(String globalKey, bool enabled) async {
+    await _database.updateSyncRuleEnabled(globalKey, enabled);
+    final existing = _syncRules[globalKey];
+    if (existing != null) {
+      _syncRules[globalKey] = existing.copyWith(enabled: enabled);
+      notifyListeners();
+    }
+    appLogger.i('${enabled ? 'Enabled' : 'Disabled'} sync rule: $globalKey');
+  }
+
+  /// Delete a sync rule. Downloaded episodes are kept.
+  Future<void> deleteSyncRule(String globalKey) async {
+    await _database.deleteSyncRule(globalKey);
+    _syncRules.remove(globalKey);
+    notifyListeners();
+    appLogger.i('Deleted sync rule: $globalKey');
+  }
+
+  /// Execute all sync rules: auto-delete watched + queue replacements.
+  ///
+  /// Pass [force] `true` from user-initiated triggers (watch-state events,
+  /// offline-sync drains) to bypass the executor's cooldown. Defaults to
+  /// `false` for background probes (e.g. connectivity reconnects).
+  ///
+  /// Returns titles of newly queued items (for snackbar display).
+  Future<List<String>> executeSyncRules(MultiServerManager serverManager, {bool force = false}) async {
+    if (_syncRules.isEmpty) return [];
+
+    final results = await _syncRuleExecutor.executeSyncRules(
+      serverManager: serverManager,
+      downloads: Map.unmodifiable(_downloads),
+      metadata: Map.unmodifiable(_metadata),
+      queueSingleDownload: (episode, client, {int mediaIndex = 0}) =>
+          _queueSingleDownload(episode, client, mediaIndex: mediaIndex),
+      force: force,
+    );
+
+    return results.where((r) => r.queuedCount > 0).map((r) {
+      final title = r.title ?? 'Unknown';
+      return '$title (${r.queuedCount})';
+    }).toList();
+  }
+
+  /// Execute a single sync rule immediately (eager path for `addToPlaylist` /
+  /// `addToCollection`). Bypasses the cooldown.
+  Future<SyncRuleResult?> executeSyncRuleFor(String globalKey, MultiServerManager serverManager) async {
+    if (!_syncRules.containsKey(globalKey)) return null;
+
+    return _syncRuleExecutor.executeSingleRule(
+      globalKey: globalKey,
+      serverManager: serverManager,
+      downloads: Map.unmodifiable(_downloads),
+      metadata: Map.unmodifiable(_metadata),
+      queueSingleDownload: (episode, client, {int mediaIndex = 0}) =>
+          _queueSingleDownload(episode, client, mediaIndex: mediaIndex),
+    );
+  }
+
+  Future<void> _loadSyncRules() async {
+    try {
+      _syncRules.clear();
+      final rules = await _database.getSyncRules();
+      for (final rule in rules) {
+        _syncRules[rule.globalKey] = rule;
+      }
+    } catch (e) {
+      appLogger.w('Failed to load sync rules', error: e);
+    }
   }
 }
 

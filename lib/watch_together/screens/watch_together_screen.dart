@@ -104,7 +104,10 @@ class _NotInSessionViewState extends State<_NotInSessionView> {
       final client = HttpClient();
       client.connectionTimeout = const Duration(seconds: 5);
       final request = await client.getUrl(Uri.parse(WatchTogetherPeerService.healthUrlFor(_customRelayUrl)));
-      final response = await request.close().namedTimeout(const Duration(seconds: 5), operation: 'WatchTogether health check');
+      final response = await request.close().namedTimeout(
+        const Duration(seconds: 5),
+        operation: 'WatchTogether health check',
+      );
       final body = await response.transform(const SystemEncoding().decoder).join();
       client.close();
       if (!mounted) return;
@@ -194,14 +197,16 @@ class _NotInSessionViewState extends State<_NotInSessionView> {
                   child: Text(t.watchTogether.recentRooms, style: theme.textTheme.titleSmall),
                 ),
                 const SizedBox(height: 8),
-                ..._recentRooms.map((room) => _RecentRoomTile(
-                      room: room,
-                      isBusy: _isBusy,
-                      isEntering: _enteringRoomCode == room.code,
-                      onTap: () => _enterRoom(room),
-                      onRename: () => _renameRoom(room),
-                      onRemove: () => _removeRoom(room),
-                    )),
+                ..._recentRooms.map(
+                  (room) => _RecentRoomTile(
+                    room: room,
+                    isBusy: _isBusy,
+                    isEntering: _enteringRoomCode == room.code,
+                    onTap: () => _enterRoom(room),
+                    onRename: () => _renameRoom(room),
+                    onRemove: () => _removeRoom(room),
+                  ),
+                ),
               ],
             ],
           ),
@@ -221,7 +226,7 @@ class _NotInSessionViewState extends State<_NotInSessionView> {
         controlMode: controlMode,
         displayName: _plexDisplayName,
       );
-      await RecentRoomsService.addOrUpdateRoom(sessionId);
+      await RecentRoomsService.addOrUpdateRoom(sessionId, controlMode: controlMode);
       if (mounted) setState(() => _recentRooms = RecentRoomsService.getRecentRooms());
     } catch (e) {
       appLogger.e('Failed to create session', error: e);
@@ -299,7 +304,11 @@ class _NotInSessionViewState extends State<_NotInSessionView> {
     setState(() => _enteringRoomCode = room.code);
 
     try {
-      await widget.watchTogether.enterRoom(room.code, displayName: _plexDisplayName);
+      await widget.watchTogether.enterRoom(
+        room.code,
+        controlMode: room.controlMode ?? ControlMode.anyone,
+        displayName: _plexDisplayName,
+      );
       await RecentRoomsService.addOrUpdateRoom(room.code);
       if (mounted) setState(() => _recentRooms = RecentRoomsService.getRecentRooms());
     } catch (e) {
@@ -381,12 +390,12 @@ class _RecentRoomTile extends StatelessWidget {
               : const Icon(Symbols.meeting_room_rounded),
           title: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis),
           subtitle: room.name != null
-              ? Text(room.code, style: TextStyle(fontFamily: 'monospace', color: theme.colorScheme.onSurfaceVariant))
+              ? Text(
+                  room.code,
+                  style: TextStyle(fontFamily: 'monospace', color: theme.colorScheme.onSurfaceVariant),
+                )
               : null,
-          trailing: IconButton(
-            icon: const Icon(Symbols.more_vert_rounded),
-            onPressed: () => _showActions(context),
-          ),
+          trailing: IconButton(icon: const Icon(Symbols.more_vert_rounded), onPressed: () => _showActions(context)),
           onTap: isBusy ? null : onTap,
         ),
       ),

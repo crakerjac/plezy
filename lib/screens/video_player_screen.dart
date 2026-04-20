@@ -36,6 +36,7 @@ import '../providers/companion_remote_provider.dart';
 import '../services/companion_remote/companion_remote_receiver.dart';
 import '../services/fullscreen_state_manager.dart';
 import '../services/discord_rpc_service.dart';
+import '../services/trakt/trakt_scrobble_service.dart';
 import '../services/episode_navigation_service.dart';
 import '../services/media_controls_manager.dart';
 import '../services/playback_initialization_service.dart';
@@ -64,6 +65,7 @@ import '../utils/plex_url_helper.dart';
 import '../utils/video_player_navigation.dart';
 import '../widgets/overlay_sheet.dart';
 import '../widgets/video_controls/video_controls.dart';
+import '../widgets/video_controls/widgets/player_toast_indicator.dart';
 import '../focus/focusable_button.dart';
 import '../focus/input_mode_tracker.dart';
 import '../focus/dpad_navigator.dart';
@@ -145,14 +147,16 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
 
   Player? player;
   bool _isPlayerInitialized = false;
+  late PlexMetadata _currentMetadata;
   PlexMetadata? _nextEpisode;
   PlexMetadata? _previousEpisode;
   bool _isLoadingNext = false;
+  bool _isSwappingEpisode = false;
   bool _showPlayNextDialog = false;
   bool _isPhone = false;
   List<PlexMediaVersion> _availableVersions = [];
   PlexMediaInfo? _currentMediaInfo;
-  StreamSubscription<String>? _errorSubscription;
+  StreamSubscription<PlayerError>? _errorSubscription;
   StreamSubscription<bool>? _playingSubscription;
   StreamSubscription<bool>? _completedSubscription;
   StreamSubscription<dynamic>? _mediaControlSubscription;
@@ -214,6 +218,9 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
   // Screen-level focus node: persists across loading/initialized phases so
   // key events never escape the video player route.
   late final FocusNode _screenFocusNode;
+
+  // VLC-style in-player toast controller (rate changes, backend switch, etc.).
+  final PlayerToastController _toastController = PlayerToastController();
   bool _reclaimingFocus = false;
 
   // Cached setting: when false on Windows/Linux, ESC should not exit the player
@@ -256,7 +263,7 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
 
   /// Get the correct PlexClient for this metadata's server
   PlexClient _getClientForMetadata(BuildContext context) {
-    return context.getClientForServer(widget.metadata.serverId!);
+    return context.getClientForServer(_currentMetadata.serverId!);
   }
 
   Uint8List? _getThumbnailData(Duration time) => _bifService?.getThumbnail(time);
@@ -272,6 +279,7 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
   void initState() {
     super.initState();
 
+    _currentMetadata = widget.metadata;
     _activeRatingKey = widget.metadata.ratingKey;
     _activeMediaIndex = widget.selectedMediaIndex;
 
@@ -469,6 +477,10 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
       return;
     }
 
+    // Suppress Watch Together heartbeats while backgrounded so App Nap
+    // doesn't cause stale position broadcasts that make guests loop.
+    _watchTogetherProvider?.setBackgrounded(true);
+
     final currentPlayer = player;
     if (currentPlayer == null || !_isPlayerInitialized) {
       _recordLifecycleState('hidden', action: 'skipped_no_player');
@@ -508,6 +520,7 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
 
   Future<void> _handleAppResumed() async {
     _recordLifecycleState('resumed', action: 'begin');
+    _watchTogetherProvider?.setBackgrounded(false);
 
     if (Platform.isAndroid && _androidAutoPipTransitionInFlight && !PipService().isPipActive.value) {
       _setAndroidAutoPipTransitionInFlight(false, reason: 'resume_without_pip');
@@ -614,6 +627,8 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
       await player!.setProperty('sub-color', settingsService.getSubtitleTextColor());
       await player!.setProperty('sub-border-size', settingsService.getSubtitleBorderSize().toString());
       await player!.setProperty('sub-border-color', settingsService.getSubtitleBorderColor());
+      await player!.setProperty('sub-bold', settingsService.getSubtitleBold() ? 'yes' : 'no');
+      await player!.setProperty('sub-italic', settingsService.getSubtitleItalic() ? 'yes' : 'no');
       final bgOpacity = (settingsService.getSubtitleBackgroundOpacity() * 255 / 100).toInt();
       final bgColor = settingsService.getSubtitleBackgroundColor().replaceFirst('#', '');
       await player!.setProperty(
@@ -726,16 +741,25 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
       // Listen to playback state changes
       _playingSubscription = player!.streams.playing.listen(_onPlayingStateChanged);
 
-      // Listen to completion
-      _completedSubscription = player!.streams.completed.listen(_onVideoCompleted);
+      // Listen to completion. When mpv emits completed=false (file-loaded after a
+      // reconnect-seek or fresh open), clear a stale _completionTriggered so the
+      // real end-of-file can still show Play Next. Guarded against clobbering an
+      // active dialog or running auto-play countdown.
+      _completedSubscription = player!.streams.completed.listen((done) {
+        if (!done && _completionTriggered && !_showPlayNextDialog && _autoPlayTimer?.isActive != true) {
+          _completionTriggered = false;
+        }
+        _onVideoCompleted(done);
+      });
 
       // Listen to MPV errors
       _errorSubscription = player!.streams.error.listen(_onPlayerError);
 
-      // Listen to error-level log messages for user-visible snackbars
+      // warn is included so we can catch ffmpeg's "HTTP error 500" line in
+      // _onPlayerLog — the error-level log that follows omits the status code.
       _logSubscription = player!.streams.log
-          .where((log) => log.level == PlayerLogLevel.error || log.level == PlayerLogLevel.fatal)
-          .listen(_onPlayerLogError);
+          .where((log) => const {PlayerLogLevel.fatal, PlayerLogLevel.error, PlayerLogLevel.warn}.contains(log.level))
+          .listen(_onPlayerLog);
 
       // Listen for backend switched event (ExoPlayer -> MPV fallback on Android)
       if (Platform.isAndroid && useExoPlayer) {
@@ -770,6 +794,7 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
       // Listen to playback restart to detect first frame ready
       _playbackRestartSubscription = player!.streams.playbackRestart.listen((_) async {
         _lastLogError = null;
+        _sawServer500 = false;
         _liveStreamFallbackLevel = 0;
         if (!_hasFirstFrame.value) {
           _hasFirstFrame.value = true;
@@ -835,6 +860,7 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
   /// Apply frame rate matching on Android by setting the display refresh rate
   /// to match the video content's frame rate.
   int _frameRateRetries = 0;
+  bool _suppressMediaPauseDuringFrameRateSwitch = false;
   Future<void> _applyFrameRateMatching() async {
     if (player == null || !Platform.isAndroid) return;
 
@@ -857,7 +883,15 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
 
       _frameRateRetries = 0;
       final durationMs = player!.state.duration.inMilliseconds;
+
+      // Suppress spurious PauseEvent from MediaSession during HDMI renegotiation.
+      // Fire Stick (and similar Android TV devices) send onPause() through the
+      // MediaSession callback when the display mode changes for frame rate matching.
+      _suppressMediaPauseDuringFrameRateSwitch = true;
       await player!.setVideoFrameRate(fps, durationMs);
+      Future.delayed(const Duration(seconds: 2), () {
+        _suppressMediaPauseDuringFrameRateSwitch = false;
+      });
 
       // Set MPV video-sync mode for smoother playback when display is synced
       await player!.setProperty('video-sync', 'display-tempo');
@@ -904,11 +938,18 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
     }
   }
 
-  /// Called when fullscreen state changes — restore display mode if exiting fullscreen.
+  /// Called when fullscreen state changes — apply or restore Windows display
+  /// matching. On Windows the player opens windowed by default, so the initial
+  /// attempt during `playbackRestart` is skipped by DisplayModeService's
+  /// fullscreen gate. Catching the enter-fullscreen transition here lets the
+  /// switch happen at the natural moment the user starts watching.
   void _onFullscreenChanged() {
-    if (!FullscreenStateManager().isFullscreen &&
-        _displayModeService != null &&
-        _displayModeService!.anyChangeApplied) {
+    if (_displayModeService == null) return;
+    if (FullscreenStateManager().isFullscreen) {
+      if (_hasFirstFrame.value && !_displayModeService!.anyChangeApplied) {
+        _applyWindowsDisplayMatching();
+      }
+    } else if (_displayModeService!.anyChangeApplied) {
       _restoreWindowsDisplayMode();
     }
   }
@@ -949,7 +990,7 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
       final offlineWatchService = context.read<OfflineWatchSyncService>();
       _progressTracker = PlaybackProgressTracker(
         client: null,
-        metadata: widget.metadata,
+        metadata: _currentMetadata,
         player: player!,
         isOffline: true,
         offlineWatchService: offlineWatchService,
@@ -957,7 +998,7 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
       _progressTracker!.startTracking();
     } else if (client != null) {
       // Online mode: send progress to server
-      _progressTracker = PlaybackProgressTracker(client: client, metadata: widget.metadata, player: player!);
+      _progressTracker = PlaybackProgressTracker(client: client, metadata: _currentMetadata, player: player!);
       _progressTracker!.startTracking();
     }
 
@@ -976,6 +1017,10 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
         _wasPlayingBeforeInactive = false;
         _updateMediaControlsPlaybackState();
       } else if (event is PauseEvent) {
+        if (_suppressMediaPauseDuringFrameRateSwitch) {
+          appLogger.d('Media control: Pause event suppressed (frame rate switch in progress)');
+          return;
+        }
         appLogger.d('Media control: Pause event received');
         currentPlayer!.pause();
         _updateMediaControlsPlaybackState();
@@ -1003,9 +1048,9 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
 
     // Update media metadata (client can be null in offline mode - artwork won't be shown)
     await _mediaControlsManager!.updateMetadata(
-      metadata: widget.metadata,
+      metadata: _currentMetadata,
       client: client,
-      duration: widget.metadata.duration != null ? Duration(milliseconds: widget.metadata.duration!) : null,
+      duration: _currentMetadata.duration != null ? Duration(milliseconds: _currentMetadata.duration!) : null,
     );
 
     if (!mounted) return;
@@ -1025,6 +1070,10 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
         speed: player!.state.rate,
       );
       DiscordRPCService.instance.updatePosition(position);
+      TraktScrobbleService.instance.updatePosition(position);
+      // Keep Trakt's known duration current — mpv only emits on the duration
+      // stream once per load, but this is cheap and avoids an extra listener.
+      TraktScrobbleService.instance.updateDuration(player!.state.duration);
     });
 
     // Listen to playback rate changes for Discord Rich Presence
@@ -1038,7 +1087,8 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
 
     // Start Discord Rich Presence for current media
     if (client != null) {
-      DiscordRPCService.instance.startPlayback(widget.metadata, client);
+      DiscordRPCService.instance.startPlayback(_currentMetadata, client);
+      TraktScrobbleService.instance.startPlayback(_currentMetadata, client, isLive: widget.isLive);
     }
   }
 
@@ -1053,7 +1103,7 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
     if (widget.isLive) return;
 
     // Only create play queues for episodes
-    if (!widget.metadata.isEpisode) {
+    if (!_currentMetadata.isEpisode) {
       return;
     }
 
@@ -1064,7 +1114,7 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
 
       // Determine the show's rating key
       // For episodes, grandparentRatingKey points to the show
-      final showRatingKey = widget.metadata.grandparentRatingKey;
+      final showRatingKey = _currentMetadata.grandparentRatingKey;
       if (showRatingKey == null) {
         appLogger.d('Episode missing grandparentRatingKey, skipping play queue creation');
         return;
@@ -1077,7 +1127,7 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
       if (isQueueActive) {
         // A queue already exists (could be shuffle, playlist, or sequential)
         // Just update the current item, don't create a new queue
-        playbackState.setCurrentItem(widget.metadata);
+        playbackState.setCurrentItem(_currentMetadata);
         appLogger.d('Using existing play queue (context: $existingContextKey)');
         return;
       }
@@ -1087,7 +1137,7 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
       final playQueue = await client.createShowPlayQueue(
         showRatingKey: showRatingKey,
         shuffle: 0, // Sequential order
-        startingEpisodeKey: widget.metadata.ratingKey,
+        startingEpisodeKey: _currentMetadata.ratingKey,
       );
 
       if (playQueue != null && playQueue.items != null && playQueue.items!.isNotEmpty) {
@@ -1118,7 +1168,7 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
       // Load adjacent episodes using the service
       final adjacentEpisodes = await _episodeNavigation.loadAdjacentEpisodes(
         context: context,
-        metadata: widget.metadata,
+        metadata: _currentMetadata,
       );
 
       if (mounted) {
@@ -1135,9 +1185,9 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
 
   /// Load next/previous episodes from locally downloaded content
   void _loadAdjacentEpisodesOffline() {
-    if (!widget.metadata.isEpisode) return;
+    if (!_currentMetadata.isEpisode) return;
 
-    final showKey = widget.metadata.grandparentRatingKey;
+    final showKey = _currentMetadata.grandparentRatingKey;
     if (showKey == null) return;
 
     try {
@@ -1162,7 +1212,7 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
         });
 
       // Find current episode in the sorted list
-      final currentIdx = sorted.indexWhere((ep) => ep.ratingKey == widget.metadata.ratingKey);
+      final currentIdx = sorted.indexWhere((ep) => ep.ratingKey == _currentMetadata.ratingKey);
 
       if (currentIdx == -1) return;
 
@@ -1299,7 +1349,7 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
         plexHeaders = client.config.headers;
         final playbackService = PlaybackInitializationService(client: client, database: PlexApiCache.instance.database);
         result = await playbackService.getPlaybackData(
-          metadata: widget.metadata,
+          metadata: _currentMetadata,
           selectedMediaIndex: widget.selectedMediaIndex,
           preferOffline: true, // Use downloaded file if available
           playbackData: widget.playbackData,
@@ -1321,15 +1371,15 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
         // since the user may have watched further since downloading.
         Duration? resumePosition;
         if (widget.isOffline) {
-          final globalKey = widget.metadata.globalKey;
+          final globalKey = _currentMetadata.globalKey;
           final localOffset = await offlineWatchService!.getLocalViewOffset(globalKey);
           if (localOffset != null && localOffset > 0) {
             resumePosition = Duration(milliseconds: localOffset);
             appLogger.d('Resuming offline playback from local progress: ${localOffset}ms');
           }
         }
-        resumePosition ??= widget.metadata.viewOffset != null
-            ? Duration(milliseconds: widget.metadata.viewOffset!)
+        resumePosition ??= _currentMetadata.viewOffset != null
+            ? Duration(milliseconds: _currentMetadata.viewOffset!)
             : null;
 
         // Enable FFmpeg auto-reconnect for VOD streams (covers network drops up to 10 min)
@@ -1364,6 +1414,8 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
             bgColor: settingsService.getSubtitleBackgroundColor(),
             bgOpacity: settingsService.getSubtitleBackgroundOpacity(),
             subtitlePosition: settingsService.getSubtitlePosition(),
+            bold: settingsService.getSubtitleBold(),
+            italic: settingsService.getSubtitleItalic(),
           );
         }
 
@@ -1432,7 +1484,7 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
           getClient: () => _getClientForMetadata(context),
           getProfileSettings: () => context.read<UserProfileProvider>().profileSettings,
           waitForProfileSettings: _waitForProfileSettingsIfNeeded,
-          metadata: widget.metadata,
+          metadata: _currentMetadata,
           mediaInfo: _currentMediaInfo,
           preferredAudioTrack: widget.preferredAudioTrack,
           preferredSubtitleTrack: widget.preferredSubtitleTrack,
@@ -1480,9 +1532,9 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
     final downloadProvider = context.read<DownloadProvider>();
 
     // Debug: log metadata info
-    appLogger.d('Offline playback - serverId: ${widget.metadata.serverId}, ratingKey: ${widget.metadata.ratingKey}');
+    appLogger.d('Offline playback - serverId: ${_currentMetadata.serverId}, ratingKey: ${_currentMetadata.ratingKey}');
 
-    final globalKey = widget.metadata.globalKey;
+    final globalKey = _currentMetadata.globalKey;
     appLogger.d('Looking up video with globalKey: $globalKey');
 
     final videoPath = await downloadProvider.getVideoFilePath(globalKey);
@@ -1496,9 +1548,9 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
     // Load cached media info so track selection (audio language) works offline
     PlexMediaInfo? mediaInfo;
     try {
-      final serverId = widget.metadata.serverId;
+      final serverId = _currentMetadata.serverId;
       if (serverId != null) {
-        final cached = await PlexApiCache.instance.get(serverId, '/library/metadata/${widget.metadata.ratingKey}');
+        final cached = await PlexApiCache.instance.get(serverId, '/library/metadata/${_currentMetadata.ratingKey}');
         final metadataJson = PlexCacheParser.extractFirstMetadata(cached);
         if (metadataJson != null) {
           mediaInfo = PlexMediaInfo.fromMetadataJson(metadataJson);
@@ -1771,9 +1823,9 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
   }
 
   /// Notify watch together session of current media change (host only)
-  /// If [metadata] is provided, uses that instead of widget.metadata (for episode navigation)
+  /// If [metadata] is provided, uses that instead of _currentMetadata (for episode navigation)
   void _notifyWatchTogetherMediaChange({PlexMetadata? metadata}) {
-    final targetMetadata = metadata ?? widget.metadata;
+    final targetMetadata = metadata ?? _currentMetadata;
     try {
       final watchTogether = context.read<WatchTogetherProvider>();
       if (watchTogether.isHost && watchTogether.isInSession) {
@@ -1833,19 +1885,23 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
     receiver.onSeekForward = () async {
       if (player == null) return;
       final settings = await SettingsService.getInstance();
-      final target = clampSeekPosition(
-        player!,
-        player!.state.position + Duration(seconds: settings.getSeekTimeSmall()),
-      );
+      final seekSeconds = settings.getSeekTimeSmall();
+      if (widget.isLive && _captureBuffer != null) {
+        await _seekLivePosition(_currentPositionEpoch + seekSeconds);
+        return;
+      }
+      final target = clampSeekPosition(player!, player!.state.position + Duration(seconds: seekSeconds));
       await player!.seek(target);
     };
     receiver.onSeekBackward = () async {
       if (player == null) return;
       final settings = await SettingsService.getInstance();
-      final target = clampSeekPosition(
-        player!,
-        player!.state.position - Duration(seconds: settings.getSeekTimeSmall()),
-      );
+      final seekSeconds = settings.getSeekTimeSmall();
+      if (widget.isLive && _captureBuffer != null) {
+        await _seekLivePosition(_currentPositionEpoch - seekSeconds);
+        return;
+      }
+      final target = clampSeekPosition(player!, player!.state.position - Duration(seconds: seekSeconds));
       await player!.seek(target);
     };
     receiver.onVolumeUp = () async {
@@ -1952,8 +2008,11 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
           if (mounted) {
             await _exitFullscreenIfNeeded();
             if (!mounted) return;
-            _isExiting.value = true;
-            Navigator.of(context).pop(true);
+            final navigator = Navigator.of(context);
+            if (navigator.canPop()) {
+              _isExiting.value = true;
+              navigator.pop(true);
+            }
           }
         }
         return;
@@ -1963,8 +2022,11 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
 
       // Default behavior for hosts or non-session users
       if (!mounted) return;
-      _isExiting.value = true;
-      Navigator.of(context).pop(true);
+      final navigator = Navigator.of(context);
+      if (navigator.canPop()) {
+        _isExiting.value = true;
+        navigator.pop(true);
+      }
     } finally {
       _isHandlingBack = false;
     }
@@ -1996,6 +2058,7 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
     _hasFirstFrame.dispose();
     _isExiting.dispose();
     _controlsVisible.dispose();
+    _toastController.dispose();
 
     // Stop progress tracking and send final state.
     // Fire-and-forget: dispose() is synchronous so we can't await, but the
@@ -2061,8 +2124,9 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
     _mediaControlsManager?.clear();
     _mediaControlsManager?.dispose();
 
-    // Clear Discord Rich Presence
+    // Clear Discord Rich Presence + send Trakt stop scrobble
     DiscordRPCService.instance.stopPlayback();
+    TraktScrobbleService.instance.stopPlayback();
 
     // Clean up Windows display mode service
     if (Platform.isWindows && _displayModeService != null) {
@@ -2110,7 +2174,7 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
 
     Sentry.addBreadcrumb(Breadcrumb(message: 'Player dispose', category: 'player'));
     player?.dispose();
-    if (_activeRatingKey == widget.metadata.ratingKey) {
+    if (_activeRatingKey == _currentMetadata.ratingKey) {
       _activeRatingKey = null;
       _activeMediaIndex = null;
     }
@@ -2150,11 +2214,13 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
     // Update OS media controls playback state
     _updateMediaControlsPlaybackState();
 
-    // Update Discord Rich Presence
+    // Update Discord Rich Presence + Trakt scrobble
     if (isPlaying) {
       DiscordRPCService.instance.resumePlayback();
+      TraktScrobbleService.instance.resumePlayback();
     } else {
       DiscordRPCService.instance.pausePlayback();
+      TraktScrobbleService.instance.pausePlayback();
     }
 
     // Update auto-PiP readiness
@@ -2168,6 +2234,8 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
     // inter-segment gaps in the chunked MKV transcode stream.
     if (widget.isLive) return;
     if (!completed) return;
+    // Ignore spurious EOF from the old file during in-place episode swap
+    if (_isSwappingEpisode) return;
 
     // mpv does not flip the `pause` property on EOF, so _onPlayingStateChanged
     // never fires false.  Normalize all playback-dependent state.
@@ -2175,12 +2243,19 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
     _progressTracker?.sendProgress('paused');
     _updateMediaControlsPlaybackState();
     DiscordRPCService.instance.pausePlayback();
+    TraktScrobbleService.instance.pausePlayback();
     if (_autoPipEnabled) {
       _videoPIPManager?.updateAutoPipState(isPlaying: false);
     }
 
     if (_nextEpisode != null && !_showPlayNextDialog && !_showStillWatchingPrompt && !_completionTriggered) {
       _completionTriggered = true;
+
+      // PiP: skip dialog (user can't interact), auto-play immediately
+      if (PipService().isPipActive.value) {
+        _playNext();
+        return;
+      }
 
       // Capture keyboard mode before async gap
       final isKeyboardMode = PlatformDetector.isTV() && InputModeTracker.isKeyboardMode(context);
@@ -2212,9 +2287,15 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
     }
   }
 
-  void _onPlayerError(String error) {
-    appLogger.e('[Player ERROR] $error');
+  void _onPlayerError(PlayerError err) {
+    appLogger.e('[Player ERROR] ${err.message}');
     if (!mounted || _isExiting.value) return;
+
+    // Fatal, unrecoverable until server-side fix — show modal instead of a snackbar.
+    if (err.cause == PlayerError.serverHttp500 || _sawServer500) {
+      _showServerLimitDialog();
+      return;
+    }
 
     // Live TV: retry with progressively degraded stream settings
     // (mirrors Plex web client fallback chain).
@@ -2226,15 +2307,29 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
       return;
     }
 
-    showGlobalErrorSnackBar(_lastLogError ?? error);
+    showGlobalErrorSnackBar(_lastLogError ?? err.message);
     _handleBackButton();
   }
 
   String? _lastLogError;
+  bool _sawServer500 = false;
 
-  void _onPlayerLogError(PlayerLog log) {
-    appLogger.e('[Player LOG ERROR] [${log.prefix}] ${log.text}');
-    _lastLogError = log.text.trim();
+  static final RegExp _server500Pattern = RegExp(r'\b(?:HTTP error |Response code: )500\b');
+
+  void _onPlayerLog(PlayerLog log) {
+    if (!_sawServer500 && _server500Pattern.hasMatch(log.text)) {
+      _sawServer500 = true;
+    }
+    if (log.level == PlayerLogLevel.error || log.level == PlayerLogLevel.fatal) {
+      appLogger.e('[Player LOG ERROR] [${log.prefix}] ${log.text}');
+      _lastLogError = log.text.trim();
+    }
+  }
+
+  Future<void> _showServerLimitDialog() async {
+    if (!mounted) return;
+    await showServerLimitDialog(context);
+    if (mounted) _handleBackButton();
   }
 
   /// Handle notification when native player switched from ExoPlayer to MPV
@@ -2242,9 +2337,11 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
     _playerBackendLabel = 'mpv';
     _recordLifecycleState('backend_switched', action: 'mpv_fallback');
 
-    if (mounted) {
-      showAppSnackBar(context, t.messages.switchingToCompatiblePlayer);
-    }
+    _toastController.show(
+      Symbols.swap_horiz_rounded,
+      t.messages.switchingToCompatiblePlayer,
+      duration: const Duration(seconds: 2),
+    );
 
     await _trackManager?.onBackendSwitched();
   }
@@ -2257,7 +2354,7 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
     if (!mounted || manager == null || currentPlayer == null) return;
 
     final playbackState = context.read<PlaybackStateProvider>();
-    final canNavigateEpisodes = widget.metadata.isEpisode || playbackState.isPlaylistActive;
+    final canNavigateEpisodes = _currentMetadata.isEpisode || playbackState.isPlaylistActive;
     final canSeek = !widget.isLive && currentPlayer.state.seekable;
 
     if (!mounted || currentPlayer != player || manager != _mediaControlsManager) return;
@@ -2285,9 +2382,9 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
     if (manager != null && currentPlayer != null) {
       final client = widget.isOffline ? null : _getClientForMetadata(context);
       await manager.updateMetadata(
-        metadata: widget.metadata,
+        metadata: _currentMetadata,
         client: client,
-        duration: widget.metadata.duration != null ? Duration(milliseconds: widget.metadata.duration!) : null,
+        duration: _currentMetadata.duration != null ? Duration(milliseconds: _currentMetadata.duration!) : null,
       );
       await _syncMediaControlsAvailability();
     }
@@ -2488,6 +2585,11 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
     if (p == null || !_isPlayerInitialized) return;
     final pos = p.state.position;
     appLogger.i('Network restored while buffering, forcing stream reconnect at ${pos.inSeconds}s');
+    // Clear any stale completion latch caused by a spurious EOF during the drop,
+    // so the real end-of-file can trigger Play Next after we recover.
+    if (_completionTriggered && !_showPlayNextDialog && _autoPlayTimer?.isActive != true) {
+      _completionTriggered = false;
+    }
     p.seek(pos);
   }
 
@@ -2771,13 +2873,21 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
     _isReplacingWithVideo = true;
   }
 
-  /// Navigates to a new episode, preserving playback state and track selections
+  /// Navigates to a new episode, preserving playback state and track selections.
+  /// When PiP is active, swaps the media source in-place to keep the PiP window alive.
   Future<void> _navigateToEpisode(PlexMetadata episodeMetadata) async {
+    // PiP active: swap media in-place to keep PiP window alive
+    if (PipService().isPipActive.value && player != null) {
+      await _swapEpisodeInPip(episodeMetadata);
+      return;
+    }
+
     // Set flag to skip orientation restoration in dispose()
     _isReplacingWithVideo = true;
 
-    // Clear Discord Rich Presence before switching episodes
+    // Clear Discord Rich Presence + Trakt scrobble before switching episodes
     DiscordRPCService.instance.stopPlayback();
+    TraktScrobbleService.instance.stopPlayback();
 
     // If player isn't available, navigate without preserving settings
     if (player == null) {
@@ -2830,6 +2940,164 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
         usePushReplacement: true,
         isOffline: widget.isOffline,
       );
+    }
+  }
+
+  /// Swap to a new episode while keeping the player alive for PiP continuity.
+  /// Reuses the existing mpv instance (and its Metal layer in PiP) and only
+  /// reloads the media source + resets Dart-side services.
+  Future<void> _swapEpisodeInPip(PlexMetadata episodeMetadata) async {
+    _isSwappingEpisode = true;
+    final currentPlayer = player!;
+    final previousMetadata = _currentMetadata;
+
+    final currentAudioTrack = currentPlayer.state.track.audio;
+    final currentSubtitleTrack = currentPlayer.state.track.subtitle;
+    final currentSecondarySubtitleTrack = currentPlayer.state.track.secondarySubtitle;
+
+    // Capture context-dependent values before async gaps
+    final client = widget.isOffline ? null : _getClientForMetadata(context);
+    final plexHeaders = client?.config.headers;
+    final offlineWatchService = widget.isOffline ? context.read<OfflineWatchSyncService>() : null;
+    final userProfileProvider = context.read<UserProfileProvider>();
+    final playbackState = context.read<PlaybackStateProvider>();
+
+    await _progressTracker?.sendProgress('stopped');
+    _progressTracker?.stopTracking();
+    _progressTracker?.dispose();
+    _progressTracker = null;
+    DiscordRPCService.instance.stopPlayback();
+    TraktScrobbleService.instance.stopPlayback();
+
+    _currentMetadata = episodeMetadata;
+    _activeRatingKey = episodeMetadata.ratingKey;
+    _showPlayNextDialog = false;
+    _autoPlayTimer?.cancel();
+    _hasFirstFrame.value = false;
+
+    try {
+      PlaybackInitializationResult result;
+
+      if (widget.isOffline) {
+        result = await _startOfflinePlayback();
+      } else {
+        final playbackService = PlaybackInitializationService(
+          client: client!,
+          database: PlexApiCache.instance.database,
+        );
+        result = await playbackService.getPlaybackData(
+          metadata: episodeMetadata,
+          selectedMediaIndex: widget.selectedMediaIndex,
+          preferOffline: true,
+        );
+      }
+
+      if (result.videoUrl == null) {
+        throw PlaybackException('No video URL available');
+      }
+
+      Duration? resumePosition;
+      if (widget.isOffline) {
+        final localOffset = await offlineWatchService!.getLocalViewOffset(episodeMetadata.globalKey);
+        if (localOffset != null && localOffset > 0) {
+          resumePosition = Duration(milliseconds: localOffset);
+        }
+      }
+      resumePosition ??= episodeMetadata.viewOffset != null
+          ? Duration(milliseconds: episodeMetadata.viewOffset!)
+          : null;
+
+      final hasExternalSubs = result.externalSubtitles.isNotEmpty;
+      final isExoPlayer = player is PlayerAndroid;
+      await currentPlayer.open(
+        Media(result.videoUrl!, start: resumePosition, headers: plexHeaders),
+        play: isExoPlayer || !hasExternalSubs,
+        externalSubtitles: isExoPlayer && hasExternalSubs ? result.externalSubtitles : null,
+      );
+
+      _completionTriggered = false;
+      _isSwappingEpisode = false;
+
+      if (!mounted) return;
+
+      _bifService?.dispose();
+      setState(() {
+        _availableVersions = result.availableVersions.cast();
+        _currentMediaInfo = result.mediaInfo;
+        _bifService = null;
+        _isLoadingNext = false;
+      });
+
+      _trackManager?.dispose();
+      _trackManager = TrackManager(
+        player: currentPlayer,
+        isActive: () => mounted && player != null,
+        getClient: () => client!,
+        getProfileSettings: () => userProfileProvider.profileSettings,
+        waitForProfileSettings: _waitForProfileSettingsIfNeeded,
+        metadata: episodeMetadata,
+        mediaInfo: _currentMediaInfo,
+        preferredAudioTrack: currentAudioTrack,
+        preferredSubtitleTrack: currentSubtitleTrack,
+        preferredSecondarySubtitleTrack: currentSecondarySubtitleTrack,
+        showMessage: (message, {duration}) {
+          if (mounted) showAppSnackBar(context, message, duration: duration);
+        },
+      );
+      _trackManager!.cacheExternalSubtitles(result.externalSubtitles);
+
+      if (player is! PlayerAndroid && hasExternalSubs) {
+        _trackManager!.waitingForExternalSubsTrackSelection = true;
+        try {
+          await _trackManager!.addExternalSubtitles(result.externalSubtitles);
+        } finally {
+          await _trackManager!.resumeAfterSubtitleLoad();
+        }
+      } else {
+        _trackManager!.applyTrackSelectionWhenReady();
+      }
+
+      if (widget.isOffline) {
+        _progressTracker = PlaybackProgressTracker(
+          client: null,
+          metadata: episodeMetadata,
+          player: currentPlayer,
+          isOffline: true,
+          offlineWatchService: offlineWatchService,
+        );
+      } else {
+        _progressTracker = PlaybackProgressTracker(client: client, metadata: episodeMetadata, player: currentPlayer);
+      }
+      _progressTracker!.startTracking();
+
+      if (_mediaControlsManager != null) {
+        await _mediaControlsManager!.updateMetadata(
+          metadata: episodeMetadata,
+          client: client,
+          duration: episodeMetadata.duration != null ? Duration(milliseconds: episodeMetadata.duration!) : null,
+        );
+      }
+
+      if (client != null) {
+        DiscordRPCService.instance.startPlayback(episodeMetadata, client);
+        TraktScrobbleService.instance.startPlayback(episodeMetadata, client, isLive: widget.isLive);
+      }
+
+      try {
+        playbackState.setCurrentItem(episodeMetadata);
+      } catch (_) {}
+
+      await _loadAdjacentEpisodes();
+
+      if (_autoPipEnabled) {
+        _videoPIPManager?.updateAutoPipState(isPlaying: currentPlayer.state.playing);
+      }
+    } catch (e) {
+      _isSwappingEpisode = false;
+      _completionTriggered = false;
+      _currentMetadata = previousMetadata;
+      _activeRatingKey = previousMetadata.ratingKey;
+      appLogger.e('Failed to swap episode in PiP', error: e);
     }
   }
 
@@ -3040,7 +3308,7 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
                       player: player!,
                       controls: (context) => plexVideoControlsBuilder(
                         player!,
-                        widget.metadata,
+                        _currentMetadata,
                         onNext: onNext,
                         onPrevious: onPrevious,
                         availableVersions: _availableVersions,
@@ -3085,6 +3353,7 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
                         onJumpToLive: _captureBuffer != null && !_isAtLiveEdge ? _jumpToLiveEdge : null,
                         isAmbientLightingEnabled: _ambientLightingService?.isEnabled ?? false,
                         onToggleAmbientLighting: _toggleAmbientLighting,
+                        toastController: _toastController,
                       ),
                     );
                   },
@@ -3373,6 +3642,7 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
               // Watch Together overlays (isolated from video surface repaints)
               RepaintBoundary(
                 child: Stack(
+                  fit: StackFit.expand,
                   children: [
                     // Watch Together: reconnecting to host overlay
                     Selector<WatchTogetherProvider, bool>(

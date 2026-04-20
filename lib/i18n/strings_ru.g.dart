@@ -75,6 +75,7 @@ class TranslationsRu with BaseTranslations<AppLocale, Translations> implements T
 	@override late final _TranslationsExternalPlayerRu externalPlayer = _TranslationsExternalPlayerRu._(_root);
 	@override late final _TranslationsMetadataEditRu metadataEdit = _TranslationsMetadataEditRu._(_root);
 	@override late final _TranslationsServerTasksRu serverTasks = _TranslationsServerTasksRu._(_root);
+	@override late final _TranslationsTraktRu trakt = _TranslationsTraktRu._(_root);
 }
 
 // Path: app
@@ -128,7 +129,6 @@ class _TranslationsCommonRu implements TranslationsCommonEn {
 	@override String get shuffle => 'Перемешать';
 	@override String get addTo => 'Добавить в...';
 	@override String get createNew => 'Создать новый';
-	@override String get paste => 'Вставить';
 	@override String get connect => 'Подключить';
 	@override String get disconnect => 'Отключить';
 	@override String get play => 'Воспроизвести';
@@ -193,18 +193,18 @@ class _TranslationsSettingsRu implements TranslationsSettingsEn {
 
 	// Translations
 	@override String get title => 'Настройки';
+	@override String get supportDeveloper => 'Поддержать Plezy';
+	@override String get supportDeveloperDescription => 'Пожертвуйте через Liberapay на развитие';
 	@override String get language => 'Язык';
 	@override String get theme => 'Тема';
 	@override String get appearance => 'Внешний вид';
 	@override String get videoPlayback => 'Воспроизведение видео';
+	@override String get videoPlaybackDescription => 'Настройка поведения воспроизведения';
 	@override String get advanced => 'Дополнительно';
 	@override String get episodePosterMode => 'Стиль постера эпизода';
 	@override String get seriesPoster => 'Постер сериала';
-	@override String get seriesPosterDescription => 'Показывать постер сериала для всех эпизодов';
 	@override String get seasonPoster => 'Постер сезона';
-	@override String get seasonPosterDescription => 'Показывать постер конкретного сезона для эпизодов';
 	@override String get episodeThumbnail => 'Миниатюра';
-	@override String get episodeThumbnailDescription => 'Показывать миниатюры скриншотов эпизодов 16:9';
 	@override String get showHeroSectionDescription => 'Показывать карусель избранного контента на главном экране';
 	@override String get secondsLabel => 'Секунды';
 	@override String get minutesLabel => 'Минуты';
@@ -212,23 +212,15 @@ class _TranslationsSettingsRu implements TranslationsSettingsEn {
 	@override String get minutesShort => 'м';
 	@override String durationHint({required Object min, required Object max}) => 'Введите длительность (${min}-${max})';
 	@override String get systemTheme => 'Системная';
-	@override String get systemThemeDescription => 'Следовать настройкам системы';
 	@override String get lightTheme => 'Светлая';
 	@override String get darkTheme => 'Тёмная';
 	@override String get oledTheme => 'OLED';
-	@override String get oledThemeDescription => 'Чистый чёрный для OLED-экранов';
 	@override String get libraryDensity => 'Плотность библиотеки';
 	@override String get compact => 'Компактный';
-	@override String get compactDescription => 'Меньшие карточки, больше элементов видно';
-	@override String get normal => 'Обычный';
-	@override String get normalDescription => 'Размер по умолчанию';
 	@override String get comfortable => 'Комфортный';
-	@override String get comfortableDescription => 'Большие карточки, меньше элементов видно';
 	@override String get viewMode => 'Режим просмотра';
 	@override String get gridView => 'Сетка';
-	@override String get gridViewDescription => 'Отображать элементы в виде сетки';
 	@override String get listView => 'Список';
-	@override String get listViewDescription => 'Отображать элементы в виде списка';
 	@override String get showHeroSection => 'Показать раздел избранного';
 	@override String get useGlobalHubs => 'Использовать макет Plex Home';
 	@override String get useGlobalHubsDescription => 'Показывать хабы главной страницы как в официальном клиенте Plex. При выключении показывает рекомендации по библиотекам.';
@@ -242,9 +234,7 @@ class _TranslationsSettingsRu implements TranslationsSettingsEn {
 	@override String get hideSpoilersDescription => 'Размывать миниатюры и скрывать описания эпизодов, которые вы ещё не смотрели';
 	@override String get playerBackend => 'Бэкенд плеера';
 	@override String get exoPlayer => 'ExoPlayer (Рекомендуется)';
-	@override String get exoPlayerDescription => 'Нативный Android-плеер с лучшей аппаратной поддержкой';
 	@override String get mpv => 'mpv';
-	@override String get mpvDescription => 'Продвинутый плеер с большим количеством функций и поддержкой субтитров ASS';
 	@override String get hardwareDecoding => 'Аппаратное декодирование';
 	@override String get hardwareDecodingDescription => 'Использовать аппаратное ускорение, когда доступно';
 	@override String get bufferSize => 'Размер буфера';
@@ -256,7 +246,6 @@ class _TranslationsSettingsRu implements TranslationsSettingsEn {
 	@override String get smallSkipDuration => 'Малая перемотка';
 	@override String get largeSkipDuration => 'Большая перемотка';
 	@override String get rewindOnResume => 'Перемотка при возобновлении';
-	@override String get rewindOnResumeDescription => 'Перемотать на это количество секунд при возобновлении воспроизведения';
 	@override String secondsUnit({required Object seconds}) => '${seconds} секунд';
 	@override String get defaultSleepTimer => 'Таймер сна по умолчанию';
 	@override String minutesUnit({required Object minutes}) => '${minutes} минут';
@@ -270,7 +259,6 @@ class _TranslationsSettingsRu implements TranslationsSettingsEn {
 	@override String get videoPlayerNavigation => 'Навигация видеоплеера';
 	@override String get videoPlayerNavigationDescription => 'Использовать клавиши стрелок для навигации по элементам управления плеером';
 	@override String get watchTogetherRelay => 'Relay совместного просмотра';
-	@override String get watchTogetherRelayDefault => 'По умолчанию';
 	@override String get watchTogetherRelayDescription => 'Указать пользовательский relay-сервер для совместного просмотра. Все участники должны использовать один и тот же сервер.';
 	@override String get watchTogetherRelayHint => 'https://my-relay.example.com';
 	@override String get crashReporting => 'Отчёты об ошибках';
@@ -328,6 +316,10 @@ class _TranslationsSettingsRu implements TranslationsSettingsEn {
 	@override String maxVolumePercent({required Object percent}) => '${percent}%';
 	@override String get discordRichPresence => 'Discord Rich Presence';
 	@override String get discordRichPresenceDescription => 'Показывать, что вы смотрите, в Discord';
+	@override String get trakt => 'Trakt';
+	@override String get traktDescription => 'Синхронизировать историю просмотров с Trakt';
+	@override String get companionRemoteServer => 'Сервер удалённого управления';
+	@override String get companionRemoteServerDescription => 'Разрешить мобильным устройствам в сети управлять этим приложением';
 	@override String get autoPip => 'Автоматический «картинка в картинке»';
 	@override String get autoPipDescription => 'Автоматически переходить в режим «картинка в картинке» при выходе из приложения во время воспроизведения';
 	@override String get matchContentFrameRate => 'Соответствие частоты кадров контента';
@@ -337,13 +329,14 @@ class _TranslationsSettingsRu implements TranslationsSettingsEn {
 	@override String get matchDynamicRange => 'Соответствие динамического диапазона';
 	@override String get matchDynamicRangeDescription => 'Автоматически включать HDR для HDR-контента и возвращать SDR при выходе из плеера';
 	@override String get displaySwitchDelay => 'Задержка переключения дисплея';
-	@override String get displaySwitchDelayDescription => 'Секунды ожидания после смены режима дисплея перед началом воспроизведения';
 	@override String get tunneledPlayback => 'Туннельное воспроизведение';
 	@override String get tunneledPlaybackDescription => 'Использовать аппаратный видеотуннелинг. Отключите, если видите чёрный экран со звуком при HDR-контенте';
 	@override String get requireProfileSelectionOnOpen => 'Запрашивать профиль при запуске';
 	@override String get requireProfileSelectionOnOpenDescription => 'Показывать выбор профиля при каждом открытии приложения';
 	@override String get confirmExitOnBack => 'Подтверждать выход';
 	@override String get confirmExitOnBackDescription => 'Показывать диалог подтверждения при нажатии «назад» для выхода из приложения';
+	@override String get forceTvMode => 'Принудительный режим ТВ';
+	@override String get forceTvModeDescription => 'Использовать макет ТВ независимо от автоматического определения. Полезно на устройствах Android TV, которые не сообщают о функции leanback. Приложение перезапустится при изменении.';
 	@override String get autoHidePerformanceOverlay => 'Автоскрытие оверлея производительности';
 	@override String get autoHidePerformanceOverlayDescription => 'Скрывать оверлей производительности вместе с элементами управления воспроизведением';
 	@override String get showNavBarLabels => 'Показывать подписи панели навигации';
@@ -358,8 +351,6 @@ class _TranslationsSettingsRu implements TranslationsSettingsEn {
 	@override String get subtitlesAndConfig => 'Subtitles & Configuration';
 	@override String get seekAndTiming => 'Seek & Timing';
 	@override String get behavior => 'Behavior';
-	@override String get companionRemoteServer => 'Сервер удалённого управления';
-	@override String get companionRemoteServerDescription => 'Разрешить мобильным устройствам в сети управлять этим приложением';
 }
 
 // Path: search
@@ -524,7 +515,6 @@ class _TranslationsVideoControlsRu implements TranslationsVideoControlsEn {
 	@override String get alwaysOnTopButton => 'Всегда поверх';
 	@override String get rotationLockButton => 'Блокировка поворота';
 	@override String get lockScreen => 'Заблокировать экран';
-	@override String get unlockScreen => 'Разблокировать экран';
 	@override String get screenLockButton => 'Блокировка экрана';
 	@override String get longPressToUnlock => 'Удерживайте для разблокировки';
 	@override String get timelineSlider => 'Временная шкала';
@@ -596,6 +586,8 @@ class _TranslationsMessagesRu implements TranslationsMessagesEn {
 	@override String get failedToCreatePlayQueueNoItems => 'Не удалось создать очередь воспроизведения — нет элементов';
 	@override String failedPlayback({required Object action, required Object error}) => 'Не удалось ${action}: ${error}';
 	@override String get switchingToCompatiblePlayer => 'Переключение на совместимый плеер...';
+	@override String get serverLimitTitle => 'Ошибка воспроизведения';
+	@override String get serverLimitBody => 'Сервер вернул ошибку (HTTP 500). Обычно это означает, что владелец сервера установил лимит пропускной способности или транскодирования, из-за которого ваш сеанс отклоняется. Со стороны клиента сделать ничего нельзя — владельцу сервера нужно изменить настройки.';
 	@override String get logsUploaded => 'Логи загружены';
 	@override String get logsUploadFailed => 'Не удалось загрузить логи';
 	@override String get logId => 'ID лога';
@@ -608,7 +600,6 @@ class _TranslationsSubtitlingStylingRu implements TranslationsSubtitlingStylingE
 	final TranslationsRu _root; // ignore: unused_field
 
 	// Translations
-	@override String get stylingOptions => 'Параметры стиля';
 	@override String get text => 'Текст';
 	@override String get border => 'Обводка';
 	@override String get background => 'Фон';
@@ -620,6 +611,8 @@ class _TranslationsSubtitlingStylingRu implements TranslationsSubtitlingStylingE
 	@override String get backgroundColor => 'Цвет фона';
 	@override String get position => 'Позиция';
 	@override String get assOverride => 'Переопределение ASS';
+	@override String get bold => 'Жирный';
+	@override String get italic => 'Курсив';
 }
 
 // Path: mpvConfig
@@ -1019,6 +1012,24 @@ class _TranslationsDownloadsRu implements TranslationsDownloadsEn {
 	@override String get customAmount => 'Указать количество...';
 	@override String get howManyEpisodes => 'Сколько эпизодов?';
 	@override String itemsQueued({required Object count}) => '${count} элементов добавлено в очередь загрузки';
+	@override String get keepSynced => 'Синхронизировать';
+	@override String get downloadOnce => 'Скачать один раз';
+	@override String keepNUnwatched({required Object count}) => 'Хранить ${count} непросмотренных';
+	@override String get editSyncRule => 'Редактировать правило синхронизации';
+	@override String get removeSyncRule => 'Удалить правило синхронизации';
+	@override String removeSyncRuleConfirm({required Object title}) => 'Прекратить синхронизацию «${title}»? Скачанные эпизоды будут сохранены.';
+	@override String syncRuleCreated({required Object count}) => 'Правило синхронизации создано — хранится ${count} непросмотренных эпизодов';
+	@override String get syncRuleUpdated => 'Правило синхронизации обновлено';
+	@override String get syncRuleRemoved => 'Правило синхронизации удалено';
+	@override String syncedNewEpisodes({required Object count, required Object title}) => 'Синхронизировано ${count} новых эпизодов для ${title}';
+	@override String get activeSyncRules => 'Правила синхронизации';
+	@override String get noSyncRules => 'Нет правил синхронизации';
+	@override String get manageSyncRule => 'Управление синхронизацией';
+	@override String get editEpisodeCount => 'Количество эпизодов';
+	@override String get editSyncFilter => 'Фильтр синхронизации';
+	@override String get syncAllItems => 'Синхронизация всех элементов';
+	@override String get syncUnwatchedItems => 'Синхронизация непросмотренных элементов';
+	@override String get syncRuleListCreated => 'Правило синхронизации создано';
 }
 
 // Path: shaders
@@ -1050,11 +1061,6 @@ class _TranslationsCompanionRemoteRu implements TranslationsCompanionRemoteEn {
 
 	// Translations
 	@override String get title => 'Пульт управления';
-	@override String get connectToDevice => 'Подключиться к устройству';
-	@override String get hostRemoteSession => 'Создать удалённую сессию';
-	@override String get controlThisDevice => 'Управляйте этим устройством с телефона';
-	@override String get remoteControl => 'Пульт управления';
-	@override String get controlDesktop => 'Управлять десктопным устройством';
 	@override String connectedTo({required Object name}) => 'Подключено к ${name}';
 	@override late final _TranslationsCompanionRemoteSessionRu session = _TranslationsCompanionRemoteSessionRu._(_root);
 	@override late final _TranslationsCompanionRemotePairingRu pairing = _TranslationsCompanionRemotePairingRu._(_root);
@@ -1199,6 +1205,30 @@ class _TranslationsServerTasksRu implements TranslationsServerTasksEn {
 	@override String get noTasks => 'Нет выполняемых задач';
 }
 
+// Path: trakt
+class _TranslationsTraktRu implements TranslationsTraktEn {
+	_TranslationsTraktRu._(this._root);
+
+	final TranslationsRu _root; // ignore: unused_field
+
+	// Translations
+	@override String get title => 'Trakt';
+	@override String get connected => 'Подключено';
+	@override String connectedAs({required Object username}) => 'Подключено как @${username}';
+	@override String get disconnectConfirm => 'Отключить аккаунт Trakt?';
+	@override String get disconnectConfirmBody => 'Plezy перестанет отправлять события воспроизведения в Trakt. Вы можете подключиться снова в любое время.';
+	@override String get scrobble => 'Скробблинг в реальном времени';
+	@override String get scrobbleDescription => 'Отправлять события воспроизведения, паузы и остановки в Trakt во время просмотра.';
+	@override String get watchedSync => 'Синхронизация статуса просмотра';
+	@override String get watchedSyncDescription => 'Когда вы отмечаете элементы как просмотренные в Plezy, они отмечаются и в Trakt.';
+	@override String get deviceCodeTitle => 'Активация Plezy в Trakt';
+	@override String deviceCodeBody({required Object url}) => 'Откройте ${url} и введите этот код:';
+	@override String get openTraktActivate => 'Открыть Trakt для активации';
+	@override String get waitingForAuthorization => 'Ожидание авторизации…';
+	@override String get codeCopied => 'Код скопирован';
+	@override String get connectFailed => 'Не удалось подключиться к Trakt. Попробуйте ещё раз.';
+}
+
 // Path: hotkeys.actions
 class _TranslationsHotkeysActionsRu implements TranslationsHotkeysActionsEn {
 	_TranslationsHotkeysActionsRu._(this._root);
@@ -1300,7 +1330,6 @@ class _TranslationsCompanionRemotePairingRu implements TranslationsCompanionRemo
 	final TranslationsRu _root; // ignore: unused_field
 
 	// Translations
-	@override String get pairWithDesktop => 'Подключиться к компьютеру';
 	@override String get discoveryDescription => 'Устройства в вашей сети с Plezy на том же аккаунте Plex появятся автоматически';
 	@override String get hostAddressHint => '192.168.1.100:48632';
 	@override String get connecting => 'Подключение...';
@@ -1329,8 +1358,6 @@ class _TranslationsCompanionRemoteRemoteRu implements TranslationsCompanionRemot
 	@override String get reconnecting => 'Переподключение...';
 	@override String attemptOf({required Object current}) => 'Попытка ${current} из 5';
 	@override String get retryNow => 'Повторить сейчас';
-	@override String get connectionError => 'Ошибка подключения';
-	@override String get notConnected => 'Не подключено';
 	@override String get tabRemote => 'Пульт';
 	@override String get tabPlay => 'Воспроизведение';
 	@override String get tabMore => 'Ещё';
@@ -1390,7 +1417,6 @@ extension on TranslationsRu {
 			'common.shuffle' => 'Перемешать',
 			'common.addTo' => 'Добавить в...',
 			'common.createNew' => 'Создать новый',
-			'common.paste' => 'Вставить',
 			'common.connect' => 'Подключить',
 			'common.disconnect' => 'Отключить',
 			'common.play' => 'Воспроизвести',
@@ -1428,18 +1454,18 @@ extension on TranslationsRu {
 			'update.latestVersion' => 'У вас последняя версия',
 			'update.checkFailed' => 'Не удалось проверить обновления',
 			'settings.title' => 'Настройки',
+			'settings.supportDeveloper' => 'Поддержать Plezy',
+			'settings.supportDeveloperDescription' => 'Пожертвуйте через Liberapay на развитие',
 			'settings.language' => 'Язык',
 			'settings.theme' => 'Тема',
 			'settings.appearance' => 'Внешний вид',
 			'settings.videoPlayback' => 'Воспроизведение видео',
+			'settings.videoPlaybackDescription' => 'Настройка поведения воспроизведения',
 			'settings.advanced' => 'Дополнительно',
 			'settings.episodePosterMode' => 'Стиль постера эпизода',
 			'settings.seriesPoster' => 'Постер сериала',
-			'settings.seriesPosterDescription' => 'Показывать постер сериала для всех эпизодов',
 			'settings.seasonPoster' => 'Постер сезона',
-			'settings.seasonPosterDescription' => 'Показывать постер конкретного сезона для эпизодов',
 			'settings.episodeThumbnail' => 'Миниатюра',
-			'settings.episodeThumbnailDescription' => 'Показывать миниатюры скриншотов эпизодов 16:9',
 			'settings.showHeroSectionDescription' => 'Показывать карусель избранного контента на главном экране',
 			'settings.secondsLabel' => 'Секунды',
 			'settings.minutesLabel' => 'Минуты',
@@ -1447,23 +1473,15 @@ extension on TranslationsRu {
 			'settings.minutesShort' => 'м',
 			'settings.durationHint' => ({required Object min, required Object max}) => 'Введите длительность (${min}-${max})',
 			'settings.systemTheme' => 'Системная',
-			'settings.systemThemeDescription' => 'Следовать настройкам системы',
 			'settings.lightTheme' => 'Светлая',
 			'settings.darkTheme' => 'Тёмная',
 			'settings.oledTheme' => 'OLED',
-			'settings.oledThemeDescription' => 'Чистый чёрный для OLED-экранов',
 			'settings.libraryDensity' => 'Плотность библиотеки',
 			'settings.compact' => 'Компактный',
-			'settings.compactDescription' => 'Меньшие карточки, больше элементов видно',
-			'settings.normal' => 'Обычный',
-			'settings.normalDescription' => 'Размер по умолчанию',
 			'settings.comfortable' => 'Комфортный',
-			'settings.comfortableDescription' => 'Большие карточки, меньше элементов видно',
 			'settings.viewMode' => 'Режим просмотра',
 			'settings.gridView' => 'Сетка',
-			'settings.gridViewDescription' => 'Отображать элементы в виде сетки',
 			'settings.listView' => 'Список',
-			'settings.listViewDescription' => 'Отображать элементы в виде списка',
 			'settings.showHeroSection' => 'Показать раздел избранного',
 			'settings.useGlobalHubs' => 'Использовать макет Plex Home',
 			'settings.useGlobalHubsDescription' => 'Показывать хабы главной страницы как в официальном клиенте Plex. При выключении показывает рекомендации по библиотекам.',
@@ -1477,9 +1495,7 @@ extension on TranslationsRu {
 			'settings.hideSpoilersDescription' => 'Размывать миниатюры и скрывать описания эпизодов, которые вы ещё не смотрели',
 			'settings.playerBackend' => 'Бэкенд плеера',
 			'settings.exoPlayer' => 'ExoPlayer (Рекомендуется)',
-			'settings.exoPlayerDescription' => 'Нативный Android-плеер с лучшей аппаратной поддержкой',
 			'settings.mpv' => 'mpv',
-			'settings.mpvDescription' => 'Продвинутый плеер с большим количеством функций и поддержкой субтитров ASS',
 			'settings.hardwareDecoding' => 'Аппаратное декодирование',
 			'settings.hardwareDecodingDescription' => 'Использовать аппаратное ускорение, когда доступно',
 			'settings.bufferSize' => 'Размер буфера',
@@ -1491,7 +1507,6 @@ extension on TranslationsRu {
 			'settings.smallSkipDuration' => 'Малая перемотка',
 			'settings.largeSkipDuration' => 'Большая перемотка',
 			'settings.rewindOnResume' => 'Перемотка при возобновлении',
-			'settings.rewindOnResumeDescription' => 'Перемотать на это количество секунд при возобновлении воспроизведения',
 			'settings.secondsUnit' => ({required Object seconds}) => '${seconds} секунд',
 			'settings.defaultSleepTimer' => 'Таймер сна по умолчанию',
 			'settings.minutesUnit' => ({required Object minutes}) => '${minutes} минут',
@@ -1505,7 +1520,6 @@ extension on TranslationsRu {
 			'settings.videoPlayerNavigation' => 'Навигация видеоплеера',
 			'settings.videoPlayerNavigationDescription' => 'Использовать клавиши стрелок для навигации по элементам управления плеером',
 			'settings.watchTogetherRelay' => 'Relay совместного просмотра',
-			'settings.watchTogetherRelayDefault' => 'По умолчанию',
 			'settings.watchTogetherRelayDescription' => 'Указать пользовательский relay-сервер для совместного просмотра. Все участники должны использовать один и тот же сервер.',
 			'settings.watchTogetherRelayHint' => 'https://my-relay.example.com',
 			'settings.crashReporting' => 'Отчёты об ошибках',
@@ -1563,6 +1577,10 @@ extension on TranslationsRu {
 			'settings.maxVolumePercent' => ({required Object percent}) => '${percent}%',
 			'settings.discordRichPresence' => 'Discord Rich Presence',
 			'settings.discordRichPresenceDescription' => 'Показывать, что вы смотрите, в Discord',
+			'settings.trakt' => 'Trakt',
+			'settings.traktDescription' => 'Синхронизировать историю просмотров с Trakt',
+			'settings.companionRemoteServer' => 'Сервер удалённого управления',
+			'settings.companionRemoteServerDescription' => 'Разрешить мобильным устройствам в сети управлять этим приложением',
 			'settings.autoPip' => 'Автоматический «картинка в картинке»',
 			'settings.autoPipDescription' => 'Автоматически переходить в режим «картинка в картинке» при выходе из приложения во время воспроизведения',
 			'settings.matchContentFrameRate' => 'Соответствие частоты кадров контента',
@@ -1572,13 +1590,14 @@ extension on TranslationsRu {
 			'settings.matchDynamicRange' => 'Соответствие динамического диапазона',
 			'settings.matchDynamicRangeDescription' => 'Автоматически включать HDR для HDR-контента и возвращать SDR при выходе из плеера',
 			'settings.displaySwitchDelay' => 'Задержка переключения дисплея',
-			'settings.displaySwitchDelayDescription' => 'Секунды ожидания после смены режима дисплея перед началом воспроизведения',
 			'settings.tunneledPlayback' => 'Туннельное воспроизведение',
 			'settings.tunneledPlaybackDescription' => 'Использовать аппаратный видеотуннелинг. Отключите, если видите чёрный экран со звуком при HDR-контенте',
 			'settings.requireProfileSelectionOnOpen' => 'Запрашивать профиль при запуске',
 			'settings.requireProfileSelectionOnOpenDescription' => 'Показывать выбор профиля при каждом открытии приложения',
 			'settings.confirmExitOnBack' => 'Подтверждать выход',
 			'settings.confirmExitOnBackDescription' => 'Показывать диалог подтверждения при нажатии «назад» для выхода из приложения',
+			'settings.forceTvMode' => 'Принудительный режим ТВ',
+			'settings.forceTvModeDescription' => 'Использовать макет ТВ независимо от автоматического определения. Полезно на устройствах Android TV, которые не сообщают о функции leanback. Приложение перезапустится при изменении.',
 			'settings.autoHidePerformanceOverlay' => 'Автоскрытие оверлея производительности',
 			'settings.autoHidePerformanceOverlayDescription' => 'Скрывать оверлей производительности вместе с элементами управления воспроизведением',
 			'settings.showNavBarLabels' => 'Показывать подписи панели навигации',
@@ -1593,8 +1612,6 @@ extension on TranslationsRu {
 			'settings.subtitlesAndConfig' => 'Subtitles & Configuration',
 			'settings.seekAndTiming' => 'Seek & Timing',
 			'settings.behavior' => 'Behavior',
-			'settings.companionRemoteServer' => 'Сервер удалённого управления',
-			'settings.companionRemoteServerDescription' => 'Разрешить мобильным устройствам в сети управлять этим приложением',
 			'search.hint' => 'Поиск фильмов, сериалов, музыки...',
 			'search.tryDifferentTerm' => 'Попробуйте другой запрос',
 			'search.searchYourMedia' => 'Поиск в вашей медиатеке',
@@ -1714,7 +1731,6 @@ extension on TranslationsRu {
 			'videoControls.alwaysOnTopButton' => 'Всегда поверх',
 			'videoControls.rotationLockButton' => 'Блокировка поворота',
 			'videoControls.lockScreen' => 'Заблокировать экран',
-			'videoControls.unlockScreen' => 'Разблокировать экран',
 			'videoControls.screenLockButton' => 'Блокировка экрана',
 			'videoControls.longPressToUnlock' => 'Удерживайте для разблокировки',
 			'videoControls.timelineSlider' => 'Временная шкала',
@@ -1774,10 +1790,11 @@ extension on TranslationsRu {
 			'messages.failedToCreatePlayQueueNoItems' => 'Не удалось создать очередь воспроизведения — нет элементов',
 			'messages.failedPlayback' => ({required Object action, required Object error}) => 'Не удалось ${action}: ${error}',
 			'messages.switchingToCompatiblePlayer' => 'Переключение на совместимый плеер...',
+			'messages.serverLimitTitle' => 'Ошибка воспроизведения',
+			'messages.serverLimitBody' => 'Сервер вернул ошибку (HTTP 500). Обычно это означает, что владелец сервера установил лимит пропускной способности или транскодирования, из-за которого ваш сеанс отклоняется. Со стороны клиента сделать ничего нельзя — владельцу сервера нужно изменить настройки.',
 			'messages.logsUploaded' => 'Логи загружены',
 			'messages.logsUploadFailed' => 'Не удалось загрузить логи',
 			'messages.logId' => 'ID лога',
-			'subtitlingStyling.stylingOptions' => 'Параметры стиля',
 			'subtitlingStyling.text' => 'Текст',
 			'subtitlingStyling.border' => 'Обводка',
 			'subtitlingStyling.background' => 'Фон',
@@ -1789,6 +1806,8 @@ extension on TranslationsRu {
 			'subtitlingStyling.backgroundColor' => 'Цвет фона',
 			'subtitlingStyling.position' => 'Позиция',
 			'subtitlingStyling.assOverride' => 'Переопределение ASS',
+			'subtitlingStyling.bold' => 'Жирный',
+			'subtitlingStyling.italic' => 'Курсив',
 			'mpvConfig.title' => 'mpv.conf',
 			'mpvConfig.description' => 'Расширенные настройки видеоплеера',
 			'mpvConfig.presets' => 'Пресеты',
@@ -1876,8 +1895,6 @@ extension on TranslationsRu {
 			'libraries.groupings.seasons' => 'Сезоны',
 			'libraries.groupings.episodes' => 'Эпизоды',
 			'libraries.groupings.folders' => 'Папки',
-			_ => null,
-		} ?? switch (path) {
 			'about.title' => 'О приложении',
 			'about.openSourceLicenses' => 'Лицензии открытого ПО',
 			'about.versionLabel' => ({required Object version}) => 'Версия ${version}',
@@ -1886,6 +1903,8 @@ extension on TranslationsRu {
 			'serverSelection.allServerConnectionsFailed' => 'Не удалось подключиться ни к одному серверу. Проверьте сеть и попробуйте снова.',
 			'serverSelection.noServersFoundForAccount' => ({required Object username, required Object email}) => 'Серверы не найдены для ${username} (${email})',
 			'serverSelection.failedToLoadServers' => ({required Object error}) => 'Не удалось загрузить серверы: ${error}',
+			_ => null,
+		} ?? switch (path) {
 			'hubDetail.title' => 'Название',
 			'hubDetail.releaseYear' => 'Год выпуска',
 			'hubDetail.dateAdded' => 'Дата добавления',
@@ -2055,6 +2074,24 @@ extension on TranslationsRu {
 			'downloads.customAmount' => 'Указать количество...',
 			'downloads.howManyEpisodes' => 'Сколько эпизодов?',
 			'downloads.itemsQueued' => ({required Object count}) => '${count} элементов добавлено в очередь загрузки',
+			'downloads.keepSynced' => 'Синхронизировать',
+			'downloads.downloadOnce' => 'Скачать один раз',
+			'downloads.keepNUnwatched' => ({required Object count}) => 'Хранить ${count} непросмотренных',
+			'downloads.editSyncRule' => 'Редактировать правило синхронизации',
+			'downloads.removeSyncRule' => 'Удалить правило синхронизации',
+			'downloads.removeSyncRuleConfirm' => ({required Object title}) => 'Прекратить синхронизацию «${title}»? Скачанные эпизоды будут сохранены.',
+			'downloads.syncRuleCreated' => ({required Object count}) => 'Правило синхронизации создано — хранится ${count} непросмотренных эпизодов',
+			'downloads.syncRuleUpdated' => 'Правило синхронизации обновлено',
+			'downloads.syncRuleRemoved' => 'Правило синхронизации удалено',
+			'downloads.syncedNewEpisodes' => ({required Object count, required Object title}) => 'Синхронизировано ${count} новых эпизодов для ${title}',
+			'downloads.activeSyncRules' => 'Правила синхронизации',
+			'downloads.noSyncRules' => 'Нет правил синхронизации',
+			'downloads.manageSyncRule' => 'Управление синхронизацией',
+			'downloads.editEpisodeCount' => 'Количество эпизодов',
+			'downloads.editSyncFilter' => 'Фильтр синхронизации',
+			'downloads.syncAllItems' => 'Синхронизация всех элементов',
+			'downloads.syncUnwatchedItems' => 'Синхронизация непросмотренных элементов',
+			'downloads.syncRuleListCreated' => 'Правило синхронизации создано',
 			'shaders.title' => 'Шейдеры',
 			'shaders.noShaderDescription' => 'Без улучшения видео',
 			'shaders.nvscalerDescription' => 'Масштабирование NVIDIA для более чёткого видео',
@@ -2068,11 +2105,6 @@ extension on TranslationsRu {
 			'shaders.deleteShader' => 'Удалить шейдер',
 			'shaders.deleteShaderConfirm' => ({required Object name}) => 'Удалить "${name}"?',
 			'companionRemote.title' => 'Пульт управления',
-			'companionRemote.connectToDevice' => 'Подключиться к устройству',
-			'companionRemote.hostRemoteSession' => 'Создать удалённую сессию',
-			'companionRemote.controlThisDevice' => 'Управляйте этим устройством с телефона',
-			'companionRemote.remoteControl' => 'Пульт управления',
-			'companionRemote.controlDesktop' => 'Управлять десктопным устройством',
 			'companionRemote.connectedTo' => ({required Object name}) => 'Подключено к ${name}',
 			'companionRemote.session.startingServer' => 'Запуск удалённого сервера...',
 			'companionRemote.session.failedToCreate' => 'Не удалось запустить удалённый сервер:',
@@ -2086,7 +2118,6 @@ extension on TranslationsRu {
 			'companionRemote.session.startServer' => 'Запустить сервер',
 			'companionRemote.session.stopServer' => 'Остановить сервер',
 			'companionRemote.session.minimize' => 'Свернуть',
-			'companionRemote.pairing.pairWithDesktop' => 'Подключиться к компьютеру',
 			'companionRemote.pairing.discoveryDescription' => 'Устройства в вашей сети с Plezy на том же аккаунте Plex появятся автоматически',
 			'companionRemote.pairing.hostAddressHint' => '192.168.1.100:48632',
 			'companionRemote.pairing.connecting' => 'Подключение...',
@@ -2106,8 +2137,6 @@ extension on TranslationsRu {
 			'companionRemote.remote.reconnecting' => 'Переподключение...',
 			'companionRemote.remote.attemptOf' => ({required Object current}) => 'Попытка ${current} из 5',
 			'companionRemote.remote.retryNow' => 'Повторить сейчас',
-			'companionRemote.remote.connectionError' => 'Ошибка подключения',
-			'companionRemote.remote.notConnected' => 'Не подключено',
 			'companionRemote.remote.tabRemote' => 'Пульт',
 			'companionRemote.remote.tabPlay' => 'Воспроизведение',
 			'companionRemote.remote.tabMore' => 'Ещё',
@@ -2233,6 +2262,21 @@ extension on TranslationsRu {
 			'serverTasks.title' => 'Задачи сервера',
 			'serverTasks.failedToLoad' => 'Не удалось загрузить задачи',
 			'serverTasks.noTasks' => 'Нет выполняемых задач',
+			'trakt.title' => 'Trakt',
+			'trakt.connected' => 'Подключено',
+			'trakt.connectedAs' => ({required Object username}) => 'Подключено как @${username}',
+			'trakt.disconnectConfirm' => 'Отключить аккаунт Trakt?',
+			'trakt.disconnectConfirmBody' => 'Plezy перестанет отправлять события воспроизведения в Trakt. Вы можете подключиться снова в любое время.',
+			'trakt.scrobble' => 'Скробблинг в реальном времени',
+			'trakt.scrobbleDescription' => 'Отправлять события воспроизведения, паузы и остановки в Trakt во время просмотра.',
+			'trakt.watchedSync' => 'Синхронизация статуса просмотра',
+			'trakt.watchedSyncDescription' => 'Когда вы отмечаете элементы как просмотренные в Plezy, они отмечаются и в Trakt.',
+			'trakt.deviceCodeTitle' => 'Активация Plezy в Trakt',
+			'trakt.deviceCodeBody' => ({required Object url}) => 'Откройте ${url} и введите этот код:',
+			'trakt.openTraktActivate' => 'Открыть Trakt для активации',
+			'trakt.waitingForAuthorization' => 'Ожидание авторизации…',
+			'trakt.codeCopied' => 'Код скопирован',
+			'trakt.connectFailed' => 'Не удалось подключиться к Trakt. Попробуйте ещё раз.',
 			_ => null,
 		};
 	}

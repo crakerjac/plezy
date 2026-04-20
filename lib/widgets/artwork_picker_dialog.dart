@@ -4,6 +4,7 @@ import 'package:material_symbols_icons/symbols.dart';
 import '../focus/focusable_button.dart';
 import '../focus/focusable_wrapper.dart';
 import '../i18n/strings.g.dart';
+import '../services/file_picker_service.dart';
 import '../services/plex_client.dart';
 import '../utils/dialogs.dart';
 import '../utils/snackbar_helper.dart';
@@ -15,12 +16,7 @@ class ArtworkPickerDialog extends StatefulWidget {
   final String ratingKey;
   final String element; // "posters" or "arts"
 
-  const ArtworkPickerDialog({
-    super.key,
-    required this.client,
-    required this.ratingKey,
-    required this.element,
-  });
+  const ArtworkPickerDialog({super.key, required this.client, required this.ratingKey, required this.element});
 
   @override
   State<ArtworkPickerDialog> createState() => _ArtworkPickerDialogState();
@@ -105,10 +101,7 @@ class _ArtworkPickerDialogState extends State<ArtworkPickerDialog> {
   }
 
   Future<void> _uploadFile() async {
-    final result = await FilePicker.platform.pickFiles(
-      type: FileType.image,
-      withData: true,
-    );
+    final result = await FilePickerService.instance.pickFiles(type: FileType.image, withData: true);
 
     if (result == null || result.files.isEmpty || !mounted) return;
 
@@ -137,9 +130,7 @@ class _ArtworkPickerDialogState extends State<ArtworkPickerDialog> {
       content: SizedBox(
         width: 500,
         height: 400,
-        child: _isLoading
-            ? const Center(child: CircularProgressIndicator())
-            : _buildArtworkContent(),
+        child: _isLoading ? const Center(child: CircularProgressIndicator()) : _buildArtworkContent(),
       ),
       actions: [
         if (_isApplying)
@@ -166,10 +157,7 @@ class _ArtworkPickerDialogState extends State<ArtworkPickerDialog> {
         FocusableButton(
           autofocus: true,
           onPressed: () => Navigator.pop(context),
-          child: TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text(t.common.cancel),
-          ),
+          child: TextButton(onPressed: () => Navigator.pop(context), child: Text(t.common.cancel)),
         ),
       ],
     );
@@ -213,11 +201,7 @@ class _ArtworkPickerDialogState extends State<ArtworkPickerDialog> {
                   ),
                   child: ClipRRect(
                     borderRadius: const BorderRadius.all(Radius.circular(8)),
-                    child: PlexOptimizedImage(
-                      client: widget.client,
-                      imagePath: thumbUrl,
-                      fit: BoxFit.contain,
-                    ),
+                    child: PlexOptimizedImage(client: widget.client, imagePath: thumbUrl, fit: BoxFit.contain),
                   ),
                 ),
                 if (isSelected)
@@ -226,10 +210,7 @@ class _ArtworkPickerDialogState extends State<ArtworkPickerDialog> {
                     bottom: 6,
                     child: Container(
                       padding: const EdgeInsets.all(4),
-                      decoration: BoxDecoration(
-                        color: Theme.of(context).colorScheme.primary,
-                        shape: BoxShape.circle,
-                      ),
+                      decoration: BoxDecoration(color: Theme.of(context).colorScheme.primary, shape: BoxShape.circle),
                       child: Icon(Symbols.check_rounded, size: 16, color: Theme.of(context).colorScheme.onPrimary),
                     ),
                   ),

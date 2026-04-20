@@ -6,6 +6,7 @@ import 'plex_client.dart';
 import '../models/plex_config.dart';
 import '../utils/app_logger.dart';
 import '../utils/connection_constants.dart';
+import '../utils/future_extensions.dart';
 import 'package:sentry_flutter/sentry_flutter.dart';
 import 'plex_auth_service.dart';
 import 'settings_service.dart';
@@ -94,7 +95,9 @@ class MultiServerManager {
     final cachedEndpoint = storage.getServerEndpoint(serverId);
 
     // Find best working connection, passing cached endpoint for fast-path
-    final streamIterator = StreamIterator(server.findBestWorkingConnection(preferredUri: cachedEndpoint, clientIdentifier: clientIdentifier));
+    final streamIterator = StreamIterator(
+      server.findBestWorkingConnection(preferredUri: cachedEndpoint, clientIdentifier: clientIdentifier),
+    );
 
     if (!await streamIterator.moveNext()) {
       throw Exception('No working connection found');
@@ -207,7 +210,10 @@ class MultiServerManager {
       try {
         appLogger.d('Attempting connection to server: ${server.name}');
 
-        final client = await _createClientForServer(server: server, clientIdentifier: effectiveClientId).timeout(timeout);
+        final client = await _createClientForServer(
+          server: server,
+          clientIdentifier: effectiveClientId,
+        ).namedTimeout(timeout, operation: 'connect to ${server.name}');
 
         // Store the client and server info
         _clients[serverId]?.close();
@@ -352,43 +358,46 @@ class MultiServerManager {
     }
 
     appLogger.i('Starting network monitoring for all servers');
-    runZonedGuarded(() {
-      final connectivity = Connectivity();
-      _connectivitySubscription = connectivity.onConnectivityChanged.listen(
-        (results) {
-          final status = results.isNotEmpty ? results.first : ConnectivityResult.none;
+    runZonedGuarded(
+      () {
+        final connectivity = Connectivity();
+        _connectivitySubscription = connectivity.onConnectivityChanged.listen(
+          (results) {
+            final status = results.isNotEmpty ? results.first : ConnectivityResult.none;
 
-          if (status == ConnectivityResult.none) {
-            appLogger.w('Connectivity lost, pausing optimization until network returns');
-            return;
-          }
+            if (status == ConnectivityResult.none) {
+              appLogger.w('Connectivity lost, pausing optimization until network returns');
+              return;
+            }
 
-          // Debounce rapid connectivity events (e.g. WiFi flapping) into a single trigger
-          _connectivityDebounce?.cancel();
-          _connectivityDebounce = Timer(const Duration(seconds: 2), () {
-            _connectivityDebounce = null;
+            // Debounce rapid connectivity events (e.g. WiFi flapping) into a single trigger
+            _connectivityDebounce?.cancel();
+            _connectivityDebounce = Timer(const Duration(seconds: 2), () {
+              _connectivityDebounce = null;
 
-            appLogger.d(
-              'Connectivity change detected, re-optimizing all servers',
-              error: {
-                'status': status.name,
-                'interfaces': results.map((r) => r.name).toList(),
-                'serverCount': _servers.length,
-              },
-            );
+              appLogger.d(
+                'Connectivity change detected, re-optimizing all servers',
+                error: {
+                  'status': status.name,
+                  'interfaces': results.map((r) => r.name).toList(),
+                  'serverCount': _servers.length,
+                },
+              );
 
-            // Re-optimize all servers and re-probe offline ones
-            _reoptimizeAllServers(reason: 'connectivity:${status.name}');
-            checkServerHealth();
-          });
-        },
-        onError: (error, stackTrace) {
-          appLogger.w('Connectivity listener error', error: error, stackTrace: stackTrace);
-        },
-      );
-    }, (error, stack) {
-      appLogger.w('Connectivity monitoring unavailable', error: error);
-    });
+              // Re-optimize all servers and re-probe offline ones
+              _reoptimizeAllServers(reason: 'connectivity:${status.name}');
+              checkServerHealth();
+            });
+          },
+          onError: (error, stackTrace) {
+            appLogger.w('Connectivity listener error', error: error, stackTrace: stackTrace);
+          },
+        );
+      },
+      (error, stack) {
+        appLogger.w('Connectivity monitoring unavailable', error: error);
+      },
+    );
   }
 
   /// Stop monitoring network connectivity
@@ -436,7 +445,10 @@ class MultiServerManager {
     try {
       appLogger.d('Starting connection optimization for ${server.name}', error: {'reason': reason});
 
-      await for (final connection in server.findBestWorkingConnection(preferredUri: cachedEndpoint, clientIdentifier: _clientIdentifier)) {
+      await for (final connection in server.findBestWorkingConnection(
+        preferredUri: cachedEndpoint,
+        clientIdentifier: _clientIdentifier,
+      )) {
         final newUrl = connection.uri;
 
         // Check if this is actually a better connection than current
@@ -480,12 +492,17 @@ class MultiServerManager {
     }
   }
 
-  /// Attempt reconnection for all offline servers
-  Future<void> reconnectOfflineServers() async {
+  /// Attempt reconnection for all offline servers.
+  ///
+  /// When [forceRediscovery] is true, the cached endpoint is cleared before
+  /// reconnecting so the fast-path is skipped and a full candidate race runs.
+  /// Used by the manual reconnect button when the cached URL may be stale
+  /// (e.g. after a network change while the app was backgrounded).
+  Future<void> reconnectOfflineServers({bool forceRediscovery = false}) async {
     // Coalesce concurrent calls — return the in-flight future if one exists
     if (_activeReconnect != null) return _activeReconnect!;
 
-    _activeReconnect = _doReconnectOfflineServers();
+    _activeReconnect = _doReconnectOfflineServers(forceRediscovery: forceRediscovery);
     try {
       await _activeReconnect;
     } finally {
@@ -493,12 +510,17 @@ class MultiServerManager {
     }
   }
 
-  Future<void> _doReconnectOfflineServers() async {
+  Future<void> _doReconnectOfflineServers({required bool forceRediscovery}) async {
     final offline = offlineServerIds;
     if (offline.isEmpty) return;
 
     appLogger.d('Attempting reconnection for ${offline.length} offline servers');
     Sentry.addBreadcrumb(Breadcrumb(message: 'Reconnecting ${offline.length} offline server(s)', category: 'servers'));
+
+    if (forceRediscovery) {
+      final storage = await StorageService.getInstance();
+      await Future.wait(offline.map(storage.clearServerEndpoint));
+    }
 
     final futures = offline.map((serverId) {
       final server = _servers[serverId];

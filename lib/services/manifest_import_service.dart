@@ -18,6 +18,7 @@
 import 'dart:convert';
 import '../services/download_storage_service.dart';
 import '../services/saf_storage_service.dart';
+import 'package:saf_stream/saf_stream.dart';
 import '../utils/app_logger.dart';
 
 /// Subdirectory within the SAF root where PlexSyncer files live.
@@ -249,7 +250,7 @@ class ManifestImportService {
     final manifestFile = await saf.getChild(metaDir.uri, 'manifest.json');
     if (manifestFile == null) throw Exception('manifest.json not found');
 
-    final bytes = await saf.readFileBytes(manifestFile.uri);
+    final bytes = await SafStream().readFileBytes(manifestFile.uri);
     if (bytes == null) throw Exception('Could not read manifest.json');
 
     return utf8.decode(bytes);

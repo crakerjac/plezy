@@ -79,6 +79,9 @@ class WatchTogetherSyncManager {
   // Whether we've announced our player as ready (first buffering: false)
   bool _hasAnnouncedReady = false;
 
+  // Whether the app is backgrounded (suppress heartbeats to avoid stale positions)
+  bool _backgrounded = false;
+
   // Callbacks
   SessionConfigCallback? onSessionConfigReceived;
   SyncStateCallback? onSyncStateChanged;
@@ -125,10 +128,19 @@ class WatchTogetherSyncManager {
     // If host, start broadcasting position periodically
     if (_session.isHost) {
       _startPositionSync();
-      // Note: sessionConfig is sent after video loads (with correct position) in buffering handler
     }
 
-    // Note: playerReady will be announced when video loads (first buffering: false)
+    // If the video is already loaded (buffering stream already fired before we
+    // subscribed), announce ready now so peers aren't stuck waiting.
+    if (!player.state.buffering && !_hasAnnouncedReady) {
+      _hasAnnouncedReady = true;
+      _peerReady[_peerService.myPeerId!] = true;
+      _peerService.broadcast(SyncMessage.playerReady(peerId: _peerService.myPeerId!, ready: true));
+      appLogger.d('WatchTogether: Video already loaded on attach, announcing ready');
+      if (_session.isHost) {
+        _sendSessionConfig();
+      }
+    }
 
     // If guest, request current session config from host in case we missed
     // a mediaSwitch broadcast (e.g., host switched episodes while we were
@@ -144,6 +156,8 @@ class WatchTogetherSyncManager {
   /// Initialize participant tracking from existing session participants
   /// Call this before attachPlayer() to ensure we know about participants who joined before
   void initializeParticipants(List<String> peerIds) {
+    // Clear stale entries (e.g. host's own peerId left over from a previous detachPlayer)
+    _peerReady.clear();
     for (final peerId in peerIds) {
       if (peerId != _peerService.myPeerId) {
         if (_session.isHost) {
@@ -193,6 +207,7 @@ class WatchTogetherSyncManager {
     }
     _positionSyncTimer?.cancel();
     _positionSyncTimer = null;
+    _backgrounded = false;
 
     appLogger.d('WatchTogether: Player detached');
   }
@@ -228,10 +243,11 @@ class WatchTogetherSyncManager {
           } finally {
             _isRemoteAction = false;
           }
-          _broadcastPlayPause(true);
+          // Don't broadcast play — deferred play will broadcast when all peers are ready.
           return;
         }
 
+        if (isPlaying && !_firstPlayCompleted) _firstPlayCompleted = true;
         if (!isPlaying) _setDeferredPlay(false);
         _broadcastPlayPause(isPlaying);
       }),
@@ -301,7 +317,7 @@ class WatchTogetherSyncManager {
   void _startPositionSync() {
     _positionSyncTimer?.cancel();
     _positionSyncTimer = Timer.periodic(positionSyncInterval, (_) {
-      if (_player != null && _session.isHost) {
+      if (_player != null && _session.isHost && !_backgrounded) {
         _peerService.broadcast(
           SyncMessage.positionSync(
             _player!.state.position,
@@ -539,20 +555,6 @@ class WatchTogetherSyncManager {
       return;
     }
 
-    // HOST RELAY: In "anyone" mode, host rebroadcasts control commands from guests
-    // This is needed because guests only connect to host (star topology), not to each other
-    if (_session.isHost && _session.controlMode == ControlMode.anyone) {
-      final isControlMessage =
-          message.type == SyncMessageType.play ||
-          message.type == SyncMessageType.pause ||
-          message.type == SyncMessageType.seek ||
-          message.type == SyncMessageType.rate;
-
-      if (isControlMessage) {
-        _peerService.broadcast(message);
-      }
-    }
-
     // In hostOnly mode, only process messages from host (unless it's join/leave/sessionConfig)
     if (_session.controlMode == ControlMode.hostOnly && !_session.isHost) {
       final isHostMessage = message.peerId == _session.hostPeerId;
@@ -669,11 +671,11 @@ class WatchTogetherSyncManager {
           if (_deferredPlay && isAllReady) {
             _setDeferredPlay(false);
             _firstPlayCompleted = true;
-            await _applyRemotePlay(
-              position: _deferredPlayPosition,
-              expectedAttachmentGeneration: queuedAttachmentGeneration,
-            );
+            final pos = _deferredPlayPosition;
             _deferredPlayPosition = null;
+            await _applyRemotePlay(position: pos, expectedAttachmentGeneration: queuedAttachmentGeneration);
+            // Broadcast play to all peers now that everyone is ready
+            _broadcastPlayPause(true);
           }
         }
         break;
@@ -952,6 +954,30 @@ class WatchTogetherSyncManager {
     if (_deferredPlay != value) {
       _deferredPlay = value;
       onDeferredPlayChanged?.call(value);
+    }
+  }
+
+  /// Suppress heartbeats while the app is backgrounded.
+  ///
+  /// macOS App Nap can throttle the event loop, causing stale position reads.
+  /// Guests would drift-correct to the stale position every heartbeat, making
+  /// playback loop. Pausing heartbeats avoids this; drift correction catches
+  /// up when the app returns to the foreground.
+  void setBackgrounded(bool value) {
+    _backgrounded = value;
+  }
+
+  /// Re-announce player readiness after reconnect.
+  ///
+  /// During reconnect the host resets our _peerReady entry to false via
+  /// _handlePeerJoin, but our _hasAnnouncedReady flag is still true (never
+  /// reset because the player stays attached). Re-broadcast so the host
+  /// doesn't stay stuck in the deferred-play gate.
+  void reannounceReadyIfNeeded() {
+    if (_hasAnnouncedReady && _peerService.myPeerId != null) {
+      _peerReady[_peerService.myPeerId!] = true;
+      _peerService.broadcast(SyncMessage.playerReady(peerId: _peerService.myPeerId!, ready: true));
+      appLogger.d('WatchTogether: Re-announced player ready after reconnect');
     }
   }
 

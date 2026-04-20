@@ -78,6 +78,7 @@ class Translations with BaseTranslations<AppLocale, Translations> {
 	late final TranslationsExternalPlayerEn externalPlayer = TranslationsExternalPlayerEn._(_root);
 	late final TranslationsMetadataEditEn metadataEdit = TranslationsMetadataEditEn._(_root);
 	late final TranslationsServerTasksEn serverTasks = TranslationsServerTasksEn._(_root);
+	late final TranslationsTraktEn trakt = TranslationsTraktEn._(_root);
 }
 
 // Path: app
@@ -183,9 +184,6 @@ class TranslationsCommonEn {
 
 	/// en: 'Create new'
 	String get createNew => 'Create new';
-
-	/// en: 'Paste'
-	String get paste => 'Paste';
 
 	/// en: 'Connect'
 	String get connect => 'Connect';
@@ -325,6 +323,12 @@ class TranslationsSettingsEn {
 	/// en: 'Settings'
 	String get title => 'Settings';
 
+	/// en: 'Support Plezy'
+	String get supportDeveloper => 'Support Plezy';
+
+	/// en: 'Donate via Liberapay to fund development'
+	String get supportDeveloperDescription => 'Donate via Liberapay to fund development';
+
 	/// en: 'Language'
 	String get language => 'Language';
 
@@ -337,6 +341,9 @@ class TranslationsSettingsEn {
 	/// en: 'Video Playback'
 	String get videoPlayback => 'Video Playback';
 
+	/// en: 'Configure playback behavior'
+	String get videoPlaybackDescription => 'Configure playback behavior';
+
 	/// en: 'Advanced'
 	String get advanced => 'Advanced';
 
@@ -346,20 +353,11 @@ class TranslationsSettingsEn {
 	/// en: 'Series Poster'
 	String get seriesPoster => 'Series Poster';
 
-	/// en: 'Show the series poster for all episodes'
-	String get seriesPosterDescription => 'Show the series poster for all episodes';
-
 	/// en: 'Season Poster'
 	String get seasonPoster => 'Season Poster';
 
-	/// en: 'Show the season-specific poster for episodes'
-	String get seasonPosterDescription => 'Show the season-specific poster for episodes';
-
 	/// en: 'Thumbnail'
 	String get episodeThumbnail => 'Thumbnail';
-
-	/// en: 'Show 16:9 episode screenshot thumbnails'
-	String get episodeThumbnailDescription => 'Show 16:9 episode screenshot thumbnails';
 
 	/// en: 'Display featured content carousel on home screen'
 	String get showHeroSectionDescription => 'Display featured content carousel on home screen';
@@ -382,9 +380,6 @@ class TranslationsSettingsEn {
 	/// en: 'System'
 	String get systemTheme => 'System';
 
-	/// en: 'Follow system settings'
-	String get systemThemeDescription => 'Follow system settings';
-
 	/// en: 'Light'
 	String get lightTheme => 'Light';
 
@@ -394,29 +389,14 @@ class TranslationsSettingsEn {
 	/// en: 'OLED'
 	String get oledTheme => 'OLED';
 
-	/// en: 'Pure black for OLED screens'
-	String get oledThemeDescription => 'Pure black for OLED screens';
-
 	/// en: 'Library Density'
 	String get libraryDensity => 'Library Density';
 
 	/// en: 'Compact'
 	String get compact => 'Compact';
 
-	/// en: 'Smaller cards, more items visible'
-	String get compactDescription => 'Smaller cards, more items visible';
-
-	/// en: 'Normal'
-	String get normal => 'Normal';
-
-	/// en: 'Default size'
-	String get normalDescription => 'Default size';
-
 	/// en: 'Comfortable'
 	String get comfortable => 'Comfortable';
-
-	/// en: 'Larger cards, fewer items visible'
-	String get comfortableDescription => 'Larger cards, fewer items visible';
 
 	/// en: 'View Mode'
 	String get viewMode => 'View Mode';
@@ -424,14 +404,8 @@ class TranslationsSettingsEn {
 	/// en: 'Grid'
 	String get gridView => 'Grid';
 
-	/// en: 'Display items in a grid layout'
-	String get gridViewDescription => 'Display items in a grid layout';
-
 	/// en: 'List'
 	String get listView => 'List';
-
-	/// en: 'Display items in a list layout'
-	String get listViewDescription => 'Display items in a list layout';
 
 	/// en: 'Show Hero Section'
 	String get showHeroSection => 'Show Hero Section';
@@ -472,14 +446,8 @@ class TranslationsSettingsEn {
 	/// en: 'ExoPlayer (Recommended)'
 	String get exoPlayer => 'ExoPlayer (Recommended)';
 
-	/// en: 'Android native player with better hardware support'
-	String get exoPlayerDescription => 'Android native player with better hardware support';
-
 	/// en: 'mpv'
 	String get mpv => 'mpv';
-
-	/// en: 'Advanced player with more features and ASS subtitle support'
-	String get mpvDescription => 'Advanced player with more features and ASS subtitle support';
 
 	/// en: 'Hardware Decoding'
 	String get hardwareDecoding => 'Hardware Decoding';
@@ -513,9 +481,6 @@ class TranslationsSettingsEn {
 
 	/// en: 'Rewind on Resume'
 	String get rewindOnResume => 'Rewind on Resume';
-
-	/// en: 'Rewind by this amount when resuming playback'
-	String get rewindOnResumeDescription => 'Rewind by this amount when resuming playback';
 
 	/// en: '${seconds} seconds'
 	String secondsUnit({required Object seconds}) => '${seconds} seconds';
@@ -555,9 +520,6 @@ class TranslationsSettingsEn {
 
 	/// en: 'Watch Together Relay'
 	String get watchTogetherRelay => 'Watch Together Relay';
-
-	/// en: 'Default'
-	String get watchTogetherRelayDefault => 'Default';
 
 	/// en: 'Set a custom relay server for Watch Together. All participants must use the same server.'
 	String get watchTogetherRelayDescription => 'Set a custom relay server for Watch Together. All participants must use the same server.';
@@ -730,6 +692,12 @@ class TranslationsSettingsEn {
 	/// en: 'Show what you're watching on Discord'
 	String get discordRichPresenceDescription => 'Show what you\'re watching on Discord';
 
+	/// en: 'Trakt'
+	String get trakt => 'Trakt';
+
+	/// en: 'Sync watch history with Trakt'
+	String get traktDescription => 'Sync watch history with Trakt';
+
 	/// en: 'Companion Remote Server'
 	String get companionRemoteServer => 'Companion Remote Server';
 
@@ -763,9 +731,6 @@ class TranslationsSettingsEn {
 	/// en: 'Display Switch Delay'
 	String get displaySwitchDelay => 'Display Switch Delay';
 
-	/// en: 'Seconds to wait after a display mode change before starting playback'
-	String get displaySwitchDelayDescription => 'Seconds to wait after a display mode change before starting playback';
-
 	/// en: 'Tunneled Playback'
 	String get tunneledPlayback => 'Tunneled Playback';
 
@@ -783,6 +748,12 @@ class TranslationsSettingsEn {
 
 	/// en: 'Show a confirmation dialog when pressing back to exit the app'
 	String get confirmExitOnBackDescription => 'Show a confirmation dialog when pressing back to exit the app';
+
+	/// en: 'Force TV mode'
+	String get forceTvMode => 'Force TV mode';
+
+	/// en: 'Use the TV layout regardless of auto-detection. Useful on Android TV devices that don't report the leanback feature. Restarts the app on change.'
+	String get forceTvModeDescription => 'Use the TV layout regardless of auto-detection. Useful on Android TV devices that don\'t report the leanback feature. Restarts the app on change.';
 
 	/// en: 'Auto-Hide Performance Overlay'
 	String get autoHidePerformanceOverlay => 'Auto-Hide Performance Overlay';
@@ -1191,9 +1162,6 @@ class TranslationsVideoControlsEn {
 	/// en: 'Lock screen'
 	String get lockScreen => 'Lock screen';
 
-	/// en: 'Unlock screen'
-	String get unlockScreen => 'Unlock screen';
-
 	/// en: 'Screen lock'
 	String get screenLockButton => 'Screen lock';
 
@@ -1370,6 +1338,12 @@ class TranslationsMessagesEn {
 	/// en: 'Switching to compatible player...'
 	String get switchingToCompatiblePlayer => 'Switching to compatible player...';
 
+	/// en: 'Playback failed'
+	String get serverLimitTitle => 'Playback failed';
+
+	/// en: 'The server returned an error (HTTP 500). This usually means the server owner has set a bandwidth or transcoding limit that's rejecting your session. There's nothing to do from the client — the server owner needs to adjust their settings.'
+	String get serverLimitBody => 'The server returned an error (HTTP 500). This usually means the server owner has set a bandwidth or transcoding limit that\'s rejecting your session. There\'s nothing to do from the client — the server owner needs to adjust their settings.';
+
 	/// en: 'Logs uploaded'
 	String get logsUploaded => 'Logs uploaded';
 
@@ -1387,9 +1361,6 @@ class TranslationsSubtitlingStylingEn {
 	final Translations _root; // ignore: unused_field
 
 	// Translations
-
-	/// en: 'Styling Options'
-	String get stylingOptions => 'Styling Options';
 
 	/// en: 'Text'
 	String get text => 'Text';
@@ -1423,6 +1394,12 @@ class TranslationsSubtitlingStylingEn {
 
 	/// en: 'ASS Override'
 	String get assOverride => 'ASS Override';
+
+	/// en: 'Bold'
+	String get bold => 'Bold';
+
+	/// en: 'Italic'
+	String get italic => 'Italic';
 }
 
 // Path: mpvConfig
@@ -2329,6 +2306,60 @@ class TranslationsDownloadsEn {
 
 	/// en: '${count} items queued for download'
 	String itemsQueued({required Object count}) => '${count} items queued for download';
+
+	/// en: 'Keep synced'
+	String get keepSynced => 'Keep synced';
+
+	/// en: 'Download once'
+	String get downloadOnce => 'Download once';
+
+	/// en: 'Keep ${count} unwatched'
+	String keepNUnwatched({required Object count}) => 'Keep ${count} unwatched';
+
+	/// en: 'Edit sync rule'
+	String get editSyncRule => 'Edit sync rule';
+
+	/// en: 'Remove sync rule'
+	String get removeSyncRule => 'Remove sync rule';
+
+	/// en: 'Stop syncing "${title}"? Downloaded episodes will be kept.'
+	String removeSyncRuleConfirm({required Object title}) => 'Stop syncing "${title}"? Downloaded episodes will be kept.';
+
+	/// en: 'Sync rule created — keeping ${count} unwatched episodes'
+	String syncRuleCreated({required Object count}) => 'Sync rule created — keeping ${count} unwatched episodes';
+
+	/// en: 'Sync rule updated'
+	String get syncRuleUpdated => 'Sync rule updated';
+
+	/// en: 'Sync rule removed'
+	String get syncRuleRemoved => 'Sync rule removed';
+
+	/// en: 'Synced ${count} new episodes for ${title}'
+	String syncedNewEpisodes({required Object count, required Object title}) => 'Synced ${count} new episodes for ${title}';
+
+	/// en: 'Sync rules'
+	String get activeSyncRules => 'Sync rules';
+
+	/// en: 'No sync rules'
+	String get noSyncRules => 'No sync rules';
+
+	/// en: 'Manage sync'
+	String get manageSyncRule => 'Manage sync';
+
+	/// en: 'Episode count'
+	String get editEpisodeCount => 'Episode count';
+
+	/// en: 'Sync filter'
+	String get editSyncFilter => 'Sync filter';
+
+	/// en: 'Syncing all items'
+	String get syncAllItems => 'Syncing all items';
+
+	/// en: 'Syncing unwatched items'
+	String get syncUnwatchedItems => 'Syncing unwatched items';
+
+	/// en: 'Sync rule created'
+	String get syncRuleListCreated => 'Sync rule created';
 }
 
 // Path: shaders
@@ -2386,21 +2417,6 @@ class TranslationsCompanionRemoteEn {
 
 	/// en: 'Companion Remote'
 	String get title => 'Companion Remote';
-
-	/// en: 'Connect to Device'
-	String get connectToDevice => 'Connect to Device';
-
-	/// en: 'Host Remote Session'
-	String get hostRemoteSession => 'Host Remote Session';
-
-	/// en: 'Control this device with your phone'
-	String get controlThisDevice => 'Control this device with your phone';
-
-	/// en: 'Remote Control'
-	String get remoteControl => 'Remote Control';
-
-	/// en: 'Control a desktop device'
-	String get controlDesktop => 'Control a desktop device';
 
 	/// en: 'Connected to ${name}'
 	String connectedTo({required Object name}) => 'Connected to ${name}';
@@ -2752,6 +2768,60 @@ class TranslationsServerTasksEn {
 	String get noTasks => 'No tasks running';
 }
 
+// Path: trakt
+class TranslationsTraktEn {
+	TranslationsTraktEn._(this._root);
+
+	final Translations _root; // ignore: unused_field
+
+	// Translations
+
+	/// en: 'Trakt'
+	String get title => 'Trakt';
+
+	/// en: 'Connected'
+	String get connected => 'Connected';
+
+	/// en: 'Connected as @${username}'
+	String connectedAs({required Object username}) => 'Connected as @${username}';
+
+	/// en: 'Disconnect Trakt account?'
+	String get disconnectConfirm => 'Disconnect Trakt account?';
+
+	/// en: 'Plezy will stop sending playback events to Trakt. You can reconnect at any time.'
+	String get disconnectConfirmBody => 'Plezy will stop sending playback events to Trakt. You can reconnect at any time.';
+
+	/// en: 'Real-time scrobbling'
+	String get scrobble => 'Real-time scrobbling';
+
+	/// en: 'Send play, pause, and stop events to Trakt during playback.'
+	String get scrobbleDescription => 'Send play, pause, and stop events to Trakt during playback.';
+
+	/// en: 'Sync watched status'
+	String get watchedSync => 'Sync watched status';
+
+	/// en: 'When you mark items watched in Plezy, mark them on Trakt.'
+	String get watchedSyncDescription => 'When you mark items watched in Plezy, mark them on Trakt.';
+
+	/// en: 'Activate Plezy on Trakt'
+	String get deviceCodeTitle => 'Activate Plezy on Trakt';
+
+	/// en: 'Visit ${url} and enter this code:'
+	String deviceCodeBody({required Object url}) => 'Visit ${url} and enter this code:';
+
+	/// en: 'Open Trakt to activate'
+	String get openTraktActivate => 'Open Trakt to activate';
+
+	/// en: 'Waiting for authorization…'
+	String get waitingForAuthorization => 'Waiting for authorization…';
+
+	/// en: 'Code copied'
+	String get codeCopied => 'Code copied';
+
+	/// en: 'Couldn't connect to Trakt. Try again.'
+	String get connectFailed => 'Couldn\'t connect to Trakt. Try again.';
+}
+
 // Path: hotkeys.actions
 class TranslationsHotkeysActionsEn {
 	TranslationsHotkeysActionsEn._(this._root);
@@ -2952,9 +3022,6 @@ class TranslationsCompanionRemotePairingEn {
 
 	// Translations
 
-	/// en: 'Connect to Desktop'
-	String get pairWithDesktop => 'Connect to Desktop';
-
 	/// en: 'Devices on your network running Plezy with the same Plex account will appear automatically'
 	String get discoveryDescription => 'Devices on your network running Plezy with the same Plex account will appear automatically';
 
@@ -3020,12 +3087,6 @@ class TranslationsCompanionRemoteRemoteEn {
 
 	/// en: 'Retry Now'
 	String get retryNow => 'Retry Now';
-
-	/// en: 'Connection error'
-	String get connectionError => 'Connection error';
-
-	/// en: 'Not connected'
-	String get notConnected => 'Not connected';
 
 	/// en: 'Remote'
 	String get tabRemote => 'Remote';
@@ -3131,7 +3192,6 @@ extension on Translations {
 			'common.shuffle' => 'Shuffle',
 			'common.addTo' => 'Add to...',
 			'common.createNew' => 'Create new',
-			'common.paste' => 'Paste',
 			'common.connect' => 'Connect',
 			'common.disconnect' => 'Disconnect',
 			'common.play' => 'Play',
@@ -3169,18 +3229,18 @@ extension on Translations {
 			'update.latestVersion' => 'You are on the latest version',
 			'update.checkFailed' => 'Failed to check for updates',
 			'settings.title' => 'Settings',
+			'settings.supportDeveloper' => 'Support Plezy',
+			'settings.supportDeveloperDescription' => 'Donate via Liberapay to fund development',
 			'settings.language' => 'Language',
 			'settings.theme' => 'Theme',
 			'settings.appearance' => 'Appearance',
 			'settings.videoPlayback' => 'Video Playback',
+			'settings.videoPlaybackDescription' => 'Configure playback behavior',
 			'settings.advanced' => 'Advanced',
 			'settings.episodePosterMode' => 'Episode Poster Style',
 			'settings.seriesPoster' => 'Series Poster',
-			'settings.seriesPosterDescription' => 'Show the series poster for all episodes',
 			'settings.seasonPoster' => 'Season Poster',
-			'settings.seasonPosterDescription' => 'Show the season-specific poster for episodes',
 			'settings.episodeThumbnail' => 'Thumbnail',
-			'settings.episodeThumbnailDescription' => 'Show 16:9 episode screenshot thumbnails',
 			'settings.showHeroSectionDescription' => 'Display featured content carousel on home screen',
 			'settings.secondsLabel' => 'Seconds',
 			'settings.minutesLabel' => 'Minutes',
@@ -3188,23 +3248,15 @@ extension on Translations {
 			'settings.minutesShort' => 'm',
 			'settings.durationHint' => ({required Object min, required Object max}) => 'Enter duration (${min}-${max})',
 			'settings.systemTheme' => 'System',
-			'settings.systemThemeDescription' => 'Follow system settings',
 			'settings.lightTheme' => 'Light',
 			'settings.darkTheme' => 'Dark',
 			'settings.oledTheme' => 'OLED',
-			'settings.oledThemeDescription' => 'Pure black for OLED screens',
 			'settings.libraryDensity' => 'Library Density',
 			'settings.compact' => 'Compact',
-			'settings.compactDescription' => 'Smaller cards, more items visible',
-			'settings.normal' => 'Normal',
-			'settings.normalDescription' => 'Default size',
 			'settings.comfortable' => 'Comfortable',
-			'settings.comfortableDescription' => 'Larger cards, fewer items visible',
 			'settings.viewMode' => 'View Mode',
 			'settings.gridView' => 'Grid',
-			'settings.gridViewDescription' => 'Display items in a grid layout',
 			'settings.listView' => 'List',
-			'settings.listViewDescription' => 'Display items in a list layout',
 			'settings.showHeroSection' => 'Show Hero Section',
 			'settings.useGlobalHubs' => 'Use Plex Home Layout',
 			'settings.useGlobalHubsDescription' => 'Show home page hubs like the official Plex client. When off, shows per-library recommendations instead.',
@@ -3218,9 +3270,7 @@ extension on Translations {
 			'settings.hideSpoilersDescription' => 'Blur thumbnails and hide descriptions for episodes you haven\'t watched yet',
 			'settings.playerBackend' => 'Player Backend',
 			'settings.exoPlayer' => 'ExoPlayer (Recommended)',
-			'settings.exoPlayerDescription' => 'Android native player with better hardware support',
 			'settings.mpv' => 'mpv',
-			'settings.mpvDescription' => 'Advanced player with more features and ASS subtitle support',
 			'settings.hardwareDecoding' => 'Hardware Decoding',
 			'settings.hardwareDecodingDescription' => 'Use hardware acceleration when available',
 			'settings.bufferSize' => 'Buffer Size',
@@ -3232,7 +3282,6 @@ extension on Translations {
 			'settings.smallSkipDuration' => 'Small Skip Duration',
 			'settings.largeSkipDuration' => 'Large Skip Duration',
 			'settings.rewindOnResume' => 'Rewind on Resume',
-			'settings.rewindOnResumeDescription' => 'Rewind by this amount when resuming playback',
 			'settings.secondsUnit' => ({required Object seconds}) => '${seconds} seconds',
 			'settings.defaultSleepTimer' => 'Default Sleep Timer',
 			'settings.minutesUnit' => ({required Object minutes}) => '${minutes} minutes',
@@ -3246,7 +3295,6 @@ extension on Translations {
 			'settings.videoPlayerNavigation' => 'Video Player Navigation',
 			'settings.videoPlayerNavigationDescription' => 'Use arrow keys to navigate video player controls',
 			'settings.watchTogetherRelay' => 'Watch Together Relay',
-			'settings.watchTogetherRelayDefault' => 'Default',
 			'settings.watchTogetherRelayDescription' => 'Set a custom relay server for Watch Together. All participants must use the same server.',
 			'settings.watchTogetherRelayHint' => 'https://my-relay.example.com',
 			'settings.crashReporting' => 'Crash Reporting',
@@ -3304,6 +3352,8 @@ extension on Translations {
 			'settings.maxVolumePercent' => ({required Object percent}) => '${percent}%',
 			'settings.discordRichPresence' => 'Discord Rich Presence',
 			'settings.discordRichPresenceDescription' => 'Show what you\'re watching on Discord',
+			'settings.trakt' => 'Trakt',
+			'settings.traktDescription' => 'Sync watch history with Trakt',
 			'settings.companionRemoteServer' => 'Companion Remote Server',
 			'settings.companionRemoteServerDescription' => 'Allow mobile devices on your network to control this app',
 			'settings.autoPip' => 'Auto Picture-in-Picture',
@@ -3315,13 +3365,14 @@ extension on Translations {
 			'settings.matchDynamicRange' => 'Match Dynamic Range',
 			'settings.matchDynamicRangeDescription' => 'Auto-enable HDR for HDR content and revert to SDR when leaving the player',
 			'settings.displaySwitchDelay' => 'Display Switch Delay',
-			'settings.displaySwitchDelayDescription' => 'Seconds to wait after a display mode change before starting playback',
 			'settings.tunneledPlayback' => 'Tunneled Playback',
 			'settings.tunneledPlaybackDescription' => 'Use hardware-accelerated video tunneling. Disable if you see a black screen with audio on HDR content',
 			'settings.requireProfileSelectionOnOpen' => 'Ask for profile on app open',
 			'settings.requireProfileSelectionOnOpenDescription' => 'Show profile selection every time the app is opened',
 			'settings.confirmExitOnBack' => 'Confirm before exiting',
 			'settings.confirmExitOnBackDescription' => 'Show a confirmation dialog when pressing back to exit the app',
+			'settings.forceTvMode' => 'Force TV mode',
+			'settings.forceTvModeDescription' => 'Use the TV layout regardless of auto-detection. Useful on Android TV devices that don\'t report the leanback feature. Restarts the app on change.',
 			'settings.autoHidePerformanceOverlay' => 'Auto-Hide Performance Overlay',
 			'settings.autoHidePerformanceOverlayDescription' => 'Fade the performance overlay with the playback controls',
 			'settings.showNavBarLabels' => 'Show Navigation Bar Labels',
@@ -3455,7 +3506,6 @@ extension on Translations {
 			'videoControls.alwaysOnTopButton' => 'Always on top',
 			'videoControls.rotationLockButton' => 'Rotation lock',
 			'videoControls.lockScreen' => 'Lock screen',
-			'videoControls.unlockScreen' => 'Unlock screen',
 			'videoControls.screenLockButton' => 'Screen lock',
 			'videoControls.longPressToUnlock' => 'Long press to unlock',
 			'videoControls.timelineSlider' => 'Video timeline',
@@ -3515,10 +3565,11 @@ extension on Translations {
 			'messages.failedToCreatePlayQueueNoItems' => 'Failed to create play queue - no items',
 			'messages.failedPlayback' => ({required Object action, required Object error}) => 'Failed to ${action}: ${error}',
 			'messages.switchingToCompatiblePlayer' => 'Switching to compatible player...',
+			'messages.serverLimitTitle' => 'Playback failed',
+			'messages.serverLimitBody' => 'The server returned an error (HTTP 500). This usually means the server owner has set a bandwidth or transcoding limit that\'s rejecting your session. There\'s nothing to do from the client — the server owner needs to adjust their settings.',
 			'messages.logsUploaded' => 'Logs uploaded',
 			'messages.logsUploadFailed' => 'Failed to upload logs',
 			'messages.logId' => 'Log ID',
-			'subtitlingStyling.stylingOptions' => 'Styling Options',
 			'subtitlingStyling.text' => 'Text',
 			'subtitlingStyling.border' => 'Border',
 			'subtitlingStyling.background' => 'Background',
@@ -3530,6 +3581,8 @@ extension on Translations {
 			'subtitlingStyling.backgroundColor' => 'Background Color',
 			'subtitlingStyling.position' => 'Position',
 			'subtitlingStyling.assOverride' => 'ASS Override',
+			'subtitlingStyling.bold' => 'Bold',
+			'subtitlingStyling.italic' => 'Italic',
 			'mpvConfig.title' => 'mpv.conf',
 			'mpvConfig.description' => 'Advanced video player settings',
 			'mpvConfig.presets' => 'Presets',
@@ -3617,8 +3670,6 @@ extension on Translations {
 			'libraries.groupings.seasons' => 'Seasons',
 			'libraries.groupings.episodes' => 'Episodes',
 			'libraries.groupings.folders' => 'Folders',
-			_ => null,
-		} ?? switch (path) {
 			'about.title' => 'About',
 			'about.openSourceLicenses' => 'Open Source Licenses',
 			'about.versionLabel' => ({required Object version}) => 'Version ${version}',
@@ -3627,6 +3678,8 @@ extension on Translations {
 			'serverSelection.allServerConnectionsFailed' => 'Failed to connect to any servers. Please check your network and try again.',
 			'serverSelection.noServersFoundForAccount' => ({required Object username, required Object email}) => 'No servers found for ${username} (${email})',
 			'serverSelection.failedToLoadServers' => ({required Object error}) => 'Failed to load servers: ${error}',
+			_ => null,
+		} ?? switch (path) {
 			'hubDetail.title' => 'Title',
 			'hubDetail.releaseYear' => 'Release Year',
 			'hubDetail.dateAdded' => 'Date Added',
@@ -3796,6 +3849,24 @@ extension on Translations {
 			'downloads.customAmount' => 'Custom amount...',
 			'downloads.howManyEpisodes' => 'How many episodes?',
 			'downloads.itemsQueued' => ({required Object count}) => '${count} items queued for download',
+			'downloads.keepSynced' => 'Keep synced',
+			'downloads.downloadOnce' => 'Download once',
+			'downloads.keepNUnwatched' => ({required Object count}) => 'Keep ${count} unwatched',
+			'downloads.editSyncRule' => 'Edit sync rule',
+			'downloads.removeSyncRule' => 'Remove sync rule',
+			'downloads.removeSyncRuleConfirm' => ({required Object title}) => 'Stop syncing "${title}"? Downloaded episodes will be kept.',
+			'downloads.syncRuleCreated' => ({required Object count}) => 'Sync rule created — keeping ${count} unwatched episodes',
+			'downloads.syncRuleUpdated' => 'Sync rule updated',
+			'downloads.syncRuleRemoved' => 'Sync rule removed',
+			'downloads.syncedNewEpisodes' => ({required Object count, required Object title}) => 'Synced ${count} new episodes for ${title}',
+			'downloads.activeSyncRules' => 'Sync rules',
+			'downloads.noSyncRules' => 'No sync rules',
+			'downloads.manageSyncRule' => 'Manage sync',
+			'downloads.editEpisodeCount' => 'Episode count',
+			'downloads.editSyncFilter' => 'Sync filter',
+			'downloads.syncAllItems' => 'Syncing all items',
+			'downloads.syncUnwatchedItems' => 'Syncing unwatched items',
+			'downloads.syncRuleListCreated' => 'Sync rule created',
 			'shaders.title' => 'Shaders',
 			'shaders.noShaderDescription' => 'No video enhancement',
 			'shaders.nvscalerDescription' => 'NVIDIA image scaling for sharper video',
@@ -3809,11 +3880,6 @@ extension on Translations {
 			'shaders.deleteShader' => 'Delete Shader',
 			'shaders.deleteShaderConfirm' => ({required Object name}) => 'Delete "${name}"?',
 			'companionRemote.title' => 'Companion Remote',
-			'companionRemote.connectToDevice' => 'Connect to Device',
-			'companionRemote.hostRemoteSession' => 'Host Remote Session',
-			'companionRemote.controlThisDevice' => 'Control this device with your phone',
-			'companionRemote.remoteControl' => 'Remote Control',
-			'companionRemote.controlDesktop' => 'Control a desktop device',
 			'companionRemote.connectedTo' => ({required Object name}) => 'Connected to ${name}',
 			'companionRemote.session.startingServer' => 'Starting remote server...',
 			'companionRemote.session.failedToCreate' => 'Failed to start remote server:',
@@ -3827,7 +3893,6 @@ extension on Translations {
 			'companionRemote.session.startServer' => 'Start Server',
 			'companionRemote.session.stopServer' => 'Stop Server',
 			'companionRemote.session.minimize' => 'Minimize',
-			'companionRemote.pairing.pairWithDesktop' => 'Connect to Desktop',
 			'companionRemote.pairing.discoveryDescription' => 'Devices on your network running Plezy with the same Plex account will appear automatically',
 			'companionRemote.pairing.hostAddressHint' => '192.168.1.100:48632',
 			'companionRemote.pairing.connecting' => 'Connecting...',
@@ -3847,8 +3912,6 @@ extension on Translations {
 			'companionRemote.remote.reconnecting' => 'Reconnecting...',
 			'companionRemote.remote.attemptOf' => ({required Object current}) => 'Attempt ${current} of 5',
 			'companionRemote.remote.retryNow' => 'Retry Now',
-			'companionRemote.remote.connectionError' => 'Connection error',
-			'companionRemote.remote.notConnected' => 'Not connected',
 			'companionRemote.remote.tabRemote' => 'Remote',
 			'companionRemote.remote.tabPlay' => 'Play',
 			'companionRemote.remote.tabMore' => 'More',
@@ -3974,6 +4037,21 @@ extension on Translations {
 			'serverTasks.title' => 'Server Tasks',
 			'serverTasks.failedToLoad' => 'Failed to load tasks',
 			'serverTasks.noTasks' => 'No tasks running',
+			'trakt.title' => 'Trakt',
+			'trakt.connected' => 'Connected',
+			'trakt.connectedAs' => ({required Object username}) => 'Connected as @${username}',
+			'trakt.disconnectConfirm' => 'Disconnect Trakt account?',
+			'trakt.disconnectConfirmBody' => 'Plezy will stop sending playback events to Trakt. You can reconnect at any time.',
+			'trakt.scrobble' => 'Real-time scrobbling',
+			'trakt.scrobbleDescription' => 'Send play, pause, and stop events to Trakt during playback.',
+			'trakt.watchedSync' => 'Sync watched status',
+			'trakt.watchedSyncDescription' => 'When you mark items watched in Plezy, mark them on Trakt.',
+			'trakt.deviceCodeTitle' => 'Activate Plezy on Trakt',
+			'trakt.deviceCodeBody' => ({required Object url}) => 'Visit ${url} and enter this code:',
+			'trakt.openTraktActivate' => 'Open Trakt to activate',
+			'trakt.waitingForAuthorization' => 'Waiting for authorization…',
+			'trakt.codeCopied' => 'Code copied',
+			'trakt.connectFailed' => 'Couldn\'t connect to Trakt. Try again.',
 			_ => null,
 		};
 	}

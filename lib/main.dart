@@ -13,11 +13,15 @@ import 'screens/main_screen.dart';
 import 'screens/auth_screen.dart';
 import 'services/storage_service.dart';
 import 'services/macos_window_service.dart';
+import 'services/native_window_service.dart';
 import 'services/fullscreen_state_manager.dart';
 import 'services/settings_service.dart';
 import 'utils/platform_detector.dart';
 import 'services/discord_rpc_service.dart';
 import 'services/gamepad_service.dart';
+import 'services/trakt/trakt_scrobble_service.dart';
+import 'services/trakt/trakt_sync_service.dart';
+import 'providers/trakt_account_provider.dart';
 import 'providers/user_profile_provider.dart';
 import 'providers/multi_server_provider.dart';
 import 'providers/theme_provider.dart';
@@ -44,8 +48,11 @@ import 'services/download_storage_service.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'services/plex_api_cache.dart';
 import 'database/app_database.dart';
+import 'screens/video_player_screen.dart';
 import 'utils/app_logger.dart';
 import 'utils/orientation_helper.dart';
+import 'utils/global_key_utils.dart';
+import 'utils/watch_state_notifier.dart';
 import 'i18n/strings.g.dart';
 import 'focus/input_mode_tracker.dart';
 import 'focus/key_event_utils.dart';
@@ -93,6 +100,7 @@ Future<void> main() async {
       options.attachStacktrace = true;
       options.enableAutoSessionTracking = false;
       options.recordHttpBreadcrumbs = false;
+      options.captureNativeFailedRequests = false;
       options.beforeSend = _beforeSend;
       options.beforeBreadcrumb = _beforeBreadcrumb;
     }, appRunner: _bootstrapApp);
@@ -132,13 +140,16 @@ Future<void> _bootstrapApp() async {
 
   // Initialize TV detection and PiP service for Android
   if (Platform.isAndroid) {
-    futures.add(TvDetectionService.getInstance());
+    futures.add(TvDetectionService.getInstance(forceTv: settings.getForceTvMode()));
     // Initialize PiP service to listen for PiP state changes
     PipService();
   }
 
   // Configure macOS window with custom titlebar (depends on window manager)
   futures.add(MacOSWindowService.setupCustomTitlebar());
+
+  // Hook Windows native fullscreen callback (no-op elsewhere).
+  NativeWindowService.initialize();
 
   // Initialize storage service
   futures.add(StorageService.getInstance());
@@ -180,10 +191,20 @@ Future<void> _bootstrapApp() async {
     DiscordRPCService.instance.initialize();
   }
 
+  // Trakt scrobble service (all platforms)
+  await TraktScrobbleService.instance.initialize();
+
   // DTD service is available for MCP tooling connection if needed
 
   // Register bundled shader licenses
   _registerShaderLicenses();
+
+  // In release mode, show a colored placeholder instead of a blank/white screen
+  // when a widget build() throws an unhandled exception.
+  ErrorWidget.builder = (FlutterErrorDetails details) {
+    if (kDebugMode) return ErrorWidget(details.exception);
+    return const ColoredBox(color: Color(0xFF000000));
+  };
 
   runApp(const MainApp());
 }
@@ -211,19 +232,19 @@ FutureOr<SentryEvent?> _beforeSend(SentryEvent event, Hint _) {
     bool shouldDrop(SentryException e) {
       final v = e.value;
       // Windows file-lock errors from cache manager cleanup
-      if (e.type == 'FileSystemException' &&
-          v != null &&
-          v.contains('plexImageCache') &&
-          v.contains('errno = 32')) {
+      if (e.type == 'FileSystemException' && v != null && v.contains('plexImageCache') && v.contains('errno = 32')) {
         return true;
       }
       // Linux without DBus/NetworkManager
-      if (e.type == 'DBusServiceUnknownException' ||
-          (v != null && v.contains('system_bus_socket'))) {
+      if (e.type == 'DBusServiceUnknownException' || (v != null && v.contains('system_bus_socket'))) {
         return true;
       }
       // Device out of disk space
-      if (v != null && (v.contains('SQLITE_FULL') || v.contains('No space left on device'))) {
+      if (v != null &&
+          (v.contains('SQLITE_FULL') ||
+              v.contains('No space left on device') ||
+              v.contains('errno = 112') ||
+              v.contains('database or disk is full'))) {
         return true;
       }
       // Native HTTP errors from CFNetwork (server errors, not actionable)
@@ -241,6 +262,26 @@ FutureOr<SentryEvent?> _beforeSend(SentryEvent event, Hint _) {
       if (value != null) {
         e.value = LogRedactionManager.redact(value);
       }
+    }
+  }
+
+  // Enrich TimeoutException with operation name + duration as tags/fingerprint.
+  // value format: "TimeoutException after 0:00:05.000000: <operation> timed out"
+  if (exceptions != null) {
+    final timeoutException = exceptions.where((e) => e.type == 'TimeoutException').firstOrNull;
+    if (timeoutException != null) {
+      final value = timeoutException.value ?? '';
+      final colonIdx = value.indexOf(': ');
+      final message = colonIdx >= 0 ? value.substring(colonIdx + 2) : value;
+      final operation = message.endsWith(' timed out')
+          ? message.substring(0, message.length - ' timed out'.length)
+          : null;
+      final durationMatch = RegExp(r'after (\d+:\d{2}:\d{2}\.\d+)').firstMatch(value);
+
+      final tags = event.tags ??= {};
+      if (operation != null) tags['timeout.operation'] = operation;
+      if (durationMatch != null) tags['timeout.duration'] = durationMatch.group(1)!;
+      event.fingerprint = ['TimeoutException', ?operation];
     }
   }
 
@@ -330,6 +371,12 @@ class _MainAppState extends State<MainApp> with WidgetsBindingObserver {
   late final DownloadManagerService _downloadManager;
   late final OfflineWatchSyncService _offlineWatchSyncService;
   late final AppLifecycleListener _appLifecycleListener;
+  StreamSubscription<WatchStateEvent>? _watchStateSubscription;
+  StreamSubscription<List<ConnectivityResult>>? _connectivitySubscription;
+  Timer? _syncDebounce;
+  final Set<String> _pendingSyncKeys = <String>{};
+  bool _isAutoDeleteRunning = false;
+  bool _lastConnectivityWasWifi = false;
 
   /// Last time server health probes ran from a resume event (cooldown for desktop)
   DateTime _lastResumeProbe = DateTime(0);
@@ -346,7 +393,8 @@ class _MainAppState extends State<MainApp> with WidgetsBindingObserver {
     if (Platform.isWindows || Platform.isMacOS || Platform.isLinux) {
       _memoryCheckTimer = Timer.periodic(const Duration(seconds: 30), (_) {
         final rss = ProcessInfo.currentRss;
-        if (rss > 1536 * 1024 * 1024) { // 1.5GB
+        if (rss > 1536 * 1024 * 1024) {
+          // 1.5GB
           appLogger.w('RSS high ($rss bytes), evicting image caches');
           _evictImageCaches();
         }
@@ -366,6 +414,10 @@ class _MainAppState extends State<MainApp> with WidgetsBindingObserver {
 
     _offlineWatchSyncService = OfflineWatchSyncService(database: _appDatabase, serverManager: _serverManager);
 
+    // Trakt sync service (subscribes to WatchStateNotifier, requires serverManager
+    // to resolve PlexClients for GUID lookups).
+    TraktSyncService.instance.initialize(serverManager: _serverManager);
+
     _appLifecycleListener = AppLifecycleListener(
       onExitRequested: () async {
         await _appDatabase.close();
@@ -379,6 +431,9 @@ class _MainAppState extends State<MainApp> with WidgetsBindingObserver {
 
   @override
   void dispose() {
+    _syncDebounce?.cancel();
+    _watchStateSubscription?.cancel();
+    _connectivitySubscription?.cancel();
     _memoryCheckTimer?.cancel();
     _appLifecycleListener.dispose();
     WidgetsBinding.instance.removeObserver(this);
@@ -397,12 +452,95 @@ class _MainAppState extends State<MainApp> with WidgetsBindingObserver {
     PaintingBinding.instance.imageCache.clearLiveImages();
   }
 
+  /// Fires [_autoDeleteAndSync] on each WiFi/Ethernet reconnect so rules run
+  /// as soon as the device is back online. Rapid flapping is bounded by the
+  /// executor's cooldown.
+  void _startConnectivitySyncTrigger(DownloadProvider downloadProvider) {
+    Future<void> setup() async {
+      try {
+        final initial = await Connectivity().checkConnectivity();
+        _lastConnectivityWasWifi = _hasWifiOrEthernet(initial);
+      } catch (e) {
+        appLogger.w('Initial connectivity read failed, defaulting to false: $e');
+        _lastConnectivityWasWifi = false;
+      }
+
+      try {
+        _connectivitySubscription = Connectivity().onConnectivityChanged.listen((results) {
+          final hasWifi = _hasWifiOrEthernet(results);
+          final transitioned = hasWifi && !_lastConnectivityWasWifi;
+          _lastConnectivityWasWifi = hasWifi;
+          if (transitioned) {
+            appLogger.d('Connectivity moved onto WiFi/Ethernet — triggering sync pass');
+            _autoDeleteAndSync(downloadProvider);
+          }
+        });
+      } catch (e) {
+        appLogger.w('Could not subscribe to connectivity changes: $e');
+      }
+    }
+
+    setup();
+  }
+
+  static bool _hasWifiOrEthernet(List<ConnectivityResult> results) =>
+      results.contains(ConnectivityResult.wifi) || results.contains(ConnectivityResult.ethernet);
+
+  /// Run auto-delete (if enabled) and then a sync-rule pass.
+  ///
+  /// When [targetKeys] is non-null, only those rules are re-evaluated
+  /// (cooldown doesn't apply — targeted runs are always "we know this
+  /// changed"). When null, every rule runs via the executor, with [force]
+  /// gating the cooldown: `true` for user-initiated drains, `false` for
+  /// background probes like a connectivity reconnect.
+  Future<void> _autoDeleteAndSync(
+    DownloadProvider downloadProvider, {
+    List<String>? targetKeys,
+    bool force = false,
+  }) async {
+    if (_isAutoDeleteRunning) return;
+    _isAutoDeleteRunning = true;
+    try {
+      await downloadProvider.refreshMetadataFromCache();
+      final activeKey = VideoPlayerScreenState.activeRatingKey;
+      final settings = SettingsService.instanceOrNull;
+      if (settings != null && settings.getAutoRemoveWatchedDownloads()) {
+        final deleted = await downloadProvider.autoDeleteWatchedDownloads(activeRatingKey: activeKey);
+        if (deleted.isNotEmpty) {
+          final msg = deleted.length == 1
+              ? t.messages.autoRemovedWatchedDownload(title: deleted.first)
+              : t.messages.autoRemovedWatchedDownload(title: '${deleted.length} items');
+          showMainSnackBar(msg);
+        }
+      }
+
+      if (targetKeys != null) {
+        for (final key in targetKeys) {
+          if (!downloadProvider.hasSyncRule(key)) continue;
+          final result = await downloadProvider.executeSyncRuleFor(key, _serverManager);
+          if (result != null && result.queuedCount > 0) {
+            final title = result.title ?? 'Unknown';
+            showMainSnackBar(t.downloads.syncedNewEpisodes(count: '1', title: '$title (${result.queuedCount})'));
+          }
+        }
+      } else {
+        final synced = await downloadProvider.executeSyncRules(_serverManager, force: force);
+        if (synced.isNotEmpty) {
+          showMainSnackBar(t.downloads.syncedNewEpisodes(count: synced.length.toString(), title: synced.first));
+        }
+      }
+    } finally {
+      _isAutoDeleteRunning = false;
+    }
+  }
+
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     switch (state) {
       case AppLifecycleState.resumed:
         // App came back to foreground - trigger sync check and start new session
         _offlineWatchSyncService.onAppResumed();
+        TraktSyncService.instance.flushQueue();
         InAppReviewService.instance.startSession();
         // Re-probe servers — mobile OS may have dropped TCP connections during doze/sleep.
         // On desktop, resumed fires on every window focus (alt-tab), so apply a cooldown
@@ -413,8 +551,12 @@ class _MainAppState extends State<MainApp> with WidgetsBindingObserver {
             : const Duration(minutes: 2);
         if (now.difference(_lastResumeProbe) >= cooldown) {
           _lastResumeProbe = now;
-          _serverManager.checkServerHealth();
-          _serverManager.reconnectOfflineServers();
+          // Await health check before reconnecting so stale "online" servers
+          // get marked offline and included in the reconnection sweep.
+          unawaited(() async {
+            await _serverManager.checkServerHealth();
+            await _serverManager.reconnectOfflineServers();
+          }());
         }
       case AppLifecycleState.paused:
       case AppLifecycleState.detached:
@@ -424,7 +566,8 @@ class _MainAppState extends State<MainApp> with WidgetsBindingObserver {
         // SQLite WAL mode handles process death; desktop uses onExitRequested.
         InAppReviewService.instance.endSession();
         if (Platform.isWindows || Platform.isMacOS || Platform.isLinux) {
-          if (ProcessInfo.currentRss > 1024 * 1024 * 1024) { // 1GB
+          if (ProcessInfo.currentRss > 1024 * 1024 * 1024) {
+            // 1GB
             _evictImageCaches();
           }
         }
@@ -454,27 +597,43 @@ class _MainAppState extends State<MainApp> with WidgetsBindingObserver {
           },
         ),
         // Download provider
-        ChangeNotifierProvider(create: (context) => DownloadProvider(downloadManager: _downloadManager)),
+        ChangeNotifierProvider(
+          create: (context) => DownloadProvider(downloadManager: _downloadManager, database: _appDatabase),
+        ),
         // Offline watch sync service
         ChangeNotifierProvider<OfflineWatchSyncService>(
           create: (context) {
             final offlineModeProvider = context.read<OfflineModeProvider>();
             final downloadProvider = context.read<DownloadProvider>();
 
-            // Wire up callback to refresh download provider after watch state sync
+            // Offline-sync drain replays a batch of queued watch actions without
+            // per-item data, so we can't target rules — force a full pass.
             _offlineWatchSyncService.onWatchStatesRefreshed = () async {
-              await downloadProvider.refreshMetadataFromCache();
-              final settings = SettingsService.instanceOrNull;
-              if (settings != null && settings.getAutoRemoveWatchedDownloads()) {
-                final deleted = await downloadProvider.autoDeleteWatchedDownloads();
-                if (deleted.isNotEmpty) {
-                  final msg = deleted.length == 1
-                      ? t.messages.autoRemovedWatchedDownload(title: deleted.first)
-                      : t.messages.autoRemovedWatchedDownload(title: '${deleted.length} items');
-                  showGlobalSnackBar(msg);
-                }
-              }
+              await _autoDeleteAndSync(downloadProvider, force: true);
             };
+
+            // In-session watch events carry the episode's parent chain, so we
+            // only re-evaluate rules that actually cover the watched item —
+            // leaves unrelated collection/playlist rules alone. Debounced so
+            // binge-watching coalesces into one pass.
+            _watchStateSubscription = WatchStateNotifier().stream.listen((event) {
+              if (event.changeType != WatchStateChangeType.watched) return;
+              if (VideoPlayerScreenState.activeRatingKey == event.ratingKey) return;
+
+              _pendingSyncKeys.add(event.globalKey);
+              for (final parentKey in event.parentChain) {
+                _pendingSyncKeys.add(buildGlobalKey(event.serverId, parentKey));
+              }
+
+              _syncDebounce?.cancel();
+              _syncDebounce = Timer(const Duration(seconds: 5), () {
+                final keys = _pendingSyncKeys.toList();
+                _pendingSyncKeys.clear();
+                _autoDeleteAndSync(downloadProvider, targetKeys: keys);
+              });
+            });
+
+            _startConnectivitySyncTrigger(downloadProvider);
 
             _offlineWatchSyncService.startConnectivityMonitoring(offlineModeProvider);
             return _offlineWatchSyncService;
@@ -493,6 +652,9 @@ class _MainAppState extends State<MainApp> with WidgetsBindingObserver {
         // Existing providers
         ChangeNotifierProvider(create: (context) => UserProfileProvider()),
         ChangeNotifierProvider(create: (context) => ThemeProvider()),
+        // Trakt account — depends on UserProfileProvider for per-profile token scoping.
+        // Hydrated and rebound in `_TraktBootstrap` below.
+        ChangeNotifierProvider(create: (context) => TraktAccountProvider()),
         ChangeNotifierProvider(create: (context) => SettingsProvider(), lazy: true),
         ChangeNotifierProvider(create: (context) => HiddenLibrariesProvider(), lazy: true),
         ChangeNotifierProvider(create: (context) => LibrariesProvider()),
@@ -504,38 +666,92 @@ class _MainAppState extends State<MainApp> with WidgetsBindingObserver {
       child: Consumer<ThemeProvider>(
         builder: (context, themeProvider, child) {
           return TranslationProvider(
-            child: Listener(
-              onPointerDown: (event) {
-                if ((event.buttons & kBackMouseButton) != 0) {
-                  rootNavigatorKey.currentState?.maybePop();
-                }
-              },
-              behavior: HitTestBehavior.translucent,
-              child: InputModeTracker(
-                child: MaterialApp(
-                title: t.app.title,
-                debugShowCheckedModeBanner: false,
-                theme: themeProvider.lightTheme,
-                darkTheme: themeProvider.darkTheme,
-                themeMode: themeProvider.materialThemeMode,
-                navigatorKey: rootNavigatorKey,
-                navigatorObservers: [routeObserver, BackKeySuppressorObserver()],
-                home: const OrientationAwareSetup(),
-                builder: (context, child) => ScaffoldMessenger(
-                  key: rootScaffoldMessengerKey,
-                  child: Scaffold(
-                    backgroundColor: Colors.transparent,
-                    body: child,
+            child: _TraktProfileBootstrap(
+              child: Listener(
+                onPointerDown: (event) {
+                  if ((event.buttons & kBackMouseButton) != 0) {
+                    rootNavigatorKey.currentState?.maybePop();
+                  }
+                },
+                behavior: HitTestBehavior.translucent,
+                child: InputModeTracker(
+                  child: MaterialApp(
+                    title: t.app.title,
+                    debugShowCheckedModeBanner: false,
+                    theme: themeProvider.lightTheme,
+                    darkTheme: themeProvider.darkTheme,
+                    themeMode: themeProvider.materialThemeMode,
+                    navigatorKey: rootNavigatorKey,
+                    navigatorObservers: [routeObserver, BackKeySuppressorObserver()],
+                    home: const OrientationAwareSetup(),
+                    builder: (context, child) => ScaffoldMessenger(
+                      key: rootScaffoldMessengerKey,
+                      child: Scaffold(backgroundColor: Colors.transparent, body: child),
+                    ),
                   ),
                 ),
               ),
-            ),
             ),
           );
         },
       ),
     );
   }
+}
+
+/// Hydrates the [TraktAccountProvider] with the active Plex profile's session
+/// and rebinds the scrobble + sync services whenever the user switches.
+///
+/// Lives high in the widget tree (above MaterialApp) so the listener survives
+/// route changes.
+class _TraktProfileBootstrap extends StatefulWidget {
+  final Widget child;
+  const _TraktProfileBootstrap({required this.child});
+
+  @override
+  State<_TraktProfileBootstrap> createState() => _TraktProfileBootstrapState();
+}
+
+class _TraktProfileBootstrapState extends State<_TraktProfileBootstrap> {
+  UserProfileProvider? _profile;
+  TraktAccountProvider? _trakt;
+  String? _lastUuid;
+  bool _hydrated = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final profile = context.read<UserProfileProvider>();
+    final trakt = context.read<TraktAccountProvider>();
+
+    if (!identical(_profile, profile)) {
+      _profile?.removeListener(_onProfileChanged);
+      _profile = profile;
+      _profile!.addListener(_onProfileChanged);
+    }
+    _trakt = trakt;
+
+    if (!_hydrated) {
+      _hydrated = true;
+      _onProfileChanged();
+    }
+  }
+
+  void _onProfileChanged() {
+    final uuid = _profile?.currentUser?.uuid;
+    if (uuid == _lastUuid) return;
+    _lastUuid = uuid;
+    _trakt?.onActiveProfileChanged(uuid);
+  }
+
+  @override
+  void dispose() {
+    _profile?.removeListener(_onProfileChanged);
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.child;
 }
 
 class OrientationAwareSetup extends StatefulWidget {
@@ -713,9 +929,9 @@ class _SetupScreenState extends State<SetupScreen> {
         _statusMessage,
         key: ValueKey(_statusMessage),
         textAlign: TextAlign.center,
-        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-          color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6),
-        ),
+        style: Theme.of(
+          context,
+        ).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6)),
       ),
     );
   }
@@ -735,7 +951,8 @@ class _SetupScreenState extends State<SetupScreen> {
         final Widget statusIcon;
         if (connected == null) {
           statusIcon = const SizedBox(
-            width: 12, height: 12,
+            width: 12,
+            height: 12,
             child: CircularProgressIndicator(strokeWidth: 1.5, color: coralColor),
           );
         } else if (connected) {
@@ -767,17 +984,20 @@ class _SetupScreenState extends State<SetupScreen> {
         children: [
           Center(child: SvgPicture.asset('assets/plezy_adaptive_foreground.svg', width: 288, height: 288)),
           Positioned(
-            left: 0, right: 0,
+            left: 0,
+            right: 0,
             bottom: MediaQuery.of(context).size.height * 0.5 - 170,
             child: _buildStatusText(context),
           ),
           Positioned(
-            left: 0, right: 0,
+            left: 0,
+            right: 0,
             top: MediaQuery.of(context).size.height * 0.5 + 180,
             child: Center(
               child: _serverStatus.isEmpty
                   ? const SizedBox(
-                      width: 20, height: 20,
+                      width: 20,
+                      height: 20,
                       child: CircularProgressIndicator(strokeWidth: 2, color: coralColor),
                     )
                   : _buildServerStatusList(context),

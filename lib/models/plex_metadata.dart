@@ -11,11 +11,9 @@ import '../utils/json_utils.dart';
 
 part 'plex_metadata.g.dart';
 
-Object? _readRatingKey(Map json, String key) =>
-    json['ratingKey'] ?? json['key'] ?? '';
+Object? _readRatingKey(Map json, String key) => json['ratingKey'] ?? json['key'] ?? '';
 
-List<String>? _tagsFromJson(List? json) =>
-    json?.cast<Map<String, dynamic>>().map((e) => e['tag'] as String).toList();
+List<String>? _tagsFromJson(List? json) => json?.cast<Map<String, dynamic>>().map((e) => e['tag'] as String).toList();
 
 /// Media type enum for type-safe media type handling
 enum PlexMediaType {
@@ -151,6 +149,12 @@ class PlexMetadata with MultiServerFields {
 
   /// Global unique identifier across all servers (serverId:ratingKey)
   String get globalKey => serverId != null ? buildGlobalKey(serverId!, ratingKey) : ratingKey;
+
+  /// Parent rating keys for hierarchical invalidation.
+  /// For an episode: [seasonRatingKey, showRatingKey]
+  /// For a season: [showRatingKey]
+  /// For a movie: []
+  List<String> get parentChain => [?parentRatingKey, ?grandparentRatingKey];
 
   /// Whether this item represents a library section (shared whole-library, not a media item).
   /// These have keys like `/library/sections/5/all` instead of `/library/metadata/12345`.
@@ -520,6 +524,10 @@ class PlexMetadata with MultiServerFields {
     return viewOffset! > 0 && viewOffset! < duration!;
   }
 
+  /// Returns true if this container (show/season) has some but not all episodes watched
+  bool get isPartiallyWatched =>
+      viewedLeafCount != null && leafCount != null && viewedLeafCount! > 0 && viewedLeafCount! < leafCount!;
+
   // Helper to determine if content is watched
   bool get isWatched {
     // For series/seasons, check if all episodes are watched
@@ -535,9 +543,13 @@ class PlexMetadata with MultiServerFields {
     try {
       return _$PlexMetadataFromJson(kBlurArtwork ? _obfuscateJson(json) : json);
     } on TypeError catch (e, st) {
-      Sentry.captureException(e, stackTrace: st, withScope: (scope) {
-        scope.setContexts('json', json);
-      });
+      Sentry.captureException(
+        e,
+        stackTrace: st,
+        withScope: (scope) {
+          scope.setContexts('json', json);
+        },
+      );
       rethrow;
     }
   }

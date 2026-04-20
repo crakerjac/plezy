@@ -57,6 +57,29 @@ Future<bool> showConfirmDialog(
   return confirmed ?? false;
 }
 
+/// Shows the server-side 500 modal (bandwidth/transcoding limit rejection).
+Future<void> showServerLimitDialog(BuildContext context) async {
+  await showDialog<void>(
+    context: context,
+    barrierDismissible: false,
+    builder: (ctx) => AlertDialog(
+      title: Text(t.messages.serverLimitTitle),
+      content: Text(t.messages.serverLimitBody),
+      actions: [
+        FocusableButton(
+          autofocus: true,
+          onPressed: () => Navigator.of(ctx).pop(),
+          child: FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            style: FilledButton.styleFrom(padding: _buttonPadding, shape: _buttonShape),
+            child: Text(t.common.close),
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
 /// Shows a confirmation dialog with an optional checkbox (e.g. "Don't ask again").
 /// Returns a record with [confirmed] and [checked] booleans.
 Future<({bool confirmed, bool checked})> showConfirmDialogWithCheckbox(
@@ -103,10 +126,7 @@ Future<({bool confirmed, bool checked})> showConfirmDialogWithCheckbox(
               ),
               FocusableButton(
                 onPressed: () => Navigator.pop(dialogContext, true),
-                child: FilledButton(
-                  onPressed: () => Navigator.pop(dialogContext, true),
-                  child: Text(confirmText),
-                ),
+                child: FilledButton(onPressed: () => Navigator.pop(dialogContext, true), child: Text(confirmText)),
               ),
             ],
           );
@@ -120,8 +140,19 @@ Future<({bool confirmed, bool checked})> showConfirmDialogWithCheckbox(
 
 /// Shows a delete confirmation dialog.
 /// Convenience wrapper around [showConfirmDialog] with destructive styling.
-Future<bool> showDeleteConfirmation(BuildContext context, {required String title, required String message, String? confirmText}) {
-  return showConfirmDialog(context, title: title, message: message, confirmText: confirmText ?? t.common.delete, isDestructive: true);
+Future<bool> showDeleteConfirmation(
+  BuildContext context, {
+  required String title,
+  required String message,
+  String? confirmText,
+}) {
+  return showConfirmDialog(
+    context,
+    title: title,
+    message: message,
+    confirmText: confirmText ?? t.common.delete,
+    isDestructive: true,
+  );
 }
 
 /// Shows a text input dialog for creating/naming items
@@ -217,10 +248,7 @@ class _MultilineTextInputDialogState extends State<_MultilineTextInputDialog> {
         FocusableButton(
           focusNode: _saveFocusNode,
           onPressed: () => Navigator.pop(context, _controller.text),
-          child: TextButton(
-            onPressed: () => Navigator.pop(context, _controller.text),
-            child: Text(t.common.save),
-          ),
+          child: TextButton(onPressed: () => Navigator.pop(context, _controller.text), child: Text(t.common.save)),
         ),
       ],
     );
@@ -330,7 +358,12 @@ class _OptionPickerDialog<T> extends StatefulWidget {
   final bool focusFirstItem;
   final Future<T?> Function(T value)? onBeforeClose;
 
-  const _OptionPickerDialog({required this.title, required this.options, this.focusFirstItem = false, this.onBeforeClose});
+  const _OptionPickerDialog({
+    required this.title,
+    required this.options,
+    this.focusFirstItem = false,
+    this.onBeforeClose,
+  });
 
   @override
   State<_OptionPickerDialog<T>> createState() => _OptionPickerDialogState<T>();

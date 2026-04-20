@@ -65,16 +65,17 @@ class TranslationsZh with BaseTranslations<AppLocale, Translations> implements T
 	@override late final _TranslationsLicensesZh licenses = _TranslationsLicensesZh._(_root);
 	@override late final _TranslationsNavigationZh navigation = _TranslationsNavigationZh._(_root);
 	@override late final _TranslationsLiveTvZh liveTv = _TranslationsLiveTvZh._(_root);
-	@override late final _TranslationsDownloadsZh downloads = _TranslationsDownloadsZh._(_root);
-	@override late final _TranslationsPlaylistsZh playlists = _TranslationsPlaylistsZh._(_root);
 	@override late final _TranslationsCollectionsZh collections = _TranslationsCollectionsZh._(_root);
+	@override late final _TranslationsPlaylistsZh playlists = _TranslationsPlaylistsZh._(_root);
 	@override late final _TranslationsWatchTogetherZh watchTogether = _TranslationsWatchTogetherZh._(_root);
+	@override late final _TranslationsDownloadsZh downloads = _TranslationsDownloadsZh._(_root);
 	@override late final _TranslationsShadersZh shaders = _TranslationsShadersZh._(_root);
 	@override late final _TranslationsCompanionRemoteZh companionRemote = _TranslationsCompanionRemoteZh._(_root);
 	@override late final _TranslationsVideoSettingsZh videoSettings = _TranslationsVideoSettingsZh._(_root);
 	@override late final _TranslationsExternalPlayerZh externalPlayer = _TranslationsExternalPlayerZh._(_root);
 	@override late final _TranslationsMetadataEditZh metadataEdit = _TranslationsMetadataEditZh._(_root);
 	@override late final _TranslationsServerTasksZh serverTasks = _TranslationsServerTasksZh._(_root);
+	@override late final _TranslationsTraktZh trakt = _TranslationsTraktZh._(_root);
 }
 
 // Path: app
@@ -128,7 +129,6 @@ class _TranslationsCommonZh implements TranslationsCommonEn {
 	@override String get shuffle => '随机播放';
 	@override String get addTo => '添加到...';
 	@override String get createNew => '新建';
-	@override String get paste => '粘贴';
 	@override String get connect => '连接';
 	@override String get disconnect => '断开连接';
 	@override String get play => '播放';
@@ -193,18 +193,18 @@ class _TranslationsSettingsZh implements TranslationsSettingsEn {
 
 	// Translations
 	@override String get title => '设置';
+	@override String get supportDeveloper => '支持 Plezy';
+	@override String get supportDeveloperDescription => '通过 Liberapay 捐赠支持开发';
 	@override String get language => '语言';
 	@override String get theme => '主题';
 	@override String get appearance => '外观';
 	@override String get videoPlayback => '视频播放';
+	@override String get videoPlaybackDescription => '配置播放行为';
 	@override String get advanced => '高级';
 	@override String get episodePosterMode => '剧集海报样式';
 	@override String get seriesPoster => '剧集海报';
-	@override String get seriesPosterDescription => '为所有剧集显示剧集海报';
 	@override String get seasonPoster => '季海报';
-	@override String get seasonPosterDescription => '为剧集显示特定季的海报';
 	@override String get episodeThumbnail => '缩略图';
-	@override String get episodeThumbnailDescription => '显示16:9剧集截图缩略图';
 	@override String get showHeroSectionDescription => '在主屏幕上显示精选内容轮播区';
 	@override String get secondsLabel => '秒';
 	@override String get minutesLabel => '分钟';
@@ -212,23 +212,15 @@ class _TranslationsSettingsZh implements TranslationsSettingsEn {
 	@override String get minutesShort => 'm';
 	@override String durationHint({required Object min, required Object max}) => '输入时长 (${min}-${max})';
 	@override String get systemTheme => '系统';
-	@override String get systemThemeDescription => '跟随系统设置';
 	@override String get lightTheme => '浅色';
 	@override String get darkTheme => '深色';
 	@override String get oledTheme => 'OLED';
-	@override String get oledThemeDescription => '纯黑色适用于 OLED 屏幕';
 	@override String get libraryDensity => '媒体库密度';
 	@override String get compact => '紧凑';
-	@override String get compactDescription => '卡片更小，显示更多项目';
-	@override String get normal => '标准';
-	@override String get normalDescription => '默认尺寸';
 	@override String get comfortable => '舒适';
-	@override String get comfortableDescription => '卡片更大，显示更少项目';
 	@override String get viewMode => '视图模式';
 	@override String get gridView => '网格视图';
-	@override String get gridViewDescription => '以网格布局显示项目';
 	@override String get listView => '列表视图';
-	@override String get listViewDescription => '以列表布局显示项目';
 	@override String get showHeroSection => '显示主要精选区';
 	@override String get useGlobalHubs => '使用 Plex 主页布局';
 	@override String get useGlobalHubsDescription => '显示与官方 Plex 客户端相同的主页推荐。关闭时将显示按媒体库分类的推荐。';
@@ -242,9 +234,7 @@ class _TranslationsSettingsZh implements TranslationsSettingsEn {
 	@override String get hideSpoilersDescription => '模糊未观看剧集的缩略图并隐藏其描述';
 	@override String get playerBackend => '播放器引擎';
 	@override String get exoPlayer => 'ExoPlayer（推荐）';
-	@override String get exoPlayerDescription => 'Android 原生播放器，硬件支持更好';
 	@override String get mpv => 'mpv';
-	@override String get mpvDescription => '功能更多的高级播放器，支持 ASS 字幕';
 	@override String get hardwareDecoding => '硬件解码';
 	@override String get hardwareDecodingDescription => '如果可用，使用硬件加速';
 	@override String get bufferSize => '缓冲区大小';
@@ -256,7 +246,6 @@ class _TranslationsSettingsZh implements TranslationsSettingsEn {
 	@override String get smallSkipDuration => '短跳过时长';
 	@override String get largeSkipDuration => '长跳过时长';
 	@override String get rewindOnResume => '恢复时回退';
-	@override String get rewindOnResumeDescription => '恢复播放时回退此时长';
 	@override String secondsUnit({required Object seconds}) => '${seconds} 秒';
 	@override String get defaultSleepTimer => '默认睡眠定时器';
 	@override String minutesUnit({required Object minutes}) => '${minutes} 分钟';
@@ -270,7 +259,6 @@ class _TranslationsSettingsZh implements TranslationsSettingsEn {
 	@override String get videoPlayerNavigation => '视频播放器导航';
 	@override String get videoPlayerNavigationDescription => '使用方向键导航视频播放器控件';
 	@override String get watchTogetherRelay => '一起看中继服务器';
-	@override String get watchTogetherRelayDefault => '默认';
 	@override String get watchTogetherRelayDescription => '设置一起看的自定义中继服务器。所有参与者必须使用相同的服务器。';
 	@override String get watchTogetherRelayHint => 'https://my-relay.example.com';
 	@override String get crashReporting => '崩溃报告';
@@ -328,6 +316,10 @@ class _TranslationsSettingsZh implements TranslationsSettingsEn {
 	@override String maxVolumePercent({required Object percent}) => '${percent}%';
 	@override String get discordRichPresence => 'Discord 动态状态';
 	@override String get discordRichPresenceDescription => '在 Discord 上显示您正在观看的内容';
+	@override String get trakt => 'Trakt';
+	@override String get traktDescription => '将观看历史与 Trakt 同步';
+	@override String get companionRemoteServer => '配套遥控服务器';
+	@override String get companionRemoteServerDescription => '允许网络上的移动设备控制此应用';
 	@override String get autoPip => '自动画中画';
 	@override String get autoPipDescription => '在播放期间离开应用时自动进入画中画模式';
 	@override String get matchContentFrameRate => '匹配内容帧率';
@@ -337,13 +329,14 @@ class _TranslationsSettingsZh implements TranslationsSettingsEn {
 	@override String get matchDynamicRange => '匹配动态范围';
 	@override String get matchDynamicRangeDescription => '自动为HDR内容启用HDR，退出播放器时恢复为SDR';
 	@override String get displaySwitchDelay => '显示切换延迟';
-	@override String get displaySwitchDelayDescription => '显示模式更改后等待多少秒再开始播放';
 	@override String get tunneledPlayback => '通道化播放';
 	@override String get tunneledPlaybackDescription => '使用硬件加速视频通道。如果在 HDR 内容上看到黑屏但有声音，请禁用此选项';
 	@override String get requireProfileSelectionOnOpen => '打开应用时询问配置文件';
 	@override String get requireProfileSelectionOnOpenDescription => '每次打开应用时显示配置文件选择';
 	@override String get confirmExitOnBack => '退出前确认';
 	@override String get confirmExitOnBackDescription => '按返回键退出应用时显示确认对话框';
+	@override String get forceTvMode => '强制 TV 模式';
+	@override String get forceTvModeDescription => '无论自动检测结果如何都使用 TV 布局。适用于未报告 leanback 功能的 Android TV 设备。更改后将重启应用。';
 	@override String get autoHidePerformanceOverlay => '自动隐藏性能叠加层';
 	@override String get autoHidePerformanceOverlayDescription => '性能叠加层随播放控件一起淡入淡出';
 	@override String get showNavBarLabels => '显示导航栏标签';
@@ -358,8 +351,6 @@ class _TranslationsSettingsZh implements TranslationsSettingsEn {
 	@override String get subtitlesAndConfig => 'Subtitles & Configuration';
 	@override String get seekAndTiming => 'Seek & Timing';
 	@override String get behavior => 'Behavior';
-	@override String get companionRemoteServer => '配套遥控服务器';
-	@override String get companionRemoteServerDescription => '允许网络上的移动设备控制此应用';
 }
 
 // Path: search
@@ -524,7 +515,6 @@ class _TranslationsVideoControlsZh implements TranslationsVideoControlsEn {
 	@override String get alwaysOnTopButton => '置顶窗口';
 	@override String get rotationLockButton => '旋转锁定';
 	@override String get lockScreen => '锁定屏幕';
-	@override String get unlockScreen => '解锁屏幕';
 	@override String get screenLockButton => '屏幕锁定';
 	@override String get longPressToUnlock => '长按解锁';
 	@override String get timelineSlider => '视频时间轴';
@@ -596,6 +586,8 @@ class _TranslationsMessagesZh implements TranslationsMessagesEn {
 	@override String get failedToCreatePlayQueueNoItems => '创建播放队列失败 - 没有项目';
 	@override String failedPlayback({required Object action, required Object error}) => '无法${action}: ${error}';
 	@override String get switchingToCompatiblePlayer => '正在切换到兼容的播放器...';
+	@override String get serverLimitTitle => '播放失败';
+	@override String get serverLimitBody => '服务器返回了错误 (HTTP 500)。这通常意味着服务器所有者设置了带宽或转码限制，正在拒绝你的会话。客户端无法解决此问题 — 需要服务器所有者调整其设置。';
 	@override String get logsUploaded => '日志已上传';
 	@override String get logsUploadFailed => '上传日志失败';
 	@override String get logId => '日志 ID';
@@ -608,7 +600,6 @@ class _TranslationsSubtitlingStylingZh implements TranslationsSubtitlingStylingE
 	final TranslationsZh _root; // ignore: unused_field
 
 	// Translations
-	@override String get stylingOptions => '样式选项';
 	@override String get text => '文本';
 	@override String get border => '边框';
 	@override String get background => '背景';
@@ -620,6 +611,8 @@ class _TranslationsSubtitlingStylingZh implements TranslationsSubtitlingStylingE
 	@override String get backgroundColor => '背景颜色';
 	@override String get position => '位置';
 	@override String get assOverride => 'ASS 样式覆盖';
+	@override String get bold => '粗体';
+	@override String get italic => '斜体';
 }
 
 // Path: mpvConfig
@@ -854,75 +847,6 @@ class _TranslationsLiveTvZh implements TranslationsLiveTvEn {
 	@override String get goToLive => '跳至直播';
 }
 
-// Path: downloads
-class _TranslationsDownloadsZh implements TranslationsDownloadsEn {
-	_TranslationsDownloadsZh._(this._root);
-
-	final TranslationsZh _root; // ignore: unused_field
-
-	// Translations
-	@override String get title => '下载';
-	@override String get manage => '管理';
-	@override String get tvShows => '电视剧';
-	@override String get movies => '电影';
-	@override String get noDownloads => '暂无下载';
-	@override String get noDownloadsDescription => '下载的内容将在此处显示以供离线观看';
-	@override String get downloadNow => '下载';
-	@override String get deleteDownload => '删除下载';
-	@override String get retryDownload => '重试下载';
-	@override String get downloadQueued => '下载已排队';
-	@override String get serverErrorBitrate => '服务器错误 — 文件可能超出远程流媒体比特率限制';
-	@override String episodesQueued({required Object count}) => '${count} 集已加入下载队列';
-	@override String get downloadDeleted => '下载已删除';
-	@override String deleteConfirm({required Object title}) => '确定要删除 "${title}" 吗？下载的文件将从您的设备中删除。';
-	@override String deletingWithProgress({required Object title, required Object current, required Object total}) => '正在删除 ${title}... (${current}/${total})';
-	@override String get noDownloadsTree => '暂无下载';
-	@override String get pauseAll => '全部暂停';
-	@override String get resumeAll => '全部继续';
-	@override String get deleteAll => '全部删除';
-	@override String get selectVersion => '选择版本';
-	@override String get allEpisodes => '所有剧集';
-	@override String get unwatchedOnly => '仅未观看';
-	@override String nextNUnwatched({required Object count}) => '接下来 ${count} 集未观看';
-	@override String get customAmount => '自定义数量...';
-	@override String get howManyEpisodes => '下载几集？';
-	@override String itemsQueued({required Object count}) => '${count} 个项目已加入下载队列';
-}
-
-// Path: playlists
-class _TranslationsPlaylistsZh implements TranslationsPlaylistsEn {
-	_TranslationsPlaylistsZh._(this._root);
-
-	final TranslationsZh _root; // ignore: unused_field
-
-	// Translations
-	@override String get title => '播放列表';
-	@override String get noPlaylists => '未找到播放列表';
-	@override String get create => '创建播放列表';
-	@override String get playlistName => '播放列表名称';
-	@override String get enterPlaylistName => '输入播放列表名称';
-	@override String get delete => '删除播放列表';
-	@override String get removeItem => '从播放列表中移除';
-	@override String get smartPlaylist => '智能播放列表';
-	@override String itemCount({required Object count}) => '${count} 个项目';
-	@override String get oneItem => '1 个项目';
-	@override String get emptyPlaylist => '此播放列表为空';
-	@override String get deleteConfirm => '删除播放列表？';
-	@override String deleteMessage({required Object name}) => '确定要删除 "${name}" 吗？';
-	@override String get created => '播放列表已创建';
-	@override String get deleted => '播放列表已删除';
-	@override String get itemAdded => '已添加到播放列表';
-	@override String get itemRemoved => '已从播放列表中移除';
-	@override String get selectPlaylist => '选择播放列表';
-	@override String get errorCreating => '创建播放列表失败';
-	@override String get errorDeleting => '删除播放列表失败';
-	@override String get errorLoading => '加载播放列表失败';
-	@override String get errorAdding => '添加到播放列表失败';
-	@override String get errorReordering => '重新排序播放列表项目失败';
-	@override String get errorRemoving => '从播放列表中移除失败';
-	@override String get playlist => '播放列表';
-}
-
 // Path: collections
 class _TranslationsCollectionsZh implements TranslationsCollectionsEn {
 	_TranslationsCollectionsZh._(this._root);
@@ -952,6 +876,40 @@ class _TranslationsCollectionsZh implements TranslationsCollectionsEn {
 	@override String get removeFromCollectionFailed => '从合集移除失败';
 	@override String removeFromCollectionError({required Object error}) => '从合集移除时出错：${error}';
 	@override String get searchCollections => '搜索合集...';
+}
+
+// Path: playlists
+class _TranslationsPlaylistsZh implements TranslationsPlaylistsEn {
+	_TranslationsPlaylistsZh._(this._root);
+
+	final TranslationsZh _root; // ignore: unused_field
+
+	// Translations
+	@override String get title => '播放列表';
+	@override String get playlist => '播放列表';
+	@override String get noPlaylists => '未找到播放列表';
+	@override String get create => '创建播放列表';
+	@override String get playlistName => '播放列表名称';
+	@override String get enterPlaylistName => '输入播放列表名称';
+	@override String get delete => '删除播放列表';
+	@override String get removeItem => '从播放列表中移除';
+	@override String get smartPlaylist => '智能播放列表';
+	@override String itemCount({required Object count}) => '${count} 个项目';
+	@override String get oneItem => '1 个项目';
+	@override String get emptyPlaylist => '此播放列表为空';
+	@override String get deleteConfirm => '删除播放列表？';
+	@override String deleteMessage({required Object name}) => '确定要删除 "${name}" 吗？';
+	@override String get created => '播放列表已创建';
+	@override String get deleted => '播放列表已删除';
+	@override String get itemAdded => '已添加到播放列表';
+	@override String get itemRemoved => '已从播放列表中移除';
+	@override String get selectPlaylist => '选择播放列表';
+	@override String get errorCreating => '创建播放列表失败';
+	@override String get errorDeleting => '删除播放列表失败';
+	@override String get errorLoading => '加载播放列表失败';
+	@override String get errorAdding => '添加到播放列表失败';
+	@override String get errorReordering => '重新排序播放列表项目失败';
+	@override String get errorRemoving => '从播放列表中移除失败';
 }
 
 // Path: watchTogether
@@ -1021,6 +979,59 @@ class _TranslationsWatchTogetherZh implements TranslationsWatchTogetherEn {
 	@override String get removeRoom => '移除';
 }
 
+// Path: downloads
+class _TranslationsDownloadsZh implements TranslationsDownloadsEn {
+	_TranslationsDownloadsZh._(this._root);
+
+	final TranslationsZh _root; // ignore: unused_field
+
+	// Translations
+	@override String get title => '下载';
+	@override String get manage => '管理';
+	@override String get tvShows => '电视剧';
+	@override String get movies => '电影';
+	@override String get noDownloads => '暂无下载';
+	@override String get noDownloadsDescription => '下载的内容将在此处显示以供离线观看';
+	@override String get downloadNow => '下载';
+	@override String get deleteDownload => '删除下载';
+	@override String get retryDownload => '重试下载';
+	@override String get downloadQueued => '下载已排队';
+	@override String get serverErrorBitrate => '服务器错误 — 文件可能超出远程流媒体比特率限制';
+	@override String episodesQueued({required Object count}) => '${count} 集已加入下载队列';
+	@override String get downloadDeleted => '下载已删除';
+	@override String deleteConfirm({required Object title}) => '确定要删除 "${title}" 吗？下载的文件将从您的设备中删除。';
+	@override String deletingWithProgress({required Object title, required Object current, required Object total}) => '正在删除 ${title}... (${current}/${total})';
+	@override String get noDownloadsTree => '暂无下载';
+	@override String get pauseAll => '全部暂停';
+	@override String get resumeAll => '全部继续';
+	@override String get deleteAll => '全部删除';
+	@override String get selectVersion => '选择版本';
+	@override String get allEpisodes => '所有剧集';
+	@override String get unwatchedOnly => '仅未观看';
+	@override String nextNUnwatched({required Object count}) => '接下来 ${count} 集未观看';
+	@override String get customAmount => '自定义数量...';
+	@override String get howManyEpisodes => '下载几集？';
+	@override String itemsQueued({required Object count}) => '${count} 个项目已加入下载队列';
+	@override String get keepSynced => '保持同步';
+	@override String get downloadOnce => '下载一次';
+	@override String keepNUnwatched({required Object count}) => '保留${count}个未观看';
+	@override String get editSyncRule => '编辑同步规则';
+	@override String get removeSyncRule => '删除同步规则';
+	@override String removeSyncRuleConfirm({required Object title}) => '停止同步“${title}”？已下载的剧集将被保留。';
+	@override String syncRuleCreated({required Object count}) => '同步规则已创建 — 保留${count}个未观看的剧集';
+	@override String get syncRuleUpdated => '同步规则已更新';
+	@override String get syncRuleRemoved => '同步规则已删除';
+	@override String syncedNewEpisodes({required Object title, required Object count}) => '已为${title}同步${count}个新剧集';
+	@override String get activeSyncRules => '同步规则';
+	@override String get noSyncRules => '没有同步规则';
+	@override String get manageSyncRule => '管理同步';
+	@override String get editEpisodeCount => '剧集数量';
+	@override String get editSyncFilter => '同步筛选';
+	@override String get syncAllItems => '同步所有项目';
+	@override String get syncUnwatchedItems => '同步未观看项目';
+	@override String get syncRuleListCreated => '同步规则已创建';
+}
+
 // Path: shaders
 class _TranslationsShadersZh implements TranslationsShadersEn {
 	_TranslationsShadersZh._(this._root);
@@ -1050,11 +1061,6 @@ class _TranslationsCompanionRemoteZh implements TranslationsCompanionRemoteEn {
 
 	// Translations
 	@override String get title => '伴侣遥控';
-	@override String get connectToDevice => '连接到设备';
-	@override String get hostRemoteSession => '创建远程会话';
-	@override String get controlThisDevice => '使用手机控制此设备';
-	@override String get remoteControl => '远程控制';
-	@override String get controlDesktop => '控制桌面设备';
 	@override String connectedTo({required Object name}) => '已连接到 ${name}';
 	@override late final _TranslationsCompanionRemoteSessionZh session = _TranslationsCompanionRemoteSessionZh._(_root);
 	@override late final _TranslationsCompanionRemotePairingZh pairing = _TranslationsCompanionRemotePairingZh._(_root);
@@ -1199,6 +1205,30 @@ class _TranslationsServerTasksZh implements TranslationsServerTasksEn {
 	@override String get noTasks => '没有正在运行的任务';
 }
 
+// Path: trakt
+class _TranslationsTraktZh implements TranslationsTraktEn {
+	_TranslationsTraktZh._(this._root);
+
+	final TranslationsZh _root; // ignore: unused_field
+
+	// Translations
+	@override String get title => 'Trakt';
+	@override String get connected => '已连接';
+	@override String connectedAs({required Object username}) => '已以 @${username} 身份连接';
+	@override String get disconnectConfirm => '断开 Trakt 账户？';
+	@override String get disconnectConfirmBody => 'Plezy 将停止向 Trakt 发送播放事件。您随时可以重新连接。';
+	@override String get scrobble => '实时 Scrobble';
+	@override String get scrobbleDescription => '在播放时向 Trakt 发送播放、暂停和停止事件。';
+	@override String get watchedSync => '同步已观看状态';
+	@override String get watchedSyncDescription => '在 Plezy 中将内容标记为已观看时，也会在 Trakt 上标记为已观看。';
+	@override String get deviceCodeTitle => '在 Trakt 上激活 Plezy';
+	@override String deviceCodeBody({required Object url}) => '请访问 ${url} 并输入此代码：';
+	@override String get openTraktActivate => '打开 Trakt 进行激活';
+	@override String get waitingForAuthorization => '等待授权…';
+	@override String get codeCopied => '代码已复制';
+	@override String get connectFailed => '无法连接到 Trakt。请重试。';
+}
+
 // Path: hotkeys.actions
 class _TranslationsHotkeysActionsZh implements TranslationsHotkeysActionsEn {
 	_TranslationsHotkeysActionsZh._(this._root);
@@ -1300,7 +1330,6 @@ class _TranslationsCompanionRemotePairingZh implements TranslationsCompanionRemo
 	final TranslationsZh _root; // ignore: unused_field
 
 	// Translations
-	@override String get pairWithDesktop => '连接到桌面';
 	@override String get discoveryDescription => '网络上使用相同Plex账户运行Plezy的设备将自动显示';
 	@override String get hostAddressHint => '192.168.1.100:48632';
 	@override String get connecting => '正在连接...';
@@ -1329,8 +1358,6 @@ class _TranslationsCompanionRemoteRemoteZh implements TranslationsCompanionRemot
 	@override String get reconnecting => '重新连接中...';
 	@override String attemptOf({required Object current}) => '第 ${current} 次尝试，共 5 次';
 	@override String get retryNow => '立即重试';
-	@override String get connectionError => '连接错误';
-	@override String get notConnected => '未连接';
 	@override String get tabRemote => '遥控';
 	@override String get tabPlay => '播放';
 	@override String get tabMore => '更多';
@@ -1390,7 +1417,6 @@ extension on TranslationsZh {
 			'common.shuffle' => '随机播放',
 			'common.addTo' => '添加到...',
 			'common.createNew' => '新建',
-			'common.paste' => '粘贴',
 			'common.connect' => '连接',
 			'common.disconnect' => '断开连接',
 			'common.play' => '播放',
@@ -1428,18 +1454,18 @@ extension on TranslationsZh {
 			'update.latestVersion' => '已安装的版本是可用的最新版本',
 			'update.checkFailed' => '无法检查更新',
 			'settings.title' => '设置',
+			'settings.supportDeveloper' => '支持 Plezy',
+			'settings.supportDeveloperDescription' => '通过 Liberapay 捐赠支持开发',
 			'settings.language' => '语言',
 			'settings.theme' => '主题',
 			'settings.appearance' => '外观',
 			'settings.videoPlayback' => '视频播放',
+			'settings.videoPlaybackDescription' => '配置播放行为',
 			'settings.advanced' => '高级',
 			'settings.episodePosterMode' => '剧集海报样式',
 			'settings.seriesPoster' => '剧集海报',
-			'settings.seriesPosterDescription' => '为所有剧集显示剧集海报',
 			'settings.seasonPoster' => '季海报',
-			'settings.seasonPosterDescription' => '为剧集显示特定季的海报',
 			'settings.episodeThumbnail' => '缩略图',
-			'settings.episodeThumbnailDescription' => '显示16:9剧集截图缩略图',
 			'settings.showHeroSectionDescription' => '在主屏幕上显示精选内容轮播区',
 			'settings.secondsLabel' => '秒',
 			'settings.minutesLabel' => '分钟',
@@ -1447,23 +1473,15 @@ extension on TranslationsZh {
 			'settings.minutesShort' => 'm',
 			'settings.durationHint' => ({required Object min, required Object max}) => '输入时长 (${min}-${max})',
 			'settings.systemTheme' => '系统',
-			'settings.systemThemeDescription' => '跟随系统设置',
 			'settings.lightTheme' => '浅色',
 			'settings.darkTheme' => '深色',
 			'settings.oledTheme' => 'OLED',
-			'settings.oledThemeDescription' => '纯黑色适用于 OLED 屏幕',
 			'settings.libraryDensity' => '媒体库密度',
 			'settings.compact' => '紧凑',
-			'settings.compactDescription' => '卡片更小，显示更多项目',
-			'settings.normal' => '标准',
-			'settings.normalDescription' => '默认尺寸',
 			'settings.comfortable' => '舒适',
-			'settings.comfortableDescription' => '卡片更大，显示更少项目',
 			'settings.viewMode' => '视图模式',
 			'settings.gridView' => '网格视图',
-			'settings.gridViewDescription' => '以网格布局显示项目',
 			'settings.listView' => '列表视图',
-			'settings.listViewDescription' => '以列表布局显示项目',
 			'settings.showHeroSection' => '显示主要精选区',
 			'settings.useGlobalHubs' => '使用 Plex 主页布局',
 			'settings.useGlobalHubsDescription' => '显示与官方 Plex 客户端相同的主页推荐。关闭时将显示按媒体库分类的推荐。',
@@ -1477,9 +1495,7 @@ extension on TranslationsZh {
 			'settings.hideSpoilersDescription' => '模糊未观看剧集的缩略图并隐藏其描述',
 			'settings.playerBackend' => '播放器引擎',
 			'settings.exoPlayer' => 'ExoPlayer（推荐）',
-			'settings.exoPlayerDescription' => 'Android 原生播放器，硬件支持更好',
 			'settings.mpv' => 'mpv',
-			'settings.mpvDescription' => '功能更多的高级播放器，支持 ASS 字幕',
 			'settings.hardwareDecoding' => '硬件解码',
 			'settings.hardwareDecodingDescription' => '如果可用，使用硬件加速',
 			'settings.bufferSize' => '缓冲区大小',
@@ -1491,7 +1507,6 @@ extension on TranslationsZh {
 			'settings.smallSkipDuration' => '短跳过时长',
 			'settings.largeSkipDuration' => '长跳过时长',
 			'settings.rewindOnResume' => '恢复时回退',
-			'settings.rewindOnResumeDescription' => '恢复播放时回退此时长',
 			'settings.secondsUnit' => ({required Object seconds}) => '${seconds} 秒',
 			'settings.defaultSleepTimer' => '默认睡眠定时器',
 			'settings.minutesUnit' => ({required Object minutes}) => '${minutes} 分钟',
@@ -1505,7 +1520,6 @@ extension on TranslationsZh {
 			'settings.videoPlayerNavigation' => '视频播放器导航',
 			'settings.videoPlayerNavigationDescription' => '使用方向键导航视频播放器控件',
 			'settings.watchTogetherRelay' => '一起看中继服务器',
-			'settings.watchTogetherRelayDefault' => '默认',
 			'settings.watchTogetherRelayDescription' => '设置一起看的自定义中继服务器。所有参与者必须使用相同的服务器。',
 			'settings.watchTogetherRelayHint' => 'https://my-relay.example.com',
 			'settings.crashReporting' => '崩溃报告',
@@ -1563,6 +1577,10 @@ extension on TranslationsZh {
 			'settings.maxVolumePercent' => ({required Object percent}) => '${percent}%',
 			'settings.discordRichPresence' => 'Discord 动态状态',
 			'settings.discordRichPresenceDescription' => '在 Discord 上显示您正在观看的内容',
+			'settings.trakt' => 'Trakt',
+			'settings.traktDescription' => '将观看历史与 Trakt 同步',
+			'settings.companionRemoteServer' => '配套遥控服务器',
+			'settings.companionRemoteServerDescription' => '允许网络上的移动设备控制此应用',
 			'settings.autoPip' => '自动画中画',
 			'settings.autoPipDescription' => '在播放期间离开应用时自动进入画中画模式',
 			'settings.matchContentFrameRate' => '匹配内容帧率',
@@ -1572,13 +1590,14 @@ extension on TranslationsZh {
 			'settings.matchDynamicRange' => '匹配动态范围',
 			'settings.matchDynamicRangeDescription' => '自动为HDR内容启用HDR，退出播放器时恢复为SDR',
 			'settings.displaySwitchDelay' => '显示切换延迟',
-			'settings.displaySwitchDelayDescription' => '显示模式更改后等待多少秒再开始播放',
 			'settings.tunneledPlayback' => '通道化播放',
 			'settings.tunneledPlaybackDescription' => '使用硬件加速视频通道。如果在 HDR 内容上看到黑屏但有声音，请禁用此选项',
 			'settings.requireProfileSelectionOnOpen' => '打开应用时询问配置文件',
 			'settings.requireProfileSelectionOnOpenDescription' => '每次打开应用时显示配置文件选择',
 			'settings.confirmExitOnBack' => '退出前确认',
 			'settings.confirmExitOnBackDescription' => '按返回键退出应用时显示确认对话框',
+			'settings.forceTvMode' => '强制 TV 模式',
+			'settings.forceTvModeDescription' => '无论自动检测结果如何都使用 TV 布局。适用于未报告 leanback 功能的 Android TV 设备。更改后将重启应用。',
 			'settings.autoHidePerformanceOverlay' => '自动隐藏性能叠加层',
 			'settings.autoHidePerformanceOverlayDescription' => '性能叠加层随播放控件一起淡入淡出',
 			'settings.showNavBarLabels' => '显示导航栏标签',
@@ -1593,8 +1612,6 @@ extension on TranslationsZh {
 			'settings.subtitlesAndConfig' => 'Subtitles & Configuration',
 			'settings.seekAndTiming' => 'Seek & Timing',
 			'settings.behavior' => 'Behavior',
-			'settings.companionRemoteServer' => '配套遥控服务器',
-			'settings.companionRemoteServerDescription' => '允许网络上的移动设备控制此应用',
 			'search.hint' => '搜索电影、系列、音乐...',
 			'search.tryDifferentTerm' => '尝试不同的搜索词',
 			'search.searchYourMedia' => '搜索媒体',
@@ -1714,7 +1731,6 @@ extension on TranslationsZh {
 			'videoControls.alwaysOnTopButton' => '置顶窗口',
 			'videoControls.rotationLockButton' => '旋转锁定',
 			'videoControls.lockScreen' => '锁定屏幕',
-			'videoControls.unlockScreen' => '解锁屏幕',
 			'videoControls.screenLockButton' => '屏幕锁定',
 			'videoControls.longPressToUnlock' => '长按解锁',
 			'videoControls.timelineSlider' => '视频时间轴',
@@ -1774,10 +1790,11 @@ extension on TranslationsZh {
 			'messages.failedToCreatePlayQueueNoItems' => '创建播放队列失败 - 没有项目',
 			'messages.failedPlayback' => ({required Object action, required Object error}) => '无法${action}: ${error}',
 			'messages.switchingToCompatiblePlayer' => '正在切换到兼容的播放器...',
+			'messages.serverLimitTitle' => '播放失败',
+			'messages.serverLimitBody' => '服务器返回了错误 (HTTP 500)。这通常意味着服务器所有者设置了带宽或转码限制，正在拒绝你的会话。客户端无法解决此问题 — 需要服务器所有者调整其设置。',
 			'messages.logsUploaded' => '日志已上传',
 			'messages.logsUploadFailed' => '上传日志失败',
 			'messages.logId' => '日志 ID',
-			'subtitlingStyling.stylingOptions' => '样式选项',
 			'subtitlingStyling.text' => '文本',
 			'subtitlingStyling.border' => '边框',
 			'subtitlingStyling.background' => '背景',
@@ -1789,6 +1806,8 @@ extension on TranslationsZh {
 			'subtitlingStyling.backgroundColor' => '背景颜色',
 			'subtitlingStyling.position' => '位置',
 			'subtitlingStyling.assOverride' => 'ASS 样式覆盖',
+			'subtitlingStyling.bold' => '粗体',
+			'subtitlingStyling.italic' => '斜体',
 			'mpvConfig.title' => 'mpv 配置',
 			'mpvConfig.description' => '高级视频播放器设置',
 			'mpvConfig.presets' => '预设',
@@ -1876,8 +1895,6 @@ extension on TranslationsZh {
 			'libraries.groupings.seasons' => '季',
 			'libraries.groupings.episodes' => '集',
 			'libraries.groupings.folders' => '文件夹',
-			_ => null,
-		} ?? switch (path) {
 			'about.title' => '关于',
 			'about.openSourceLicenses' => '开源许可证',
 			'about.versionLabel' => ({required Object version}) => '版本 ${version}',
@@ -1886,6 +1903,8 @@ extension on TranslationsZh {
 			'serverSelection.allServerConnectionsFailed' => '无法连接到任何服务器。请检查你的网络并重试。',
 			'serverSelection.noServersFoundForAccount' => ({required Object username, required Object email}) => '未找到 ${username} (${email}) 的服务器',
 			'serverSelection.failedToLoadServers' => ({required Object error}) => '无法加载服务器: ${error}',
+			_ => null,
+		} ?? switch (path) {
 			'hubDetail.title' => '标题',
 			'hubDetail.releaseYear' => '发行年份',
 			'hubDetail.dateAdded' => '添加日期',
@@ -1924,33 +1943,30 @@ extension on TranslationsZh {
 			'liveTv.watchFromStart' => ({required Object minutes}) => '从头观看（${minutes}分钟前开始）',
 			'liveTv.watchLive' => '观看直播',
 			'liveTv.goToLive' => '跳至直播',
-			'downloads.title' => '下载',
-			'downloads.manage' => '管理',
-			'downloads.tvShows' => '电视剧',
-			'downloads.movies' => '电影',
-			'downloads.noDownloads' => '暂无下载',
-			'downloads.noDownloadsDescription' => '下载的内容将在此处显示以供离线观看',
-			'downloads.downloadNow' => '下载',
-			'downloads.deleteDownload' => '删除下载',
-			'downloads.retryDownload' => '重试下载',
-			'downloads.downloadQueued' => '下载已排队',
-			'downloads.serverErrorBitrate' => '服务器错误 — 文件可能超出远程流媒体比特率限制',
-			'downloads.episodesQueued' => ({required Object count}) => '${count} 集已加入下载队列',
-			'downloads.downloadDeleted' => '下载已删除',
-			'downloads.deleteConfirm' => ({required Object title}) => '确定要删除 "${title}" 吗？下载的文件将从您的设备中删除。',
-			'downloads.deletingWithProgress' => ({required Object title, required Object current, required Object total}) => '正在删除 ${title}... (${current}/${total})',
-			'downloads.noDownloadsTree' => '暂无下载',
-			'downloads.pauseAll' => '全部暂停',
-			'downloads.resumeAll' => '全部继续',
-			'downloads.deleteAll' => '全部删除',
-			'downloads.selectVersion' => '选择版本',
-			'downloads.allEpisodes' => '所有剧集',
-			'downloads.unwatchedOnly' => '仅未观看',
-			'downloads.nextNUnwatched' => ({required Object count}) => '接下来 ${count} 集未观看',
-			'downloads.customAmount' => '自定义数量...',
-			'downloads.howManyEpisodes' => '下载几集？',
-			'downloads.itemsQueued' => ({required Object count}) => '${count} 个项目已加入下载队列',
+			'collections.title' => '合集',
+			'collections.collection' => '合集',
+			'collections.empty' => '合集为空',
+			'collections.unknownLibrarySection' => '无法删除：未知的媒体库分区',
+			'collections.deleteCollection' => '删除合集',
+			'collections.deleteConfirm' => ({required Object title}) => '确定要删除"${title}"吗？此操作无法撤销。',
+			'collections.deleted' => '已删除合集',
+			'collections.deleteFailed' => '删除合集失败',
+			'collections.deleteFailedWithError' => ({required Object error}) => '删除合集失败：${error}',
+			'collections.failedToLoadItems' => ({required Object error}) => '加载合集项目失败：${error}',
+			'collections.selectCollection' => '选择合集',
+			'collections.collectionName' => '合集名称',
+			'collections.enterCollectionName' => '输入合集名称',
+			'collections.addedToCollection' => '已添加到合集',
+			'collections.errorAddingToCollection' => '添加到合集失败',
+			'collections.created' => '已创建合集',
+			'collections.removeFromCollection' => '从合集移除',
+			'collections.removeFromCollectionConfirm' => ({required Object title}) => '将“${title}”从此合集移除？',
+			'collections.removedFromCollection' => '已从合集移除',
+			'collections.removeFromCollectionFailed' => '从合集移除失败',
+			'collections.removeFromCollectionError' => ({required Object error}) => '从合集移除时出错：${error}',
+			'collections.searchCollections' => '搜索合集...',
 			'playlists.title' => '播放列表',
+			'playlists.playlist' => '播放列表',
 			'playlists.noPlaylists' => '未找到播放列表',
 			'playlists.create' => '创建播放列表',
 			'playlists.playlistName' => '播放列表名称',
@@ -1974,29 +1990,6 @@ extension on TranslationsZh {
 			'playlists.errorAdding' => '添加到播放列表失败',
 			'playlists.errorReordering' => '重新排序播放列表项目失败',
 			'playlists.errorRemoving' => '从播放列表中移除失败',
-			'playlists.playlist' => '播放列表',
-			'collections.title' => '合集',
-			'collections.collection' => '合集',
-			'collections.empty' => '合集为空',
-			'collections.unknownLibrarySection' => '无法删除：未知的媒体库分区',
-			'collections.deleteCollection' => '删除合集',
-			'collections.deleteConfirm' => ({required Object title}) => '确定要删除"${title}"吗？此操作无法撤销。',
-			'collections.deleted' => '已删除合集',
-			'collections.deleteFailed' => '删除合集失败',
-			'collections.deleteFailedWithError' => ({required Object error}) => '删除合集失败：${error}',
-			'collections.failedToLoadItems' => ({required Object error}) => '加载合集项目失败：${error}',
-			'collections.selectCollection' => '选择合集',
-			'collections.collectionName' => '合集名称',
-			'collections.enterCollectionName' => '输入合集名称',
-			'collections.addedToCollection' => '已添加到合集',
-			'collections.errorAddingToCollection' => '添加到合集失败',
-			'collections.created' => '已创建合集',
-			'collections.removeFromCollection' => '从合集移除',
-			'collections.removeFromCollectionConfirm' => ({required Object title}) => '将“${title}”从此合集移除？',
-			'collections.removedFromCollection' => '已从合集移除',
-			'collections.removeFromCollectionFailed' => '从合集移除失败',
-			'collections.removeFromCollectionError' => ({required Object error}) => '从合集移除时出错：${error}',
-			'collections.searchCollections' => '搜索合集...',
 			'watchTogether.title' => '一起看',
 			'watchTogether.description' => '与朋友和家人同步观看内容',
 			'watchTogether.createSession' => '创建会话',
@@ -2055,6 +2048,50 @@ extension on TranslationsZh {
 			'watchTogether.recentRooms' => '最近的房间',
 			'watchTogether.renameRoom' => '重命名房间',
 			'watchTogether.removeRoom' => '移除',
+			'downloads.title' => '下载',
+			'downloads.manage' => '管理',
+			'downloads.tvShows' => '电视剧',
+			'downloads.movies' => '电影',
+			'downloads.noDownloads' => '暂无下载',
+			'downloads.noDownloadsDescription' => '下载的内容将在此处显示以供离线观看',
+			'downloads.downloadNow' => '下载',
+			'downloads.deleteDownload' => '删除下载',
+			'downloads.retryDownload' => '重试下载',
+			'downloads.downloadQueued' => '下载已排队',
+			'downloads.serverErrorBitrate' => '服务器错误 — 文件可能超出远程流媒体比特率限制',
+			'downloads.episodesQueued' => ({required Object count}) => '${count} 集已加入下载队列',
+			'downloads.downloadDeleted' => '下载已删除',
+			'downloads.deleteConfirm' => ({required Object title}) => '确定要删除 "${title}" 吗？下载的文件将从您的设备中删除。',
+			'downloads.deletingWithProgress' => ({required Object title, required Object current, required Object total}) => '正在删除 ${title}... (${current}/${total})',
+			'downloads.noDownloadsTree' => '暂无下载',
+			'downloads.pauseAll' => '全部暂停',
+			'downloads.resumeAll' => '全部继续',
+			'downloads.deleteAll' => '全部删除',
+			'downloads.selectVersion' => '选择版本',
+			'downloads.allEpisodes' => '所有剧集',
+			'downloads.unwatchedOnly' => '仅未观看',
+			'downloads.nextNUnwatched' => ({required Object count}) => '接下来 ${count} 集未观看',
+			'downloads.customAmount' => '自定义数量...',
+			'downloads.howManyEpisodes' => '下载几集？',
+			'downloads.itemsQueued' => ({required Object count}) => '${count} 个项目已加入下载队列',
+			'downloads.keepSynced' => '保持同步',
+			'downloads.downloadOnce' => '下载一次',
+			'downloads.keepNUnwatched' => ({required Object count}) => '保留${count}个未观看',
+			'downloads.editSyncRule' => '编辑同步规则',
+			'downloads.removeSyncRule' => '删除同步规则',
+			'downloads.removeSyncRuleConfirm' => ({required Object title}) => '停止同步“${title}”？已下载的剧集将被保留。',
+			'downloads.syncRuleCreated' => ({required Object count}) => '同步规则已创建 — 保留${count}个未观看的剧集',
+			'downloads.syncRuleUpdated' => '同步规则已更新',
+			'downloads.syncRuleRemoved' => '同步规则已删除',
+			'downloads.syncedNewEpisodes' => ({required Object title, required Object count}) => '已为${title}同步${count}个新剧集',
+			'downloads.activeSyncRules' => '同步规则',
+			'downloads.noSyncRules' => '没有同步规则',
+			'downloads.manageSyncRule' => '管理同步',
+			'downloads.editEpisodeCount' => '剧集数量',
+			'downloads.editSyncFilter' => '同步筛选',
+			'downloads.syncAllItems' => '同步所有项目',
+			'downloads.syncUnwatchedItems' => '同步未观看项目',
+			'downloads.syncRuleListCreated' => '同步规则已创建',
 			'shaders.title' => '着色器',
 			'shaders.noShaderDescription' => '无视频增强',
 			'shaders.nvscalerDescription' => 'NVIDIA 图像缩放，使视频更清晰',
@@ -2068,11 +2105,6 @@ extension on TranslationsZh {
 			'shaders.deleteShader' => '删除着色器',
 			'shaders.deleteShaderConfirm' => ({required Object name}) => '删除"${name}"？',
 			'companionRemote.title' => '伴侣遥控',
-			'companionRemote.connectToDevice' => '连接到设备',
-			'companionRemote.hostRemoteSession' => '创建远程会话',
-			'companionRemote.controlThisDevice' => '使用手机控制此设备',
-			'companionRemote.remoteControl' => '远程控制',
-			'companionRemote.controlDesktop' => '控制桌面设备',
 			'companionRemote.connectedTo' => ({required Object name}) => '已连接到 ${name}',
 			'companionRemote.session.startingServer' => '正在启动远程服务器...',
 			'companionRemote.session.failedToCreate' => '启动远程服务器失败：',
@@ -2086,7 +2118,6 @@ extension on TranslationsZh {
 			'companionRemote.session.startServer' => '启动服务器',
 			'companionRemote.session.stopServer' => '停止服务器',
 			'companionRemote.session.minimize' => '最小化',
-			'companionRemote.pairing.pairWithDesktop' => '连接到桌面',
 			'companionRemote.pairing.discoveryDescription' => '网络上使用相同Plex账户运行Plezy的设备将自动显示',
 			'companionRemote.pairing.hostAddressHint' => '192.168.1.100:48632',
 			'companionRemote.pairing.connecting' => '正在连接...',
@@ -2106,8 +2137,6 @@ extension on TranslationsZh {
 			'companionRemote.remote.reconnecting' => '重新连接中...',
 			'companionRemote.remote.attemptOf' => ({required Object current}) => '第 ${current} 次尝试，共 5 次',
 			'companionRemote.remote.retryNow' => '立即重试',
-			'companionRemote.remote.connectionError' => '连接错误',
-			'companionRemote.remote.notConnected' => '未连接',
 			'companionRemote.remote.tabRemote' => '遥控',
 			'companionRemote.remote.tabPlay' => '播放',
 			'companionRemote.remote.tabMore' => '更多',
@@ -2233,6 +2262,21 @@ extension on TranslationsZh {
 			'serverTasks.title' => '服务器任务',
 			'serverTasks.failedToLoad' => '加载任务失败',
 			'serverTasks.noTasks' => '没有正在运行的任务',
+			'trakt.title' => 'Trakt',
+			'trakt.connected' => '已连接',
+			'trakt.connectedAs' => ({required Object username}) => '已以 @${username} 身份连接',
+			'trakt.disconnectConfirm' => '断开 Trakt 账户？',
+			'trakt.disconnectConfirmBody' => 'Plezy 将停止向 Trakt 发送播放事件。您随时可以重新连接。',
+			'trakt.scrobble' => '实时 Scrobble',
+			'trakt.scrobbleDescription' => '在播放时向 Trakt 发送播放、暂停和停止事件。',
+			'trakt.watchedSync' => '同步已观看状态',
+			'trakt.watchedSyncDescription' => '在 Plezy 中将内容标记为已观看时，也会在 Trakt 上标记为已观看。',
+			'trakt.deviceCodeTitle' => '在 Trakt 上激活 Plezy',
+			'trakt.deviceCodeBody' => ({required Object url}) => '请访问 ${url} 并输入此代码：',
+			'trakt.openTraktActivate' => '打开 Trakt 进行激活',
+			'trakt.waitingForAuthorization' => '等待授权…',
+			'trakt.codeCopied' => '代码已复制',
+			'trakt.connectFailed' => '无法连接到 Trakt。请重试。',
 			_ => null,
 		};
 	}
