@@ -19,11 +19,15 @@ import 'dart:convert';
 import '../services/download_storage_service.dart';
 import '../services/saf_storage_service.dart';
 import 'package:saf_stream/saf_stream.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../utils/app_logger.dart';
 
 /// Subdirectory within the SAF root where PlexSyncer files live.
 /// Must match PLEXSYNCER_DIR in plex_hardlink_sync.py.
 const kPlexSyncerFolder = 'PlexSyncer';
+
+/// SharedPreferences key for the last successfully imported manifest timestamp.
+const _kLastImportedGeneratedAt = 'plexsyncer_last_imported_generated_at';
 
 /// A single resolved item ready to be registered in the database.
 class ResolvedManifestItem {
@@ -78,6 +82,7 @@ class ResolvedManifestItem {
 class ManifestReadResult {
   final String  serverId;
   final String  serverName;
+  final String  generatedAt;
   final List<ResolvedManifestItem> resolved;
   final int     missing;         // files listed in manifest but not found on device
   final String? error;           // null on success
@@ -93,6 +98,7 @@ class ManifestReadResult {
   const ManifestReadResult({
     this.serverId          = '',
     this.serverName        = '',
+    this.generatedAt       = '',
     this.resolved          = const [],
     this.missing           = 0,
     this.error,
@@ -162,8 +168,9 @@ class ManifestImportService {
       return const ManifestReadResult(error: 'manifest.json contains invalid JSON.');
     }
 
-    final serverId   = (manifest['serverId']   as String?) ?? '';
-    final serverName = (manifest['serverName'] as String?) ?? '';
+    final serverId     = (manifest['serverId']     as String?) ?? '';
+    final serverName   = (manifest['serverName']   as String?) ?? '';
+    final generatedAt  = (manifest['generatedAt']  as String?) ?? '';
 
     if (serverId.isEmpty) {
       return const ManifestReadResult(error: 'manifest.json is missing serverId.');
@@ -231,11 +238,55 @@ class ManifestImportService {
     return ManifestReadResult(
       serverId:           serverId,
       serverName:         serverName,
+      generatedAt:        generatedAt,
       resolved:           resolved,
       missing:            missing,
       psRootUri:          psRoot.uri,
       manifestGlobalKeys: manifestGlobalKeys,
     );
+  }
+
+
+  /// Reads only the manifest header (fast — no SAF tree walk) and compares
+  /// [generatedAt] to the last successfully imported value stored in prefs.
+  /// Returns true if the manifest has been updated since the last import,
+  /// false if it hasn't changed or if it can't be read.
+  Future<bool> checkForUpdates() async {
+    try {
+      final storageService = DownloadStorageService.instance;
+      if (!storageService.isUsingSaf) return false;
+
+      final safBaseUri = storageService.safBaseUri;
+      if (safBaseUri == null) return false;
+
+      final saf = SafStorageService.instance;
+      final psRoot = await saf.getChild(safBaseUri, kPlexSyncerFolder);
+      if (psRoot == null) return false;
+
+      final manifestJson = await _readManifestBytes(saf, psRoot.uri);
+      final manifest = jsonDecode(manifestJson) as Map<String, dynamic>;
+      final generatedAt = manifest['generatedAt'] as String?;
+      if (generatedAt == null || generatedAt.isEmpty) return false;
+
+      final prefs = await SharedPreferences.getInstance();
+      final lastSeen = prefs.getString(_kLastImportedGeneratedAt);
+
+      return generatedAt != lastSeen;
+    } catch (e) {
+      appLogger.d('PlexSyncer: manifest update check failed (non-fatal): $e');
+      return false;
+    }
+  }
+
+  /// Persist the [generatedAt] timestamp after a successful import so the
+  /// next [checkForUpdates] call knows what was last seen.
+  Future<void> markImported(String generatedAt) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_kLastImportedGeneratedAt, generatedAt);
+    } catch (e) {
+      appLogger.w('PlexSyncer: failed to persist generatedAt: $e');
+    }
   }
 
   // ── Private ────────────────────────────────────────────────────────────────

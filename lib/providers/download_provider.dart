@@ -1219,6 +1219,12 @@ class DownloadProvider extends ChangeNotifier {
 
     notifyListeners();
 
+    // PlexSyncer: persist the manifest timestamp so the auto-check
+    // on next Downloads navigation knows this version is already imported.
+    if (readResult.generatedAt.isNotEmpty) {
+      await ManifestImportService.instance.markImported(readResult.generatedAt);
+    }
+
     return ImportSummary(
       imported: imported,
       skipped:  skipped,
