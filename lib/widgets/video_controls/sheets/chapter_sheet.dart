@@ -72,22 +72,7 @@ class _ChapterSheetState extends State<ChapterSheet> {
       initialData: widget.player.state.position,
       builder: (context, positionSnapshot) {
         final currentPosition = positionSnapshot.data ?? Duration.zero;
-        final currentPositionMs = currentPosition.inMilliseconds;
-
-        // Find the current chapter based on position
-        int? currentChapterIndex;
-        for (int i = 0; i < widget.chapters.length; i++) {
-          final chapter = widget.chapters[i];
-          final startMs = chapter.startTimeOffset ?? 0;
-          final endMs =
-              chapter.endTimeOffset ??
-              (i < widget.chapters.length - 1 ? widget.chapters[i + 1].startTimeOffset ?? 0 : double.maxFinite.toInt());
-
-          if (currentPositionMs >= startMs && currentPositionMs < endMs) {
-            currentChapterIndex = i;
-            break;
-          }
-        }
+        final currentChapterIndex = PlexChapter.indexAtPosition(currentPosition, widget.chapters);
 
         Widget content;
         if (!widget.chaptersLoaded) {
@@ -177,11 +162,7 @@ class _ChapterSheetState extends State<ChapterSheet> {
           );
         }
 
-        return BaseVideoControlSheet(
-          title: t.videoControls.chapters,
-          icon: Symbols.video_library_rounded,
-          child: content,
-        );
+        return BaseVideoControlSheet(title: t.videoControls.chapters, icon: Symbols.bookmarks_rounded, child: content);
       },
     );
   }

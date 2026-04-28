@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:collection';
 
 import '../../models/trakt/trakt_ids.dart';
 import '../../models/trakt/trakt_scrobble_request.dart';
@@ -6,9 +7,10 @@ import '../../utils/app_logger.dart';
 import '../../utils/watch_state_notifier.dart';
 import '../multi_server_manager.dart';
 import '../settings_service.dart';
+import '../trackers/tracker_constants.dart';
+import '../trackers/tracker_id_resolver.dart';
 import 'trakt_client.dart';
 import 'trakt_constants.dart';
-import 'trakt_guid_resolver.dart';
 import 'trakt_session.dart';
 import 'trakt_sync_queue.dart';
 
@@ -38,7 +40,13 @@ class TraktSyncService {
 
   /// One resolver per Plex server, kept alive across events so the per-rating-
   /// key GUID cache survives a binge-watch session.
-  final Map<String, TraktGuidResolver> _resolvers = {};
+  final Map<String, TrackerIdResolver> _resolvers = {};
+
+  /// Fallback buffer for items that failed to persist to the on-disk queue
+  /// (e.g. SharedPreferences write threw). Retried on next `flushQueue`.
+  /// Bounded to keep memory pressure finite; oldest items drop first.
+  static const int _maxInMemoryFallback = 100;
+  final Queue<TraktSyncQueueItem> _inMemoryFallback = Queue<TraktSyncQueueItem>();
 
   bool _isFlushing = false;
 
@@ -48,9 +56,13 @@ class TraktSyncService {
     _serverManager = serverManager;
 
     final settings = await SettingsService.getInstance();
-    _isEnabled = settings.getEnableTraktWatchedSync();
+    _isEnabled = settings.read(SettingsService.enableTraktWatchedSync);
 
-    _subscription = WatchStateNotifier().stream.listen(_onWatchStateEvent);
+    _subscription = WatchStateNotifier().stream.listen(
+      _onWatchStateEvent,
+      onError: (Object e, StackTrace st) =>
+          appLogger.w('Trakt sync: watch event handler error', error: e, stackTrace: st),
+    );
   }
 
   Future<void> setEnabled(bool enabled) async {
@@ -79,14 +91,14 @@ class TraktSyncService {
 
   bool get _canPush => _isEnabled && _client != null;
 
-  TraktGuidResolver? _resolverFor(String serverId) {
+  TrackerIdResolver? _resolverFor(String serverId) {
     final cached = _resolvers[serverId];
     if (cached != null) return cached;
 
     final plexClient = _serverManager?.getClient(serverId);
     if (plexClient == null) return null;
 
-    final resolver = TraktGuidResolver(plexClient);
+    final resolver = TrackerIdResolver(plexClient, needsFribb: () => false);
     _resolvers[serverId] = resolver;
     return resolver;
   }
@@ -97,6 +109,12 @@ class TraktSyncService {
 
     final kind = TraktMediaKind.tryFromPlexType(event.mediaType);
     if (kind == null) return;
+
+    final settings = SettingsService.instanceOrNull;
+    if (settings != null && !settings.isLibraryAllowedForTracker(TrackerService.trakt, event.librarySectionGlobalKey)) {
+      appLogger.d('Trakt sync: library filtered out for ${event.ratingKey}');
+      return;
+    }
 
     final op = event.changeType == WatchStateChangeType.watched ? TraktSyncOp.add : TraktSyncOp.remove;
     await _push(
@@ -121,12 +139,12 @@ class TraktSyncService {
       return;
     }
 
-    TraktIds? ids;
+    TrackerIds? resolved;
     int? season;
     int? number;
 
     if (kind == TraktMediaKind.movie) {
-      ids = await resolver.resolveForMovie(ratingKey);
+      resolved = await resolver.resolveForMovie(ratingKey);
     } else {
       // Episode — need show IDs + season/episode index. The WatchStateEvent
       // doesn't carry the index, so fetch episode metadata.
@@ -137,14 +155,15 @@ class TraktSyncService {
       season = episodeMeta.parentIndex;
       number = episodeMeta.index;
       if (season == null || number == null) return;
-      ids = await resolver.resolveShowForEpisode(episodeMeta);
+      resolved = await resolver.resolveShowForEpisode(episodeMeta);
     }
 
-    if (ids == null || !ids.hasAny) {
+    if (resolved == null) {
       appLogger.d('Trakt sync: no IDs for ${kind.name} $ratingKey, dropping');
       return;
     }
 
+    final ids = TraktIds.fromExternal(resolved.external);
     final body = kind == TraktMediaKind.movie
         ? TraktScrobbleRequest.movie(ids: ids)
         : TraktScrobbleRequest.episode(showIds: ids, season: season!, number: number!);
@@ -166,7 +185,7 @@ class TraktSyncService {
   Future<void> _trySendOrQueue(TraktSyncQueueItem item, TraktScrobbleRequest body) async {
     final client = _client;
     if (client == null) {
-      await _queue.add(_activeUserUuid, item);
+      await _persistOrBuffer(item);
       return;
     }
     try {
@@ -174,7 +193,27 @@ class TraktSyncService {
       appLogger.d('Trakt sync: ${item.op.name} ${item.ratingKey} → ok');
     } catch (e) {
       appLogger.d('Trakt sync: ${item.op.name} ${item.ratingKey} failed, queuing', error: e);
+      await _persistOrBuffer(item);
+    }
+  }
+
+  /// Persist an item to the on-disk queue; fall back to a bounded in-memory
+  /// buffer if the disk write throws (e.g. disk full, SAF permission revoked).
+  /// Retried at the start of the next `flushQueue` run.
+  Future<void> _persistOrBuffer(TraktSyncQueueItem item) async {
+    try {
       await _queue.add(_activeUserUuid, item);
+    } catch (e, st) {
+      appLogger.e(
+        'Trakt sync: queue persist failed for ${item.op.name} ${item.ratingKey}, buffering in memory',
+        error: e,
+        stackTrace: st,
+      );
+      if (_inMemoryFallback.length >= _maxInMemoryFallback) {
+        final dropped = _inMemoryFallback.removeFirst();
+        appLogger.w('Trakt sync: in-memory fallback full, dropping ${dropped.op.name} ${dropped.ratingKey}');
+      }
+      _inMemoryFallback.addLast(item);
     }
   }
 
@@ -193,28 +232,38 @@ class TraktSyncService {
     if (client == null) return;
     _isFlushing = true;
     try {
-      final items = await _queue.load(_activeUserUuid);
-      if (items.isEmpty) return;
+      await _recoverInMemoryFallback();
 
-      final remaining = <TraktSyncQueueItem>[];
-      for (final item in items) {
+      await _queue.drainWith(_activeUserUuid, (item) async {
         if (item.attempts >= TraktSyncQueue.maxAttempts) {
           appLogger.w('Trakt sync: dropping ${item.op.name} ${item.ratingKey} after ${item.attempts} attempts');
-          continue;
+          return null;
         }
         try {
           await _dispatch(client, item, _bodyFor(item));
           appLogger.d('Trakt sync: drained ${item.op.name} ${item.ratingKey}');
+          await Future<void>.delayed(_queueRequestSpacing);
+          return null;
         } catch (e) {
           appLogger.d('Trakt sync: drain failed for ${item.ratingKey}, will retry', error: e);
-          remaining.add(item.incrementAttempts());
+          await Future<void>.delayed(_queueRequestSpacing);
+          return item.incrementAttempts();
         }
-        await Future<void>.delayed(_queueRequestSpacing);
-      }
-
-      await _queue.save(_activeUserUuid, remaining);
+      });
     } finally {
       _isFlushing = false;
+    }
+  }
+
+  /// Try to move items buffered in memory (because prior disk writes failed)
+  /// back onto the persistent queue. Best-effort; items that still can't be
+  /// persisted stay in the buffer for the next flush.
+  Future<void> _recoverInMemoryFallback() async {
+    if (_inMemoryFallback.isEmpty) return;
+    final snapshot = List<TraktSyncQueueItem>.from(_inMemoryFallback);
+    _inMemoryFallback.clear();
+    for (final item in snapshot) {
+      await _persistOrBuffer(item);
     }
   }
 

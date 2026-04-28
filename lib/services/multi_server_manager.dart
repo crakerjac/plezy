@@ -94,9 +94,18 @@ class MultiServerManager {
     final storage = await StorageService.getInstance();
     final cachedEndpoint = storage.getServerEndpoint(serverId);
 
+    // The connection race already hits `/` on the winning endpoint — capture
+    // `transcoderVideo` from that response so PlexClient.create can skip the
+    // redundant warm-up probe.
+    bool? observedTranscoderVideo;
+
     // Find best working connection, passing cached endpoint for fast-path
     final streamIterator = StreamIterator(
-      server.findBestWorkingConnection(preferredUri: cachedEndpoint, clientIdentifier: clientIdentifier),
+      server.findBestWorkingConnection(
+        preferredUri: cachedEndpoint,
+        clientIdentifier: clientIdentifier,
+        onTranscoderCapability: (b) => observedTranscoderVideo = b,
+      ),
     );
 
     if (!await streamIterator.moveNext()) {
@@ -124,6 +133,7 @@ class MultiServerManager {
         appLogger.i('Updated endpoint for ${server.name} after failover: $newUrl');
       },
       onAllEndpointsExhausted: () => _onServerEndpointsExhausted(serverId),
+      seedTranscoderVideoSupport: observedTranscoderVideo,
     );
 
     // Save the initial endpoint
@@ -196,10 +206,14 @@ class MultiServerManager {
     }
 
     appLogger.i('Connecting to ${servers.length} servers...');
-    Sentry.addBreadcrumb(Breadcrumb(message: 'Connecting to ${servers.length} server(s)', category: 'servers'));
+    unawaited(
+      Sentry.addBreadcrumb(Breadcrumb(message: 'Connecting to ${servers.length} server(s)', category: 'servers')),
+    );
 
-    // Use provided client ID or generate a unique one for this app instance
-    final effectiveClientId = clientIdentifier ?? DateTime.now().millisecondsSinceEpoch.toString();
+    // Re-use the persisted client ID so Plex doesn't see a "new device" on
+    // every reconnect.
+    final effectiveClientId =
+        clientIdentifier ?? await (await StorageService.getInstance()).getOrCreateClientIdentifier();
     _clientIdentifier = effectiveClientId;
 
     // Create connection tasks for all servers (timeout is inside each task
@@ -225,10 +239,17 @@ class MultiServerManager {
         appLogger.i('Successfully connected to ${server.name}');
 
         // Fire-and-forget: fetch server prefs and cache watched threshold
-        client.fetchServerPrefs().then((_) {
-          final threshold = client.watchedThresholdPercent;
-          SettingsService.instanceOrNull?.setWatchedThreshold(serverId, threshold);
-        });
+        unawaited(
+          client
+              .fetchServerPrefs()
+              .then((_) {
+                final threshold = client.watchedThresholdPercent;
+                SettingsService.instanceOrNull?.write(SettingsService.watchedThresholdPref(serverId), threshold);
+              })
+              .catchError((Object e, StackTrace st) {
+                appLogger.w('fetchServerPrefs failed for ${server.name}', error: e, stackTrace: st);
+              }),
+        );
 
         return serverId;
       } on TimeoutException {
@@ -358,46 +379,43 @@ class MultiServerManager {
     }
 
     appLogger.i('Starting network monitoring for all servers');
-    runZonedGuarded(
-      () {
-        final connectivity = Connectivity();
-        _connectivitySubscription = connectivity.onConnectivityChanged.listen(
-          (results) {
-            final status = results.isNotEmpty ? results.first : ConnectivityResult.none;
+    try {
+      final connectivity = Connectivity();
+      _connectivitySubscription = connectivity.onConnectivityChanged.listen(
+        (results) {
+          final status = results.isNotEmpty ? results.first : ConnectivityResult.none;
 
-            if (status == ConnectivityResult.none) {
-              appLogger.w('Connectivity lost, pausing optimization until network returns');
-              return;
-            }
+          if (status == ConnectivityResult.none) {
+            appLogger.w('Connectivity lost, pausing optimization until network returns');
+            return;
+          }
 
-            // Debounce rapid connectivity events (e.g. WiFi flapping) into a single trigger
-            _connectivityDebounce?.cancel();
-            _connectivityDebounce = Timer(const Duration(seconds: 2), () {
-              _connectivityDebounce = null;
+          // Debounce rapid connectivity events (e.g. WiFi flapping) into a single trigger
+          _connectivityDebounce?.cancel();
+          _connectivityDebounce = Timer(const Duration(seconds: 2), () {
+            _connectivityDebounce = null;
 
-              appLogger.d(
-                'Connectivity change detected, re-optimizing all servers',
-                error: {
-                  'status': status.name,
-                  'interfaces': results.map((r) => r.name).toList(),
-                  'serverCount': _servers.length,
-                },
-              );
+            appLogger.d(
+              'Connectivity change detected, re-optimizing all servers',
+              error: {
+                'status': status.name,
+                'interfaces': results.map((r) => r.name).toList(),
+                'serverCount': _servers.length,
+              },
+            );
 
-              // Re-optimize all servers and re-probe offline ones
-              _reoptimizeAllServers(reason: 'connectivity:${status.name}');
-              checkServerHealth();
-            });
-          },
-          onError: (error, stackTrace) {
-            appLogger.w('Connectivity listener error', error: error, stackTrace: stackTrace);
-          },
-        );
-      },
-      (error, stack) {
-        appLogger.w('Connectivity monitoring unavailable', error: error);
-      },
-    );
+            // Re-optimize all servers and re-probe offline ones
+            _reoptimizeAllServers(reason: 'connectivity:${status.name}');
+            checkServerHealth();
+          });
+        },
+        onError: (error, stackTrace) {
+          appLogger.w('Connectivity listener error', error: error, stackTrace: stackTrace);
+        },
+      );
+    } catch (e) {
+      appLogger.w('Connectivity monitoring unavailable', error: e);
+    }
   }
 
   /// Stop monitoring network connectivity
@@ -515,7 +533,11 @@ class MultiServerManager {
     if (offline.isEmpty) return;
 
     appLogger.d('Attempting reconnection for ${offline.length} offline servers');
-    Sentry.addBreadcrumb(Breadcrumb(message: 'Reconnecting ${offline.length} offline server(s)', category: 'servers'));
+    unawaited(
+      Sentry.addBreadcrumb(
+        Breadcrumb(message: 'Reconnecting ${offline.length} offline server(s)', category: 'servers'),
+      ),
+    );
 
     if (forceRediscovery) {
       final storage = await StorageService.getInstance();

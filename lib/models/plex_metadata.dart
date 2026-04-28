@@ -11,7 +11,7 @@ import '../utils/json_utils.dart';
 
 part 'plex_metadata.g.dart';
 
-Object? _readRatingKey(Map json, String key) => json['ratingKey'] ?? json['key'] ?? '';
+Object? _readRatingKey(Map json, String key) => (json['ratingKey'] ?? json['key'] ?? '').toString();
 
 List<String>? _tagsFromJson(List? json) => json?.cast<Map<String, dynamic>>().map((e) => e['tag'] as String).toList();
 
@@ -54,6 +54,10 @@ enum PlexMediaType {
     _ => 0,
   };
 }
+
+/// Shared suffix of both unmatched-agent URL schemes: legacy
+/// `com.plexapp.agents.none://` and new-style `tv.plex.agents.none://`.
+const _unmatchedAgentMarker = 'agents.none://';
 
 @JsonSerializable()
 class PlexMetadata with MultiServerFields {
@@ -150,6 +154,12 @@ class PlexMetadata with MultiServerFields {
   /// Global unique identifier across all servers (serverId:ratingKey)
   String get globalKey => serverId != null ? buildGlobalKey(serverId!, ratingKey) : ratingKey;
 
+  /// Global unique identifier of this item's library section, matching
+  /// [PlexLibrary.globalKey]. Null when either [serverId] or [librarySectionID]
+  /// is missing.
+  String? get librarySectionGlobalKey =>
+      serverId != null && librarySectionID != null ? buildGlobalKey(serverId!, librarySectionID!.toString()) : null;
+
   /// Parent rating keys for hierarchical invalidation.
   /// For an episode: [seasonRatingKey, showRatingKey]
   /// For a season: [showRatingKey]
@@ -159,6 +169,10 @@ class PlexMetadata with MultiServerFields {
   /// Whether this item represents a library section (shared whole-library, not a media item).
   /// These have keys like `/library/sections/5/all` instead of `/library/metadata/12345`.
   bool get isLibrarySection => key != null && key!.startsWith('/library/sections/');
+
+  /// Whether this item has no metadata agent match. Unmatched items get a
+  /// synthetic `*.agents.none://` guid from the server.
+  bool get isUnmatched => guid == null || guid!.isEmpty || guid!.contains(_unmatchedAgentMarker);
 
   /// Extract the library section ID from a library-section item's key.
   /// Returns null if this is not a library section item.
@@ -399,7 +413,7 @@ class PlexMetadata with MultiServerFields {
     final images = json['Image'] as List?;
     if (images == null) return null;
 
-    for (var image in images) {
+    for (final image in images) {
       if (image is Map && image['type'] == imageType) {
         return image['url'] as String?;
       }
@@ -410,14 +424,14 @@ class PlexMetadata with MultiServerFields {
   /// Create from JSON with Image array fields extracted
   factory PlexMetadata.fromJsonWithImages(Map<String, dynamic> json) {
     final clearLogoUrl = _extractImageFromJson(json, 'clearLogo');
-    if (clearLogoUrl != null) {
-      json['clearLogo'] = clearLogoUrl;
-    }
     final backgroundSquareUrl = _extractImageFromJson(json, 'backgroundSquare');
-    if (backgroundSquareUrl != null) {
-      json['backgroundSquare'] = backgroundSquareUrl;
+    if (clearLogoUrl == null && backgroundSquareUrl == null) {
+      return PlexMetadata.fromJson(json);
     }
-    return PlexMetadata.fromJson(json);
+    final enriched = Map<String, dynamic>.from(json);
+    if (clearLogoUrl != null) enriched['clearLogo'] = clearLogoUrl;
+    if (backgroundSquareUrl != null) enriched['backgroundSquare'] = backgroundSquareUrl;
+    return PlexMetadata.fromJson(enriched);
   }
 
   /// Returns the best hero art path based on the container's aspect ratio.

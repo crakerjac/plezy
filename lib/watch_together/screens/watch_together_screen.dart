@@ -14,6 +14,7 @@ import '../../utils/app_logger.dart';
 import '../../utils/provider_extensions.dart';
 import '../../utils/dialogs.dart';
 import '../../utils/snackbar_helper.dart';
+import '../../widgets/dialog_action_button.dart';
 import '../../utils/video_player_navigation.dart';
 import '../../widgets/focused_scroll_scaffold.dart';
 import '../models/watch_session.dart';
@@ -90,7 +91,7 @@ class _NotInSessionViewState extends State<_NotInSessionView> {
   @override
   void initState() {
     super.initState();
-    _customRelayUrl = SettingsService.instanceOrNull?.getCustomRelayUrl();
+    _customRelayUrl = SettingsService.instanceOrNull?.read(SettingsService.customRelayUrl);
     _recentRooms = RecentRoomsService.getRecentRooms();
     _checkHealth();
   }
@@ -231,7 +232,7 @@ class _NotInSessionViewState extends State<_NotInSessionView> {
     } catch (e) {
       appLogger.e('Failed to create session', error: e);
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${t.watchTogether.failedToCreate}: $e')));
+        showErrorSnackBar(context, '${t.watchTogether.failedToCreate}: $e');
       }
     } finally {
       if (mounted) {
@@ -241,37 +242,21 @@ class _NotInSessionViewState extends State<_NotInSessionView> {
   }
 
   Future<ControlMode?> _showControlModeDialog() {
-    const buttonPadding = EdgeInsets.symmetric(horizontal: 18, vertical: 14);
-    const buttonShape = StadiumBorder();
     return showDialog<ControlMode>(
       context: context,
       builder: (context) => AlertDialog(
         title: Text(t.watchTogether.controlMode),
         content: Text(t.watchTogether.controlModeQuestion),
         actions: [
-          FocusableButton(
-            autofocus: true,
-            onPressed: () => Navigator.pop(context),
-            child: TextButton(
-              onPressed: () => Navigator.pop(context),
-              style: TextButton.styleFrom(padding: buttonPadding, shape: buttonShape),
-              child: Text(t.common.cancel),
-            ),
-          ),
-          FocusableButton(
+          DialogActionButton(onPressed: () => Navigator.pop(context), label: t.common.cancel),
+          DialogActionButton(
             onPressed: () => Navigator.pop(context, ControlMode.hostOnly),
-            child: TextButton(
-              onPressed: () => Navigator.pop(context, ControlMode.hostOnly),
-              style: TextButton.styleFrom(padding: buttonPadding, shape: buttonShape),
-              child: Text(t.watchTogether.hostOnly),
-            ),
+            label: t.watchTogether.hostOnly,
           ),
-          FocusableButton(
+          DialogActionButton(
             onPressed: () => Navigator.pop(context, ControlMode.anyone),
-            child: FilledButton(
-              onPressed: () => Navigator.pop(context, ControlMode.anyone),
-              child: Text(t.watchTogether.anyone),
-            ),
+            label: t.watchTogether.anyone,
+            isPrimary: true,
           ),
         ],
       ),
@@ -291,7 +276,7 @@ class _NotInSessionViewState extends State<_NotInSessionView> {
     } catch (e) {
       appLogger.e('Failed to join session', error: e);
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${t.watchTogether.failedToJoin}: $e')));
+        showErrorSnackBar(context, '${t.watchTogether.failedToJoin}: $e');
       }
     } finally {
       if (mounted) {
@@ -314,7 +299,7 @@ class _NotInSessionViewState extends State<_NotInSessionView> {
     } catch (e) {
       appLogger.e('Failed to enter room', error: e);
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${t.watchTogether.failedToJoin}: $e')));
+        showErrorSnackBar(context, '${t.watchTogether.failedToJoin}: $e');
       }
     } finally {
       if (mounted) {
@@ -744,6 +729,6 @@ class _SessionCodeRow extends StatelessWidget {
 
   void _copySessionCode(BuildContext context) {
     Clipboard.setData(ClipboardData(text: sessionId));
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(t.watchTogether.sessionCodeCopied)));
+    showSnackBar(context, t.watchTogether.sessionCodeCopied);
   }
 }

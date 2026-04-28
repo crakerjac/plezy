@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:drift/drift.dart';
 import 'package:drift/native.dart';
+import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as p;
 
@@ -11,13 +12,21 @@ import '../utils/global_key_utils.dart';
 
 part 'app_database.g.dart';
 
+/// String values stored in [OfflineWatchProgress.actionType] (use `.name`).
+enum OfflineActionType { progress, watched, unwatched }
+
 // Simplified database with API cache for offline support
 @DriftDatabase(tables: [DownloadedMedia, DownloadQueue, ApiCache, OfflineWatchProgress, SyncRules])
 class AppDatabase extends _$AppDatabase {
   AppDatabase() : super(_openConnection());
 
+  /// Test-only constructor — inject an in-memory [QueryExecutor]
+  /// (e.g. `NativeDatabase.memory()`) so tests don't touch real disk.
+  @visibleForTesting
+  AppDatabase.forTesting(super.e);
+
   @override
-  int get schemaVersion => 12;
+  int get schemaVersion => 13;
 
   @override
   MigrationStrategy get migration {
@@ -64,6 +73,22 @@ class AppDatabase extends _$AppDatabase {
             await m.addColumn(syncRules, syncRules.downloadFilter);
           } catch (e) {
             appLogger.w('downloadFilter column may already exist: $e');
+          }
+        }
+        if (from < 13) {
+          appLogger.i('Adding indexes on DownloadedMedia hot-queried columns (v13 migration)');
+          final indexes = {
+            'idx_downloaded_media_status': idxDownloadedMediaStatus,
+            'idx_downloaded_media_server': idxDownloadedMediaServer,
+            'idx_downloaded_media_parent': idxDownloadedMediaParent,
+            'idx_downloaded_media_grandparent': idxDownloadedMediaGrandparent,
+          };
+          for (final entry in indexes.entries) {
+            try {
+              await m.create(entry.value);
+            } catch (e) {
+              appLogger.w('Index ${entry.key} may already exist: $e');
+            }
           }
         }
       },
@@ -134,7 +159,7 @@ class AppDatabase extends _$AppDatabase {
     // Check for existing progress entry
     final existing =
         await (select(offlineWatchProgress)
-              ..where((t) => t.globalKey.equals(globalKey) & t.actionType.equals('progress'))
+              ..where((t) => t.globalKey.equals(globalKey) & t.actionType.equals(OfflineActionType.progress.name))
               ..limit(1))
             .getSingleOrNull();
 
@@ -155,7 +180,7 @@ class AppDatabase extends _$AppDatabase {
           serverId: serverId,
           ratingKey: ratingKey,
           globalKey: globalKey,
-          actionType: 'progress',
+          actionType: OfflineActionType.progress.name,
           viewOffset: Value(viewOffset),
           duration: Value(duration),
           shouldMarkWatched: Value(shouldMarkWatched),

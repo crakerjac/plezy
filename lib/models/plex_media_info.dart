@@ -9,6 +9,7 @@ class PlexMediaInfo {
   final List<PlexSubtitleTrack> subtitleTracks;
   final List<PlexChapter> chapters;
   final int? partId;
+  final double? frameRate;
 
   PlexMediaInfo({
     required this.videoUrl,
@@ -16,6 +17,7 @@ class PlexMediaInfo {
     required this.subtitleTracks,
     required this.chapters,
     this.partId,
+    this.frameRate,
   });
   int? getPartId() => partId;
 
@@ -23,20 +25,23 @@ class PlexMediaInfo {
   /// Parses audio/subtitle tracks from `Media[0].Part[0].Stream[]` so that
   /// offline playback can still apply language-based track selection.
   static PlexMediaInfo? fromMetadataJson(Map<String, dynamic> metadata) {
-    final media = metadata['Media'] as List<dynamic>?;
+    final media = flexibleList(metadata['Media']);
     if (media == null || media.isEmpty) return null;
-    final parts = media.first['Part'] as List<dynamic>?;
+    final parts = flexibleList(media.first['Part']);
     if (parts == null || parts.isEmpty) return null;
-    final streams = parts.first['Stream'] as List<dynamic>?;
+    final streams = flexibleList(parts.first['Stream']);
 
     final audioTracks = <PlexAudioTrack>[];
     final subtitleTracks = <PlexSubtitleTrack>[];
+    double? frameRate;
 
     if (streams != null) {
       for (final s in streams) {
         try {
           final streamType = s['streamType'] as int?;
-          if (streamType == 2) {
+          if (streamType == 1) {
+            frameRate ??= (s['frameRate'] as num?)?.toDouble();
+          } else if (streamType == 2) {
             audioTracks.add(
               PlexAudioTrack(
                 id: s['id'] as int,
@@ -72,7 +77,13 @@ class PlexMediaInfo {
       }
     }
 
-    return PlexMediaInfo(videoUrl: '', audioTracks: audioTracks, subtitleTracks: subtitleTracks, chapters: const []);
+    return PlexMediaInfo(
+      videoUrl: '',
+      audioTracks: audioTracks,
+      subtitleTracks: subtitleTracks,
+      chapters: const [],
+      frameRate: frameRate,
+    );
   }
 }
 
@@ -175,12 +186,18 @@ class PlexSubtitleTrack with _TrackLabelMixin {
   /// Returns null if this is not an external subtitle
   String? getSubtitleUrl(String baseUrl, String token) {
     if (!isExternal) return null;
-
-    // Determine file extension based on codec
     final ext = CodecUtils.getSubtitleExtension(codec);
-
-    // Construct URL with authentication token
     return '$baseUrl$key.$ext?encoding=utf-8&X-Plex-Token=$token';
+  }
+
+  /// Constructs a sidecar URL for any subtitle track (internal or external),
+  /// used in transcode mode where embedded subtitle streams are stripped.
+  /// Falls back to the standard `/library/streams/{id}.{ext}` path when
+  /// [key] is missing.
+  String getTranscodeSidecarUrl(String baseUrl, String token) {
+    final ext = CodecUtils.getSubtitleExtension(codec);
+    final path = (key != null && key!.isNotEmpty) ? key! : '/library/streams/$id';
+    return '$baseUrl$path.$ext?encoding=utf-8&X-Plex-Token=$token';
   }
 }
 
@@ -198,6 +215,22 @@ class PlexChapter {
 
   Duration get startTime => Duration(milliseconds: startTimeOffset ?? 0);
   Duration? get endTime => endTimeOffset != null ? Duration(milliseconds: endTimeOffset!) : null;
+
+  /// Find the chapter index containing [position]. Returns null if none match.
+  /// A chapter's end defaults to the next chapter's start when [endTimeOffset]
+  /// is missing; the final chapter without an end extends to infinity.
+  static int? indexAtPosition(Duration position, List<PlexChapter> chapters) {
+    final positionMs = position.inMilliseconds;
+    for (int i = 0; i < chapters.length; i++) {
+      final chapter = chapters[i];
+      final startMs = chapter.startTimeOffset ?? 0;
+      final endMs =
+          chapter.endTimeOffset ??
+          (i < chapters.length - 1 ? chapters[i + 1].startTimeOffset ?? 0 : double.maxFinite.toInt());
+      if (positionMs >= startMs && positionMs < endMs) return i;
+    }
+    return null;
+  }
 }
 
 class PlexMarker {

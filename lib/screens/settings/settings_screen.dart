@@ -1,9 +1,9 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_svg/flutter_svg.dart';
 import 'package:plezy/widgets/app_icon.dart';
 import 'package:material_symbols_icons/symbols.dart';
 import 'package:provider/provider.dart';
@@ -14,26 +14,32 @@ import '../../focus/input_mode_tracker.dart';
 import '../../i18n/strings.g.dart';
 import '../main_screen.dart';
 import '../../mixins/refreshable.dart';
+import '../../providers/hidden_libraries_provider.dart';
+import '../../providers/libraries_provider.dart';
 import '../../services/donation_service.dart';
 import '../../services/download_storage_service.dart';
 import '../../services/file_picker_service.dart';
 import '../../services/saf_storage_service.dart';
+import '../../services/settings_export_service.dart';
 import '../../providers/settings_provider.dart';
 import '../../providers/theme_provider.dart';
+import '../../providers/trackers_provider.dart';
 import '../../providers/trakt_account_provider.dart';
 import '../../services/keyboard_shortcuts_service.dart';
 import '../../services/settings_service.dart' as settings;
 import '../../services/update_service.dart';
+import '../../utils/dialogs.dart';
 import '../../utils/snackbar_helper.dart';
 import '../../utils/platform_detector.dart';
 import '../../widgets/desktop_app_bar.dart';
+import '../../widgets/dialog_action_button.dart';
 import '../../widgets/settings_section.dart';
 import 'about_screen.dart';
 import 'appearance_settings_screen.dart';
 import 'keyboard_shortcuts_screen.dart';
 import 'logs_screen.dart';
 import 'playback_settings_screen.dart';
-import 'trakt_settings_screen.dart';
+import 'trackers_settings_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -50,7 +56,7 @@ class _SettingsScreenState extends State<SettingsScreen> with FocusableTab {
   static const _kDonate = 'donate';
   static const _kAppearance = 'appearance';
   static const _kPlayback = 'playback';
-  static const _kTrakt = 'trakt';
+  static const _kTrackers = 'trackers';
   static const _kDownloadLocation = 'download_location';
   static const _kDownloadOnWifiOnly = 'download_on_wifi_only';
   static const _kAutoRemoveWatchedDownloads = 'auto_remove_watched_downloads';
@@ -62,8 +68,11 @@ class _SettingsScreenState extends State<SettingsScreen> with FocusableTab {
   static const _kClearCache = 'clear_cache';
   static const _kResetSettings = 'reset_settings';
   static const _kCheckForUpdates = 'check_for_updates';
+  static const _kAutoCheckUpdatesOnStartup = 'auto_check_updates_on_startup';
   static const _kAbout = 'about';
   static const _kWatchTogetherRelay = 'watch_together_relay';
+  static const _kExportSettings = 'export_settings';
+  static const _kImportSettings = 'import_settings';
 
   KeyboardShortcutsService? _keyboardService;
   late final bool _keyboardShortcutsSupported = KeyboardShortcutsService.isPlatformSupported();
@@ -73,6 +82,7 @@ class _SettingsScreenState extends State<SettingsScreen> with FocusableTab {
   bool _enableDebugLogging = false;
   bool _downloadOnWifiOnly = false;
   bool _autoRemoveWatchedDownloads = false;
+  bool _autoCheckUpdatesOnStartup = true;
   bool _videoPlayerNavigationEnabled = false;
   String? _customRelayUrl;
 
@@ -126,12 +136,13 @@ class _SettingsScreenState extends State<SettingsScreen> with FocusableTab {
 
     if (!mounted) return;
     setState(() {
-      _crashReporting = _settingsService.getCrashReporting();
-      _enableDebugLogging = _settingsService.getEnableDebugLogging();
-      _downloadOnWifiOnly = _settingsService.getDownloadOnWifiOnly();
-      _autoRemoveWatchedDownloads = _settingsService.getAutoRemoveWatchedDownloads();
-      _videoPlayerNavigationEnabled = _settingsService.getVideoPlayerNavigationEnabled();
-      _customRelayUrl = _settingsService.getCustomRelayUrl();
+      _crashReporting = _settingsService.read(settings.SettingsService.crashReporting);
+      _enableDebugLogging = _settingsService.read(settings.SettingsService.enableDebugLogging);
+      _downloadOnWifiOnly = _settingsService.read(settings.SettingsService.downloadOnWifiOnly);
+      _autoRemoveWatchedDownloads = _settingsService.read(settings.SettingsService.autoRemoveWatchedDownloads);
+      _autoCheckUpdatesOnStartup = _settingsService.read(settings.SettingsService.autoCheckUpdatesOnStartup);
+      _videoPlayerNavigationEnabled = _settingsService.read(settings.SettingsService.videoPlayerNavigationEnabled);
+      _customRelayUrl = _settingsService.read(settings.SettingsService.customRelayUrl);
       _isLoading = false;
     });
   }
@@ -160,11 +171,11 @@ class _SettingsScreenState extends State<SettingsScreen> with FocusableTab {
                 // --- Playback (navigation tile) ---
                 _buildPlaybackTile(),
 
-                // --- Trakt.tv (navigation tile) ---
-                _buildTraktTile(),
+                // --- Trackers (unified hub: Trakt + MAL + AniList + Simkl) ---
+                _buildTrackersTile(),
 
                 // --- Downloads (inline) ---
-                _buildDownloadsSection(),
+                if (!PlatformDetector.isAppleTV()) _buildDownloadsSection(),
 
                 // --- Keyboard Shortcuts (inline, conditional) ---
                 if (_keyboardShortcutsSupported) ...[_buildKeyboardShortcutsSection()],
@@ -174,6 +185,9 @@ class _SettingsScreenState extends State<SettingsScreen> with FocusableTab {
 
                 // --- Updates (conditional) ---
                 if (UpdateService.isUpdateCheckEnabled) ...[_buildUpdateSection()],
+
+                // --- Backup (hidden on Apple TV — no file picker / storage) ---
+                if (!PlatformDetector.isAppleTV()) _buildBackupSection(),
 
                 // --- About ---
                 ListTile(
@@ -243,31 +257,24 @@ class _SettingsScreenState extends State<SettingsScreen> with FocusableTab {
     );
   }
 
-  Widget _buildTraktTile() {
-    return Consumer<TraktAccountProvider>(
-      builder: (context, account, _) {
-        final connected = account.isConnected;
-        final username = account.username;
-        final iconColor = IconTheme.of(context).color ?? Theme.of(context).colorScheme.onSurface;
+  Widget _buildTrackersTile() {
+    return Consumer2<TraktAccountProvider, TrackersProvider>(
+      builder: (context, trakt, trackers, _) {
+        final connectedNames = <String>[
+          if (trakt.isConnected) t.trakt.title,
+          if (trackers.isMalConnected) t.trackers.services.mal,
+          if (trackers.isAnilistConnected) t.trackers.services.anilist,
+          if (trackers.isSimklConnected) t.trackers.services.simkl,
+        ];
+        final subtitle = connectedNames.isEmpty ? t.settings.trackersDescription : connectedNames.join(' · ');
         return ListTile(
-          focusNode: _focusTracker.get(_kTrakt),
-          leading: SvgPicture.asset(
-            'assets/trakt_circlemark.svg',
-            width: 24,
-            height: 24,
-            colorFilter: ColorFilter.mode(iconColor, BlendMode.srcIn),
-          ),
-          title: Text(t.settings.trakt),
-          subtitle: Text(
-            connected && username != null ? t.trakt.connectedAs(username: username) : t.settings.traktDescription,
-          ),
+          focusNode: _focusTracker.get(_kTrackers),
+          leading: const AppIcon(Symbols.sync_rounded, fill: 1),
+          title: Text(t.settings.trackers),
+          subtitle: Text(subtitle),
           trailing: const AppIcon(Symbols.chevron_right_rounded, fill: 1),
           onTap: () {
-            if (account.isConnected) {
-              Navigator.push(context, MaterialPageRoute(builder: (context) => const TraktSettingsScreen()));
-            } else {
-              startTraktConnection(context);
-            }
+            Navigator.push(context, MaterialPageRoute(builder: (_) => const TrackersSettingsScreen()));
           },
         );
       },
@@ -305,7 +312,7 @@ class _SettingsScreenState extends State<SettingsScreen> with FocusableTab {
           value: _downloadOnWifiOnly,
           onChanged: (value) async {
             setState(() => _downloadOnWifiOnly = value);
-            await _settingsService.setDownloadOnWifiOnly(value);
+            await _settingsService.write(settings.SettingsService.downloadOnWifiOnly, value);
           },
         ),
         SwitchListTile(
@@ -316,7 +323,7 @@ class _SettingsScreenState extends State<SettingsScreen> with FocusableTab {
           value: _autoRemoveWatchedDownloads,
           onChanged: (value) async {
             setState(() => _autoRemoveWatchedDownloads = value);
-            await _settingsService.setAutoRemoveWatchedDownloads(value);
+            await _settingsService.write(settings.SettingsService.autoRemoveWatchedDownloads, value);
           },
         ),
       ],
@@ -351,7 +358,7 @@ class _SettingsScreenState extends State<SettingsScreen> with FocusableTab {
           value: _videoPlayerNavigationEnabled,
           onChanged: (value) async {
             setState(() => _videoPlayerNavigationEnabled = value);
-            await _settingsService.setVideoPlayerNavigationEnabled(value);
+            await _settingsService.write(settings.SettingsService.videoPlayerNavigationEnabled, value);
           },
         ),
       ],
@@ -379,7 +386,7 @@ class _SettingsScreenState extends State<SettingsScreen> with FocusableTab {
           value: _crashReporting,
           onChanged: (value) async {
             setState(() => _crashReporting = value);
-            await _settingsService.setCrashReporting(value);
+            await _settingsService.write(settings.SettingsService.crashReporting, value);
           },
         ),
         SwitchListTile(
@@ -390,7 +397,7 @@ class _SettingsScreenState extends State<SettingsScreen> with FocusableTab {
           value: _enableDebugLogging,
           onChanged: (value) async {
             setState(() => _enableDebugLogging = value);
-            await _settingsService.setEnableDebugLogging(value);
+            await _settingsService.write(settings.SettingsService.enableDebugLogging, value);
           },
         ),
         ListTile(
@@ -445,6 +452,45 @@ class _SettingsScreenState extends State<SettingsScreen> with FocusableTab {
     );
   }
 
+  Widget _buildBackupSection() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SettingsSectionHeader(t.settings.backup),
+        ListTile(
+          focusNode: _focusTracker.get(_kExportSettings),
+          leading: const AppIcon(Symbols.upload_rounded, fill: 1),
+          title: Text(t.settings.exportSettings),
+          subtitle: Text(t.settings.exportSettingsDescription),
+          trailing: const AppIcon(Symbols.chevron_right_rounded, fill: 1),
+          onTap: _handleExportSettings,
+        ),
+        ListTile(
+          focusNode: _focusTracker.get(_kImportSettings),
+          leading: const AppIcon(Symbols.download_rounded, fill: 1),
+          title: Text(t.settings.importSettings),
+          subtitle: Text(t.settings.importSettingsDescription),
+          trailing: const AppIcon(Symbols.chevron_right_rounded, fill: 1),
+          onTap: _showImportSettingsDialog,
+        ),
+      ],
+    );
+  }
+
+  Widget _buildAutoCheckUpdatesOnStartupTile() {
+    return SwitchListTile(
+      focusNode: _focusTracker.get(_kAutoCheckUpdatesOnStartup),
+      secondary: const AppIcon(Symbols.notifications_active_rounded, fill: 1),
+      title: Text(t.settings.autoCheckUpdatesOnStartup),
+      subtitle: Text(t.settings.autoCheckUpdatesOnStartupDescription),
+      value: _autoCheckUpdatesOnStartup,
+      onChanged: (value) async {
+        setState(() => _autoCheckUpdatesOnStartup = value);
+        await _settingsService.write(settings.SettingsService.autoCheckUpdatesOnStartup, value);
+      },
+    );
+  }
+
   Widget _buildUpdateSection() {
     if (UpdateService.useNativeUpdater) {
       return Column(
@@ -458,6 +504,7 @@ class _SettingsScreenState extends State<SettingsScreen> with FocusableTab {
             trailing: const AppIcon(Symbols.chevron_right_rounded, fill: 1),
             onTap: () => UpdateService.checkForUpdatesNative(inBackground: false),
           ),
+          _buildAutoCheckUpdatesOnStartupTile(),
         ],
       );
     }
@@ -490,6 +537,7 @@ class _SettingsScreenState extends State<SettingsScreen> with FocusableTab {
                   }
                 },
         ),
+        _buildAutoCheckUpdatesOnStartupTile(),
       ],
     );
   }
@@ -500,45 +548,48 @@ class _SettingsScreenState extends State<SettingsScreen> with FocusableTab {
     final storageService = DownloadStorageService.instance;
     final isCustom = storageService.isUsingCustomPath();
 
-    showDialog(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: Text(t.settings.downloads),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(t.settings.downloadLocationDescription),
-            const SizedBox(height: 16),
-            FutureBuilder<String>(
-              future: storageService.getCurrentDownloadPathDisplay(),
-              builder: (context, snapshot) {
-                return Text(
-                  t.settings.currentPath(path: snapshot.data ?? '...'),
-                  style: Theme.of(context).textTheme.bodySmall,
-                );
+    unawaited(
+      showDialog(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: Text(t.settings.downloads),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(t.settings.downloadLocationDescription),
+              const SizedBox(height: 16),
+              FutureBuilder<String>(
+                future: storageService.getCurrentDownloadPathDisplay(),
+                builder: (context, snapshot) {
+                  return Text(
+                    t.settings.currentPath(path: snapshot.data ?? '...'),
+                    style: Theme.of(context).textTheme.bodySmall,
+                  );
+                },
+              ),
+            ],
+          ),
+          actions: [
+            if (isCustom)
+              DialogActionButton(
+                onPressed: () async {
+                  Navigator.pop(dialogContext);
+                  await _resetDownloadLocation();
+                },
+                label: t.settings.resetToDefault,
+              ),
+            DialogActionButton(onPressed: () => Navigator.pop(dialogContext), label: t.common.cancel),
+            DialogActionButton(
+              onPressed: () async {
+                Navigator.pop(dialogContext);
+                await _selectDownloadLocation();
               },
+              label: t.settings.selectFolder,
+              isPrimary: true,
             ),
           ],
         ),
-        actions: [
-          if (isCustom)
-            TextButton(
-              onPressed: () async {
-                Navigator.pop(dialogContext);
-                await _resetDownloadLocation();
-              },
-              child: Text(t.settings.resetToDefault),
-            ),
-          TextButton(onPressed: () => Navigator.pop(dialogContext), child: Text(t.common.cancel)),
-          FilledButton(
-            onPressed: () async {
-              Navigator.pop(dialogContext);
-              await _selectDownloadLocation();
-            },
-            child: Text(t.settings.selectFolder),
-          ),
-        ],
       ),
     );
   }
@@ -576,7 +627,8 @@ class _SettingsScreenState extends State<SettingsScreen> with FocusableTab {
           }
         }
 
-        await _settingsService.setCustomDownloadPath(selectedPath, type: pathType);
+        await _settingsService.write(settings.SettingsService.customDownloadPath, selectedPath);
+        await _settingsService.write(settings.SettingsService.customDownloadPathType, pathType);
         await DownloadStorageService.instance.refreshCustomPath();
 
         if (mounted) {
@@ -593,7 +645,8 @@ class _SettingsScreenState extends State<SettingsScreen> with FocusableTab {
   }
 
   Future<void> _resetDownloadLocation() async {
-    await _settingsService.setCustomDownloadPath(null);
+    await _settingsService.write(settings.SettingsService.customDownloadPath, null);
+    await _settingsService.write(settings.SettingsService.customDownloadPathType, null);
     await DownloadStorageService.instance.refreshCustomPath();
 
     if (mounted) {
@@ -620,25 +673,25 @@ class _SettingsScreenState extends State<SettingsScreen> with FocusableTab {
             onEditingComplete: () => saveFocusNode.requestFocus(),
           ),
           actions: [
-            TextButton(
+            DialogActionButton(
               onPressed: () async {
                 controller.clear();
-                await _settingsService.setCustomRelayUrl(null);
+                await _settingsService.write(settings.SettingsService.customRelayUrl, null);
                 if (mounted) setState(() => _customRelayUrl = null);
                 if (dialogContext.mounted) Navigator.pop(dialogContext);
               },
-              child: Text(t.settings.resetToDefault),
+              label: t.settings.resetToDefault,
             ),
-            TextButton(onPressed: () => Navigator.pop(dialogContext), child: Text(t.common.cancel)),
-            TextButton(
+            DialogActionButton(onPressed: () => Navigator.pop(dialogContext), label: t.common.cancel),
+            DialogActionButton(
               focusNode: saveFocusNode,
               onPressed: () async {
                 final url = controller.text.trim().isEmpty ? null : controller.text.trim();
-                await _settingsService.setCustomRelayUrl(url);
+                await _settingsService.write(settings.SettingsService.customRelayUrl, url);
                 if (mounted) setState(() => _customRelayUrl = url);
                 if (dialogContext.mounted) Navigator.pop(dialogContext);
               },
-              child: Text(t.common.save),
+              label: t.common.save,
             ),
           ],
         );
@@ -649,58 +702,93 @@ class _SettingsScreenState extends State<SettingsScreen> with FocusableTab {
     });
   }
 
-  void _showClearCacheDialog() {
-    showDialog(
-      context: context,
-      builder: (BuildContext context) {
-        return AlertDialog(
-          title: Text(t.settings.clearCache),
-          content: Text(t.settings.clearCacheDescription),
-          actions: [
-            TextButton(autofocus: true, onPressed: () => Navigator.pop(context), child: Text(t.common.cancel)),
-            TextButton(
-              onPressed: () async {
-                final navigator = Navigator.of(context);
-                await _settingsService.clearCache();
-                if (mounted) {
-                  navigator.pop();
-                  showSuccessSnackBar(this.context, t.settings.clearCacheSuccess);
-                }
-              },
-              child: Text(t.common.clear),
-            ),
-          ],
-        );
-      },
+  Future<void> _showClearCacheDialog() async {
+    final confirmed = await showConfirmDialog(
+      context,
+      title: t.settings.clearCache,
+      message: t.settings.clearCacheDescription,
+      confirmText: t.common.clear,
     );
+    if (!confirmed) return;
+    await _settingsService.clearCache();
+    if (mounted) showSuccessSnackBar(context, t.settings.clearCacheSuccess);
   }
 
-  void _showResetSettingsDialog() {
-    showDialog(
-      context: context,
-      builder: (BuildContext context) {
-        return AlertDialog(
-          title: Text(t.settings.resetSettings),
-          content: Text(t.settings.resetSettingsDescription),
-          actions: [
-            TextButton(autofocus: true, onPressed: () => Navigator.pop(context), child: Text(t.common.cancel)),
-            TextButton(
-              onPressed: () async {
-                final navigator = Navigator.of(context);
-                await _settingsService.resetAllSettings();
-                await _keyboardService?.resetToDefaults();
-                if (mounted) {
-                  navigator.pop();
-                  showSuccessSnackBar(this.context, t.settings.resetSettingsSuccess);
-                  _loadSettings();
-                }
-              },
-              child: Text(t.common.reset),
-            ),
-          ],
-        );
-      },
+  Future<void> _showResetSettingsDialog() async {
+    final confirmed = await showConfirmDialog(
+      context,
+      title: t.settings.resetSettings,
+      message: t.settings.resetSettingsDescription,
+      confirmText: t.common.reset,
+      isDestructive: true,
     );
+    if (!confirmed) return;
+    await _settingsService.resetAllSettings();
+    await _keyboardService?.resetToDefaults();
+    if (mounted) {
+      showSuccessSnackBar(context, t.settings.resetSettingsSuccess);
+      unawaited(_loadSettings());
+    }
+  }
+
+  Future<void> _handleExportSettings() async {
+    try {
+      final path = await SettingsExportService.exportToFile();
+      if (!mounted) return;
+      if (path == null) return; // user cancelled
+      showSuccessSnackBar(context, t.settings.exportSettingsSuccess);
+    } on SettingsExportException {
+      if (mounted) showErrorSnackBar(context, t.settings.exportSettingsFailed);
+    } catch (_) {
+      if (mounted) showErrorSnackBar(context, t.settings.exportSettingsFailed);
+    }
+  }
+
+  Future<void> _showImportSettingsDialog() async {
+    final confirmed = await showConfirmDialog(
+      context,
+      title: t.settings.importSettings,
+      message: t.settings.importSettingsConfirm,
+      confirmText: t.settings.importSettings,
+    );
+    if (!confirmed) return;
+    await _handleImportSettings();
+  }
+
+  Future<void> _handleImportSettings() async {
+    // Capture providers before any awaits so we don't reach through `context`
+    // after the widget may have been unmounted.
+    final themeProvider = context.read<ThemeProvider>();
+    final settingsProvider = context.read<SettingsProvider>();
+    final hiddenLibrariesProvider = context.read<HiddenLibrariesProvider>();
+    final librariesProvider = context.read<LibrariesProvider>();
+
+    try {
+      final result = await SettingsExportService.importFromFile();
+      if (!mounted) return;
+      if (result == null) return; // user cancelled file picker
+
+      unawaited(LocaleSettings.setLocale(_settingsService.read(settings.SettingsService.appLocale)));
+      await Future.wait([
+        themeProvider.reload(),
+        settingsProvider.reload(),
+        hiddenLibrariesProvider.refresh(),
+        if (_keyboardService != null) _keyboardService!.refreshFromStorage(),
+      ]);
+      unawaited(librariesProvider.refresh());
+
+      if (!mounted) return;
+      unawaited(_loadSettings());
+      showSuccessSnackBar(context, t.settings.importSettingsSuccess);
+    } on NoUserSignedInException {
+      if (mounted) showErrorSnackBar(context, t.settings.importSettingsNoUser);
+    } on InvalidExportFileException {
+      if (mounted) showErrorSnackBar(context, t.settings.importSettingsInvalidFile);
+    } on SettingsExportException {
+      if (mounted) showErrorSnackBar(context, t.settings.importSettingsFailed);
+    } catch (_) {
+      if (mounted) showErrorSnackBar(context, t.settings.importSettingsFailed);
+    }
   }
 
   Future<void> _checkForUpdates() async {
@@ -751,8 +839,8 @@ class _SettingsScreenState extends State<SettingsScreen> with FocusableTab {
             ],
           ),
           actions: [
-            TextButton(autofocus: true, onPressed: () => Navigator.pop(context), child: Text(t.common.close)),
-            FilledButton(
+            DialogActionButton(onPressed: () => Navigator.pop(context), label: t.common.close),
+            DialogActionButton(
               onPressed: () async {
                 final url = Uri.parse(_updateInfo!['releaseUrl']);
                 if (await canLaunchUrl(url)) {
@@ -760,7 +848,8 @@ class _SettingsScreenState extends State<SettingsScreen> with FocusableTab {
                 }
                 if (context.mounted) Navigator.pop(context);
               },
-              child: Text(t.update.viewRelease),
+              label: t.update.viewRelease,
+              isPrimary: true,
             ),
           ],
         );

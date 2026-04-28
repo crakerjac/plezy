@@ -1,10 +1,10 @@
 import 'dart:io';
 
-import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as path;
 
 import '../mpv/player/player.dart';
+import '../utils/app_logger.dart';
 
 /// Generates and manages an ambient lighting GLSL shader that fills letterbox/pillarbox
 /// bars with a blurred, dimmed version of the video edges.
@@ -40,9 +40,7 @@ class AmbientLightingService {
       // Write static shader (only needs to happen once)
       _shaderPath ??= await _writeShaderToTemp(_generateShader());
 
-      if (kDebugMode) {
-        debugPrint('AmbientLightingService: Shader path: $_shaderPath');
-      }
+      appLogger.d('AmbientLightingService: Shader path: $_shaderPath');
 
       // Set video-aspect-override to fill the entire output area
       await _player.setProperty('video-aspect-override', outputAspect.toString());
@@ -52,13 +50,9 @@ class AmbientLightingService {
 
       _enabled = true;
 
-      if (kDebugMode) {
-        debugPrint('AmbientLightingService: Enabled (video=$videoAspect, output=$outputAspect)');
-      }
-    } catch (e) {
-      if (kDebugMode) {
-        debugPrint('AmbientLightingService: Failed to enable: $e');
-      }
+      appLogger.d('AmbientLightingService: Enabled (video=$videoAspect, output=$outputAspect)');
+    } catch (e, st) {
+      appLogger.w('AmbientLightingService: Failed to enable', error: e, stackTrace: st);
     }
   }
 
@@ -75,13 +69,9 @@ class AmbientLightingService {
 
       _enabled = false;
 
-      if (kDebugMode) {
-        debugPrint('AmbientLightingService: Disabled');
-      }
-    } catch (e) {
-      if (kDebugMode) {
-        debugPrint('AmbientLightingService: Failed to disable: $e');
-      }
+      appLogger.d('AmbientLightingService: Disabled');
+    } catch (e, st) {
+      appLogger.w('AmbientLightingService: Failed to disable', error: e, stackTrace: st);
     }
   }
 
@@ -145,22 +135,8 @@ class AmbientLightingService {
       ('BLUR8A', 'BLUR8B', '6.0', 'Blur2'),
       ('BLUR8B', 'BLUR8C', '12.0', 'Blur3'),
     ];
-    for (final (input, output, offset, desc) in blur8Steps) {
-      buf.writeln('//!HOOK MAIN');
-      buf.writeln('//!BIND $input');
-      buf.writeln('//!SAVE $output');
-      buf.writeln('//!WIDTH $input.w');
-      buf.writeln('//!HEIGHT $input.h');
-      buf.writeln('//!DESC Ambient Lighting $desc');
-      buf.writeln('vec4 hook() {');
-      buf.writeln('    vec2 ps = ${input}_pt;');
-      buf.writeln('    vec4 s = ${input}_tex(${input}_pos + vec2( $offset,  $offset) * ps)');
-      buf.writeln('           + ${input}_tex(${input}_pos + vec2( $offset, -$offset) * ps)');
-      buf.writeln('           + ${input}_tex(${input}_pos + vec2(-$offset,  $offset) * ps)');
-      buf.writeln('           + ${input}_tex(${input}_pos + vec2(-$offset, -$offset) * ps);');
-      buf.writeln('    return s * 0.25;');
-      buf.writeln('}');
-      buf.writeln();
+    for (final step in blur8Steps) {
+      _writeKawasePass(buf, step.$1, step.$2, step.$3, step.$4);
     }
 
     // Pass 6: Downscale the already-blurred 1/8 texture to 1/64.
@@ -177,22 +153,8 @@ class AmbientLightingService {
 
     // Pass 7-8: Two more Kawase blur passes at 1/64 for maximum diffusion.
     const blur64Steps = [('TINY', 'GLOW1', '3.0', 'Blur4'), ('GLOW1', 'GLOW', '6.0', 'Blur5')];
-    for (final (input, output, offset, desc) in blur64Steps) {
-      buf.writeln('//!HOOK MAIN');
-      buf.writeln('//!BIND $input');
-      buf.writeln('//!SAVE $output');
-      buf.writeln('//!WIDTH $input.w');
-      buf.writeln('//!HEIGHT $input.h');
-      buf.writeln('//!DESC Ambient Lighting $desc');
-      buf.writeln('vec4 hook() {');
-      buf.writeln('    vec2 ps = ${input}_pt;');
-      buf.writeln('    vec4 s = ${input}_tex(${input}_pos + vec2( $offset,  $offset) * ps)');
-      buf.writeln('           + ${input}_tex(${input}_pos + vec2( $offset, -$offset) * ps)');
-      buf.writeln('           + ${input}_tex(${input}_pos + vec2(-$offset,  $offset) * ps)');
-      buf.writeln('           + ${input}_tex(${input}_pos + vec2(-$offset, -$offset) * ps);');
-      buf.writeln('    return s * 0.25;');
-      buf.writeln('}');
-      buf.writeln();
+    for (final step in blur64Steps) {
+      _writeKawasePass(buf, step.$1, step.$2, step.$3, step.$4);
     }
 
     // Pass 9: Composite — no //!SAVE so this replaces MAIN.
@@ -228,6 +190,24 @@ class AmbientLightingService {
     buf.writeln('}');
 
     return buf.toString();
+  }
+
+  void _writeKawasePass(StringBuffer buf, String input, String output, String offset, String desc) {
+    buf.writeln('//!HOOK MAIN');
+    buf.writeln('//!BIND $input');
+    buf.writeln('//!SAVE $output');
+    buf.writeln('//!WIDTH $input.w');
+    buf.writeln('//!HEIGHT $input.h');
+    buf.writeln('//!DESC Ambient Lighting $desc');
+    buf.writeln('vec4 hook() {');
+    buf.writeln('    vec2 ps = ${input}_pt;');
+    buf.writeln('    vec4 s = ${input}_tex(${input}_pos + vec2( $offset,  $offset) * ps)');
+    buf.writeln('           + ${input}_tex(${input}_pos + vec2( $offset, -$offset) * ps)');
+    buf.writeln('           + ${input}_tex(${input}_pos + vec2(-$offset,  $offset) * ps)');
+    buf.writeln('           + ${input}_tex(${input}_pos + vec2(-$offset, -$offset) * ps);');
+    buf.writeln('    return s * 0.25;');
+    buf.writeln('}');
+    buf.writeln();
   }
 
   /// Write the shader to a temp file and return the path.

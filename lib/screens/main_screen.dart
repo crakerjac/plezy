@@ -12,7 +12,7 @@ import '../../services/plex_client.dart';
 import '../i18n/strings.g.dart';
 import '../services/update_service.dart';
 import '../utils/app_logger.dart';
-import '../focus/focusable_button.dart';
+import '../widgets/dialog_action_button.dart';
 import '../utils/dialogs.dart';
 import '../utils/provider_extensions.dart';
 import '../utils/platform_detector.dart';
@@ -35,6 +35,7 @@ import '../providers/offline_mode_provider.dart';
 import '../services/plex_auth_service.dart';
 import '../services/storage_service.dart';
 import '../services/companion_remote/companion_remote_receiver.dart';
+import '../services/fullscreen_state_manager.dart';
 import '../providers/companion_remote_provider.dart';
 import '../utils/desktop_window_padding.dart';
 import '../widgets/side_navigation_rail.dart';
@@ -138,7 +139,7 @@ class _MainScreenState extends State<MainScreen> with RouteAware, WindowListener
 
     WidgetsBinding.instance.addObserver(this);
 
-    if (Platform.isLinux || Platform.isWindows || Platform.isMacOS) {
+    if (PlatformDetector.isDesktopOS()) {
       windowManager.addListener(this);
       windowManager.setPreventClose(true);
     }
@@ -174,7 +175,7 @@ class _MainScreenState extends State<MainScreen> with RouteAware, WindowListener
 
         // Auto-start companion remote server now that home data is available
         if (_companionRemoteSetup && mounted) {
-          _autoStartCompanionRemoteServer(context.read<CompanionRemoteProvider>());
+          unawaited(_autoStartCompanionRemoteServer(context.read<CompanionRemoteProvider>()));
         }
 
         // Ensure first login (or any unset profile state) requires explicit selection.
@@ -188,7 +189,7 @@ class _MainScreenState extends State<MainScreen> with RouteAware, WindowListener
       }
 
       // Check for updates on startup
-      _checkForUpdatesOnStartup();
+      unawaited(_checkForUpdatesOnStartup());
     });
   }
 
@@ -198,7 +199,8 @@ class _MainScreenState extends State<MainScreen> with RouteAware, WindowListener
     final needsInitial = userProfileProvider.needsInitialProfileSelection;
     final settingsService = await SettingsService.getInstance();
     if (!mounted) return;
-    final requireOnOpen = settingsService.getRequireProfileSelectionOnOpen() && userProfileProvider.hasMultipleUsers;
+    final requireOnOpen =
+        settingsService.read(SettingsService.requireProfileSelectionOnOpen) && userProfileProvider.hasMultipleUsers;
 
     if (!needsInitial && !requireOnOpen) return;
 
@@ -210,10 +212,10 @@ class _MainScreenState extends State<MainScreen> with RouteAware, WindowListener
   }
 
   Future<void> _checkForUpdatesOnStartup() async {
-    // Delay slightly to allow UI to settle
-    await Future.delayed(const Duration(seconds: 3));
-
     if (!mounted) return;
+
+    final settingsService = await SettingsService.getInstance();
+    if (!settingsService.read(SettingsService.autoCheckUpdatesOnStartup)) return;
 
     // Native updater (Sparkle/WinSparkle) handles everything — skip Flutter dialog
     if (UpdateService.useNativeUpdater) {
@@ -254,36 +256,15 @@ class _MainScreenState extends State<MainScreen> with RouteAware, WindowListener
             ],
           ),
           actions: [
-            FocusableButton(
-              autofocus: true,
-              onPressed: () => Navigator.pop(dialogContext),
-              child: TextButton(
-                onPressed: () => Navigator.pop(dialogContext),
-                style: TextButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
-                  shape: const StadiumBorder(),
-                ),
-                child: Text(t.common.later),
-              ),
-            ),
-            FocusableButton(
+            DialogActionButton(onPressed: () => Navigator.pop(dialogContext), label: t.common.later),
+            DialogActionButton(
               onPressed: () async {
                 await UpdateService.skipVersion(updateInfo['latestVersion']);
                 if (dialogContext.mounted) Navigator.pop(dialogContext);
               },
-              child: TextButton(
-                onPressed: () async {
-                  await UpdateService.skipVersion(updateInfo['latestVersion']);
-                  if (dialogContext.mounted) Navigator.pop(dialogContext);
-                },
-                style: TextButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
-                  shape: const StadiumBorder(),
-                ),
-                child: Text(t.update.skipVersion),
-              ),
+              label: t.update.skipVersion,
             ),
-            FocusableButton(
+            DialogActionButton(
               onPressed: () async {
                 final url = Uri.parse(updateInfo['releaseUrl']);
                 if (await canLaunchUrl(url)) {
@@ -291,16 +272,8 @@ class _MainScreenState extends State<MainScreen> with RouteAware, WindowListener
                 }
                 if (dialogContext.mounted) Navigator.pop(dialogContext);
               },
-              child: FilledButton(
-                onPressed: () async {
-                  final url = Uri.parse(updateInfo['releaseUrl']);
-                  if (await canLaunchUrl(url)) {
-                    await launchUrl(url, mode: LaunchMode.externalApplication);
-                  }
-                  if (dialogContext.mounted) Navigator.pop(dialogContext);
-                },
-                child: Text(t.update.viewRelease),
-              ),
+              label: t.update.viewRelease,
+              isPrimary: true,
             ),
           ],
         );
@@ -354,7 +327,7 @@ class _MainScreenState extends State<MainScreen> with RouteAware, WindowListener
       final contentId = await watchNext.getInitialDeepLink();
       if (contentId != null && mounted) {
         appLogger.d('Watch Next initial deep link: $contentId');
-        _handleWatchNextContentId(contentId);
+        unawaited(_handleWatchNextContentId(contentId));
       }
     });
   }
@@ -384,7 +357,7 @@ class _MainScreenState extends State<MainScreen> with RouteAware, WindowListener
 
       if (metadata == null || !mounted) return;
 
-      navigateToVideoPlayer(context, metadata: metadata);
+      unawaited(navigateToVideoPlayer(context, metadata: metadata));
     } catch (e) {
       appLogger.e('Watch Next: failed to navigate to media', error: e);
     }
@@ -477,7 +450,7 @@ class _MainScreenState extends State<MainScreen> with RouteAware, WindowListener
   Future<void> _autoStartCompanionRemoteServer(CompanionRemoteProvider companionRemote) async {
     try {
       final settings = await SettingsService.getInstance();
-      if (!settings.getEnableCompanionRemoteServer()) return;
+      if (!settings.read(SettingsService.enableCompanionRemoteServer)) return;
       if (!mounted) return;
 
       final home = context.read<UserProfileProvider>().home;
@@ -493,7 +466,7 @@ class _MainScreenState extends State<MainScreen> with RouteAware, WindowListener
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     routeObserver.unsubscribe(this);
-    if (Platform.isLinux || Platform.isWindows || Platform.isMacOS) {
+    if (PlatformDetector.isDesktopOS()) {
       windowManager.removeListener(this);
       windowManager.setPreventClose(false);
     }
@@ -538,7 +511,7 @@ class _MainScreenState extends State<MainScreen> with RouteAware, WindowListener
 
   Future<void> _showProfileSelectionOnResume() async {
     final settingsService = await SettingsService.getInstance();
-    if (!settingsService.getRequireProfileSelectionOnOpen()) return;
+    if (!settingsService.read(SettingsService.requireProfileSelectionOnOpen)) return;
     if (!mounted) return;
 
     final userProfileProvider = context.read<UserProfileProvider>();
@@ -710,7 +683,7 @@ class _MainScreenState extends State<MainScreen> with RouteAware, WindowListener
     return handleBackKeyAction(event, () async {
       if (PlatformDetector.isTV()) {
         final settings = await SettingsService.getInstance();
-        if (settings.getConfirmExitOnBack() && mounted) {
+        if (settings.read(SettingsService.confirmExitOnBack) && mounted) {
           final result = await showConfirmDialogWithCheckbox(
             context,
             title: t.common.exitConfirmTitle,
@@ -719,13 +692,25 @@ class _MainScreenState extends State<MainScreen> with RouteAware, WindowListener
             checkboxLabel: t.common.dontAskAgain,
           );
           if (result.checked) {
-            await settings.setConfirmExitOnBack(false);
+            await settings.write(SettingsService.confirmExitOnBack, false);
           }
           if (!result.confirmed) return;
         }
       }
-      SystemNavigator.pop();
+      unawaited(SystemNavigator.pop());
     });
+  }
+
+  /// F11 toggles OS fullscreen from anywhere in the main UI. The in-player
+  /// hotkey (default `f`) only works while the player is mounted; this is
+  /// the escape hatch when fullscreen persists after the player closes.
+  KeyEventResult _handleFullscreenShortcut(KeyEvent event) {
+    if (event is! KeyDownEvent) return KeyEventResult.ignored;
+    if (event.logicalKey != LogicalKeyboardKey.f11) return KeyEventResult.ignored;
+    if (!PlatformDetector.isDesktopOS()) return KeyEventResult.ignored;
+
+    unawaited(FullscreenStateManager().toggleFullscreen());
+    return KeyEventResult.handled;
   }
 
   /// Handle Cmd+F (macOS) / Ctrl+F (Windows/Linux) to navigate to search.
@@ -838,7 +823,7 @@ class _MainScreenState extends State<MainScreen> with RouteAware, WindowListener
     }
 
     // Reset other provider states
-    hiddenLibrariesProvider.refresh();
+    unawaited(hiddenLibrariesProvider.refresh());
     playbackStateProvider.clearShuffle();
 
     appLogger.d('Cleared all provider states for profile switch');
@@ -969,6 +954,8 @@ class _MainScreenState extends State<MainScreen> with RouteAware, WindowListener
               onPopInvokedWithResult: (didPop, result) {},
               child: Focus(
                 onKeyEvent: (node, event) {
+                  final fullscreenResult = _handleFullscreenShortcut(event);
+                  if (fullscreenResult == KeyEventResult.handled) return fullscreenResult;
                   final searchResult = _handleSearchShortcut(event);
                   if (searchResult == KeyEventResult.handled) return searchResult;
                   return _handleBackKey(event);

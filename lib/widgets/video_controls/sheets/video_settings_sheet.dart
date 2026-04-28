@@ -150,18 +150,18 @@ class _VideoSettingsSheetState extends State<VideoSettingsSheet> {
     final settings = await SettingsService.getInstance();
     if (!mounted) return;
     setState(() {
-      _enableHDR = settings.getEnableHDR();
-      _showPerformanceOverlay = settings.getShowPerformanceOverlay();
-      _autoPlayNextEpisode = settings.getAutoPlayNextEpisode();
-      _audioPassthrough = settings.getAudioPassthrough();
-      _audioNormalization = settings.getAudioNormalization();
+      _enableHDR = settings.read(SettingsService.enableHDR);
+      _showPerformanceOverlay = settings.read(SettingsService.showPerformanceOverlay);
+      _autoPlayNextEpisode = settings.read(SettingsService.autoPlayNextEpisode);
+      _audioPassthrough = settings.read(SettingsService.audioPassthrough);
+      _audioNormalization = settings.read(SettingsService.audioNormalization);
     });
   }
 
   Future<void> _toggleHDR() async {
     final newValue = !_enableHDR;
     final settings = await SettingsService.getInstance();
-    await settings.setEnableHDR(newValue);
+    await settings.write(SettingsService.enableHDR, newValue);
     if (!mounted) return;
     setState(() {
       _enableHDR = newValue;
@@ -173,7 +173,7 @@ class _VideoSettingsSheetState extends State<VideoSettingsSheet> {
   Future<void> _togglePerformanceOverlay() async {
     final newValue = !_showPerformanceOverlay;
     final settings = await SettingsService.getInstance();
-    await settings.setShowPerformanceOverlay(newValue);
+    await settings.write(SettingsService.showPerformanceOverlay, newValue);
     if (!mounted) return;
     setState(() {
       _showPerformanceOverlay = newValue;
@@ -183,7 +183,7 @@ class _VideoSettingsSheetState extends State<VideoSettingsSheet> {
   Future<void> _toggleAutoPlayNextEpisode() async {
     final newValue = !_autoPlayNextEpisode;
     final settings = await SettingsService.getInstance();
-    await settings.setAutoPlayNextEpisode(newValue);
+    await settings.write(SettingsService.autoPlayNextEpisode, newValue);
     if (!mounted) return;
     setState(() {
       _autoPlayNextEpisode = newValue;
@@ -193,7 +193,7 @@ class _VideoSettingsSheetState extends State<VideoSettingsSheet> {
   Future<void> _toggleAudioPassthrough() async {
     final newValue = !_audioPassthrough;
     final settings = await SettingsService.getInstance();
-    await settings.setAudioPassthrough(newValue);
+    await settings.write(SettingsService.audioPassthrough, newValue);
     if (!mounted) return;
     setState(() {
       _audioPassthrough = newValue;
@@ -204,7 +204,7 @@ class _VideoSettingsSheetState extends State<VideoSettingsSheet> {
   Future<void> _toggleAudioNormalization() async {
     final newValue = !_audioNormalization;
     final settings = await SettingsService.getInstance();
-    await settings.setAudioNormalization(newValue);
+    await settings.write(SettingsService.audioNormalization, newValue);
     if (!mounted) return;
     setState(() {
       _audioNormalization = newValue;
@@ -256,9 +256,9 @@ class _VideoSettingsSheetState extends State<VideoSettingsSheet> {
             onOffsetChanged: (offset) async {
               final settings = await SettingsService.getInstance();
               if (isSubtitle) {
-                await settings.setSubtitleSyncOffset(offset);
+                await settings.write(SettingsService.subtitleSyncOffset, offset);
               } else {
-                await settings.setAudioSyncOffset(offset);
+                await settings.write(SettingsService.audioSyncOffset, offset);
               }
               widget.onSyncOffsetChanged?.call(propertyName, offset);
             },
@@ -559,10 +559,10 @@ class _VideoSettingsSheetState extends State<VideoSettingsSheet> {
               title: Text(label, style: TextStyle(color: isSelected ? primary : null)),
               trailing: isSelected ? AppIcon(Symbols.check_rounded, fill: 1, color: primary) : null,
               onTap: () async {
-                widget.player.setRate(speed);
+                await widget.player.setRate(speed);
                 // Save as default playback speed
                 final settings = await SettingsService.getInstance();
-                await settings.setDefaultPlaybackSpeed(speed);
+                await settings.write(SettingsService.defaultPlaybackSpeed, speed);
                 if (context.mounted) {
                   OverlaySheetController.of(context).close(); // Close sheet after selection
                 }
@@ -798,6 +798,16 @@ class _VideoSettingsSheetState extends State<VideoSettingsSheet> {
         return t.shaders.noShaderDescription;
       case ShaderPresetType.nvscaler:
         return t.shaders.nvscalerDescription;
+      case ShaderPresetType.artcnn:
+        if (preset.artcnnConfig != null) {
+          final variant = switch (preset.artcnnConfig!.variant) {
+            ArtCNNVariant.neutral => t.shaders.artcnnVariantNeutral,
+            ArtCNNVariant.denoise => t.shaders.artcnnVariantDenoise,
+            ArtCNNVariant.denoiseSharpen => t.shaders.artcnnVariantDenoiseSharpen,
+          };
+          return '${preset.artcnnModelDisplayName} - $variant';
+        }
+        return null;
       case ShaderPresetType.anime4k:
         if (preset.anime4kConfig != null) {
           final quality = preset.anime4kConfig!.quality == Anime4KQuality.fast

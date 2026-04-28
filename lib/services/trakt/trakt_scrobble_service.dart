@@ -1,13 +1,15 @@
 import 'dart:async';
 
 import '../../models/plex_metadata.dart';
+import '../../models/trakt/trakt_ids.dart';
 import '../../models/trakt/trakt_scrobble_request.dart';
 import '../../utils/app_logger.dart';
 import '../plex_client.dart';
 import '../settings_service.dart';
+import '../trackers/tracker_constants.dart';
+import '../trackers/tracker_id_resolver.dart';
 import 'trakt_client.dart';
 import 'trakt_constants.dart';
-import 'trakt_guid_resolver.dart';
 import 'trakt_session.dart';
 
 /// Real-time scrobble service for Trakt.
@@ -41,7 +43,7 @@ class TraktScrobbleService {
   bool _isEnabled = false;
 
   TraktClient? _client;
-  TraktGuidResolver? _resolver;
+  TrackerIdResolver? _resolver;
   TraktScrobbleRequest? _currentBody;
   Duration _currentPosition = Duration.zero;
   Duration _currentDuration = Duration.zero;
@@ -53,7 +55,7 @@ class TraktScrobbleService {
     if (_isInitialized) return;
     _isInitialized = true;
     final settings = await SettingsService.getInstance();
-    _isEnabled = settings.getEnableTraktScrobble();
+    _isEnabled = settings.read(SettingsService.enableTraktScrobble);
   }
 
   Future<void> setEnabled(bool enabled) async {
@@ -90,12 +92,19 @@ class TraktScrobbleService {
     final type = metadata.mediaType;
     if (type != PlexMediaType.movie && type != PlexMediaType.episode) return;
 
+    final settings = SettingsService.instanceOrNull;
+    if (settings != null &&
+        !settings.isLibraryAllowedForTracker(TrackerService.trakt, metadata.librarySectionGlobalKey)) {
+      appLogger.d('Trakt: library filtered out for ${metadata.ratingKey}');
+      return;
+    }
+
     // Seed with the resume offset so the first real position update doesn't
     // look like a seek when resuming mid-item.
     _currentPosition = metadata.viewOffset != null ? Duration(milliseconds: metadata.viewOffset!) : Duration.zero;
     _currentDuration = metadata.duration != null ? Duration(milliseconds: metadata.duration!) : Duration.zero;
     _lastSeekCheckpointAt = null;
-    _resolver = TraktGuidResolver(plexClient);
+    _resolver = TrackerIdResolver(plexClient, needsFribb: () => false);
 
     final body = await _buildBody(metadata);
     if (body == null) {
@@ -153,8 +162,8 @@ class TraktScrobbleService {
 
     if (metadata.mediaType == PlexMediaType.movie) {
       final ids = await resolver.resolveForMovie(metadata.ratingKey);
-      if (!ids.hasAny) return null;
-      return TraktScrobbleRequest.movie(ids: ids);
+      if (ids == null) return null;
+      return TraktScrobbleRequest.movie(ids: TraktIds.fromExternal(ids.external));
     }
 
     final season = metadata.parentIndex;
@@ -162,9 +171,13 @@ class TraktScrobbleService {
     if (season == null || number == null) return null;
 
     final showIds = await resolver.resolveShowForEpisode(metadata);
-    if (showIds == null || !showIds.hasAny) return null;
+    if (showIds == null) return null;
 
-    return TraktScrobbleRequest.episode(showIds: showIds, season: season, number: number);
+    return TraktScrobbleRequest.episode(
+      showIds: TraktIds.fromExternal(showIds.external),
+      season: season,
+      number: number,
+    );
   }
 
   double _progressPercent() {

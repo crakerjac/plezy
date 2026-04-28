@@ -31,6 +31,7 @@ import '../../models/livetv_capture_buffer.dart';
 import '../../services/plex_client.dart';
 import '../../services/plex_api_cache.dart';
 import '../../models/plex_media_info.dart';
+import '../../models/transcode_quality_preset.dart';
 import '../../models/plex_media_version.dart';
 import '../../models/plex_metadata.dart';
 import '../../screens/video_player_screen.dart';
@@ -69,6 +70,11 @@ Widget plexVideoControlsBuilder(
   VoidCallback? onPrevious,
   List<PlexMediaVersion>? availableVersions,
   int? selectedMediaIndex,
+  TranscodeQualityPreset selectedQualityPreset = TranscodeQualityPreset.original,
+  bool serverSupportsTranscoding = false,
+  bool isTranscoding = false,
+  List<PlexAudioTrack> sourceAudioTracks = const [],
+  int? selectedAudioStreamId,
   VoidCallback? onTogglePIPMode,
   int boxFitMode = 0,
   VoidCallback? onCycleBoxFitMode,
@@ -79,6 +85,7 @@ Widget plexVideoControlsBuilder(
   Function(SubtitleTrack)? onSecondarySubtitleTrackChanged,
   Function(Duration position)? onSeekCompleted,
   VoidCallback? onBack,
+  VoidCallback? onReachedEnd,
   bool canControl = true,
   ValueNotifier<bool>? hasFirstFrame,
   FocusNode? playNextFocusNode,
@@ -106,6 +113,11 @@ Widget plexVideoControlsBuilder(
     onPrevious: onPrevious,
     availableVersions: availableVersions ?? [],
     selectedMediaIndex: selectedMediaIndex ?? 0,
+    selectedQualityPreset: selectedQualityPreset,
+    serverSupportsTranscoding: serverSupportsTranscoding,
+    isTranscoding: isTranscoding,
+    sourceAudioTracks: sourceAudioTracks,
+    selectedAudioStreamId: selectedAudioStreamId,
     boxFitMode: boxFitMode,
     onTogglePIPMode: onTogglePIPMode,
     onCycleBoxFitMode: onCycleBoxFitMode,
@@ -116,6 +128,7 @@ Widget plexVideoControlsBuilder(
     onSecondarySubtitleTrackChanged: onSecondarySubtitleTrackChanged,
     onSeekCompleted: onSeekCompleted,
     onBack: onBack,
+    onReachedEnd: onReachedEnd,
     canControl: canControl,
     hasFirstFrame: hasFirstFrame,
     playNextFocusNode: playNextFocusNode,
@@ -143,6 +156,11 @@ class PlexVideoControls extends StatefulWidget {
   final VoidCallback? onPrevious;
   final List<PlexMediaVersion> availableVersions;
   final int selectedMediaIndex;
+  final TranscodeQualityPreset selectedQualityPreset;
+  final bool serverSupportsTranscoding;
+  final bool isTranscoding;
+  final List<PlexAudioTrack> sourceAudioTracks;
+  final int? selectedAudioStreamId;
   final int boxFitMode;
   final VoidCallback? onTogglePIPMode;
   final VoidCallback? onCycleBoxFitMode;
@@ -157,6 +175,11 @@ class PlexVideoControls extends StatefulWidget {
 
   /// Called when back button is pressed (for Watch Together session leave confirmation)
   final VoidCallback? onBack;
+
+  /// Called when the video has effectively reached the end (e.g. credits extend
+  /// to EOF and can't be seeked past). Parent should route this into its
+  /// normal completion flow so the auto-play-next setting is honored.
+  final VoidCallback? onReachedEnd;
 
   /// Whether the user can control playback (false in host-only mode for non-host).
   final bool canControl;
@@ -221,6 +244,11 @@ class PlexVideoControls extends StatefulWidget {
     this.onPrevious,
     this.availableVersions = const [],
     this.selectedMediaIndex = 0,
+    this.selectedQualityPreset = TranscodeQualityPreset.original,
+    this.serverSupportsTranscoding = false,
+    this.isTranscoding = false,
+    this.sourceAudioTracks = const [],
+    this.selectedAudioStreamId,
     this.boxFitMode = 0,
     this.onTogglePIPMode,
     this.onCycleBoxFitMode,
@@ -231,6 +259,7 @@ class PlexVideoControls extends StatefulWidget {
     this.onSecondarySubtitleTrackChanged,
     this.onSeekCompleted,
     this.onBack,
+    this.onReachedEnd,
     this.canControl = true,
     this.hasFirstFrame,
     this.playNextFocusNode,
@@ -362,7 +391,7 @@ class _PlexVideoControlsState extends State<PlexVideoControls> with WindowListen
     // Add lifecycle observer to reload settings when app resumes
     WidgetsBinding.instance.addObserver(this);
     // Add window listener for tracking fullscreen state (for button icon)
-    if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
+    if (PlatformDetector.isDesktopOS()) {
       windowManager.addListener(this);
       _initAlwaysOnTopState();
     }
@@ -524,13 +553,10 @@ class _PlexVideoControlsState extends State<PlexVideoControls> with WindowListen
     final isAtEnd = duration > Duration.zero && (duration - endTime).inMilliseconds <= 1000;
 
     if (marker.isCredits && isAtEnd) {
-      // Credits extend to end of video — don't seek (unreliable due to
-      // position stream throttling). Go to next episode or exit player.
-      if (widget.onNext != null) {
-        widget.onNext!.call();
-      } else {
-        widget.onBack?.call();
-      }
+      // Seeking to EOF is unreliable due to position stream throttling,
+      // so pause and defer to the parent's completion flow.
+      await widget.player.pause();
+      widget.onReachedEnd?.call();
     } else {
       await _seekToPosition(endTime);
     }
@@ -621,18 +647,18 @@ class _PlexVideoControlsState extends State<PlexVideoControls> with WindowListen
     final settingsService = await SettingsService.getInstance();
     if (mounted) {
       setState(() {
-        _seekTimeSmall = settingsService.getSeekTimeSmall();
-        _rewindOnResume = settingsService.getRewindOnResume();
-        _audioSyncOffset = settingsService.getAudioSyncOffset();
-        _subtitleSyncOffset = settingsService.getSubtitleSyncOffset();
-        _isRotationLocked = settingsService.getRotationLocked();
-        _autoSkipIntro = settingsService.getAutoSkipIntro();
-        _autoSkipCredits = settingsService.getAutoSkipCredits();
-        _autoSkipDelay = settingsService.getAutoSkipDelay();
-        _videoPlayerNavigationEnabled = settingsService.getVideoPlayerNavigationEnabled();
-        _showPerformanceOverlay = settingsService.getShowPerformanceOverlay();
-        _autoHidePerformanceOverlay = settingsService.getAutoHidePerformanceOverlay();
-        _clickVideoTogglesPlayback = settingsService.getClickVideoTogglesPlayback();
+        _seekTimeSmall = settingsService.read(SettingsService.seekTimeSmall);
+        _rewindOnResume = settingsService.read(SettingsService.rewindOnResume);
+        _audioSyncOffset = settingsService.read(SettingsService.audioSyncOffset);
+        _subtitleSyncOffset = settingsService.read(SettingsService.subtitleSyncOffset);
+        _isRotationLocked = settingsService.read(SettingsService.rotationLocked);
+        _autoSkipIntro = settingsService.read(SettingsService.autoSkipIntro);
+        _autoSkipCredits = settingsService.read(SettingsService.autoSkipCredits);
+        _autoSkipDelay = settingsService.read(SettingsService.autoSkipDelay);
+        _videoPlayerNavigationEnabled = settingsService.read(SettingsService.videoPlayerNavigationEnabled);
+        _showPerformanceOverlay = settingsService.read(SettingsService.showPerformanceOverlay);
+        _autoHidePerformanceOverlay = settingsService.read(SettingsService.autoHidePerformanceOverlay);
+        _clickVideoTogglesPlayback = settingsService.read(SettingsService.clickVideoTogglesPlayback);
       });
 
       // Focus play/pause if navigation is now enabled and controls are visible
@@ -643,9 +669,11 @@ class _PlexVideoControlsState extends State<PlexVideoControls> with WindowListen
 
       // Apply rotation lock setting
       if (_isRotationLocked) {
-        SystemChrome.setPreferredOrientations([DeviceOrientation.landscapeLeft, DeviceOrientation.landscapeRight]);
+        unawaited(
+          SystemChrome.setPreferredOrientations([DeviceOrientation.landscapeLeft, DeviceOrientation.landscapeRight]),
+        );
       } else {
-        SystemChrome.setPreferredOrientations(DeviceOrientation.values);
+        unawaited(SystemChrome.setPreferredOrientations(DeviceOrientation.values));
       }
     }
   }
@@ -679,11 +707,18 @@ class _PlexVideoControlsState extends State<PlexVideoControls> with WindowListen
 
     if (shaderService.currentPreset.isEnabled) {
       // Currently active - disable temporarily
-      shaderService.applyPreset(ShaderPreset.none).then((_) {
-        // ignore: no-empty-block - setState triggers rebuild to reflect disabled shader
-        if (mounted) setState(() {});
-        widget.onShaderChanged?.call();
-      });
+      unawaited(
+        shaderService
+            .applyPreset(ShaderPreset.none)
+            .then((_) {
+              // ignore: no-empty-block - setState triggers rebuild to reflect disabled shader
+              if (mounted) setState(() {});
+              widget.onShaderChanged?.call();
+            })
+            .catchError((Object e, StackTrace st) {
+              appLogger.w('Failed to disable shader', error: e, stackTrace: st);
+            }),
+      );
     } else {
       // Currently off - restore saved preset
       final shaderProvider = context.read<ShaderProvider>();
@@ -692,12 +727,19 @@ class _PlexVideoControlsState extends State<PlexVideoControls> with WindowListen
       final targetPreset = saved.isEnabled
           ? saved
           : allPresets.firstWhere((p) => p.isEnabled, orElse: () => allPresets[1]);
-      shaderService.applyPreset(targetPreset).then((_) {
-        shaderProvider.setCurrentPreset(targetPreset);
-        // ignore: no-empty-block - setState triggers rebuild to reflect restored shader
-        if (mounted) setState(() {});
-        widget.onShaderChanged?.call();
-      });
+      unawaited(
+        shaderService
+            .applyPreset(targetPreset)
+            .then((_) {
+              shaderProvider.setCurrentPreset(targetPreset);
+              // ignore: no-empty-block - setState triggers rebuild to reflect restored shader
+              if (mounted) setState(() {});
+              widget.onShaderChanged?.call();
+            })
+            .catchError((Object e, StackTrace st) {
+              appLogger.w('Failed to apply shader preset', error: e, stackTrace: st);
+            }),
+      );
     }
   }
 
@@ -740,7 +782,7 @@ class _PlexVideoControlsState extends State<PlexVideoControls> with WindowListen
     // Remove lifecycle observer
     WidgetsBinding.instance.removeObserver(this);
     // Remove window listener and reset always-on-top if it was enabled
-    if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
+    if (PlatformDetector.isDesktopOS()) {
       windowManager.removeListener(this);
       if (_isAlwaysOnTop) {
         windowManager.setAlwaysOnTop(false);
@@ -900,7 +942,7 @@ class _PlexVideoControlsState extends State<PlexVideoControls> with WindowListen
       final maxVol = _keyboardService!.maxVolume.toDouble();
       final newVolume = (volume - delta / 20).clamp(0.0, maxVol);
       widget.player.setVolume(newVolume);
-      SettingsService.getInstance().then((s) => s.setVolume(newVolume));
+      unawaited(SettingsService.getInstance().then((s) => s.write(SettingsService.volume, newVolume)));
       _showControlsFromPointerActivity();
     }
   }
@@ -950,14 +992,14 @@ class _PlexVideoControlsState extends State<PlexVideoControls> with WindowListen
 
     // Save to settings
     final settingsService = await SettingsService.getInstance();
-    await settingsService.setRotationLocked(_isRotationLocked);
+    await settingsService.write(SettingsService.rotationLocked, _isRotationLocked);
 
     if (_isRotationLocked) {
       // Locked: Allow landscape orientations only
-      SystemChrome.setPreferredOrientations([DeviceOrientation.landscapeLeft, DeviceOrientation.landscapeRight]);
+      await SystemChrome.setPreferredOrientations([DeviceOrientation.landscapeLeft, DeviceOrientation.landscapeRight]);
     } else {
       // Unlocked: Allow all orientations including portrait
-      SystemChrome.setPreferredOrientations(DeviceOrientation.values);
+      await SystemChrome.setPreferredOrientations(DeviceOrientation.values);
     }
   }
 
@@ -1045,8 +1087,8 @@ class _PlexVideoControlsState extends State<PlexVideoControls> with WindowListen
       appLogger.d('_loadPlaybackExtras: got client with serverId=${client.serverId}');
 
       final settings = await SettingsService.getInstance();
-      final introPattern = settings.getIntroPattern();
-      final creditsPattern = settings.getCreditsPattern();
+      final introPattern = settings.read(SettingsService.introPattern);
+      final creditsPattern = settings.read(SettingsService.creditsPattern);
       final extras = await client.getPlaybackExtras(
         widget.metadata.ratingKey,
         introPattern: introPattern,
@@ -1099,7 +1141,7 @@ class _PlexVideoControlsState extends State<PlexVideoControls> with WindowListen
     if (metadataJson != null) {
       // Parse chapters
       if (metadataJson['Chapter'] != null) {
-        for (var chapter in metadataJson['Chapter'] as List) {
+        for (final chapter in metadataJson['Chapter'] as List) {
           chapters.add(
             PlexChapter(
               id: chapter['id'] as int,
@@ -1115,7 +1157,7 @@ class _PlexVideoControlsState extends State<PlexVideoControls> with WindowListen
 
       // Parse markers
       if (metadataJson['Marker'] != null) {
-        for (var marker in metadataJson['Marker'] as List) {
+        for (final marker in metadataJson['Marker'] as List) {
           markers.add(
             PlexMarker(
               id: marker['id'] as int,
@@ -1132,8 +1174,8 @@ class _PlexVideoControlsState extends State<PlexVideoControls> with WindowListen
     return PlaybackExtras.withChapterFallback(
       chapters: chapters,
       markers: markers,
-      introPatternStr: settings.getIntroPattern(),
-      creditsPatternStr: settings.getCreditsPattern(),
+      introPatternStr: settings.read(SettingsService.introPattern),
+      creditsPatternStr: settings.read(SettingsService.creditsPattern),
     );
   }
 
@@ -1144,6 +1186,12 @@ class _PlexVideoControlsState extends State<PlexVideoControls> with WindowListen
     return TrackControlsState(
       availableVersions: widget.availableVersions,
       selectedMediaIndex: widget.selectedMediaIndex,
+      selectedQualityPreset: widget.selectedQualityPreset,
+      serverSupportsTranscoding: widget.serverSupportsTranscoding,
+      isTranscoding: widget.isTranscoding,
+      sourceAudioTracks: widget.sourceAudioTracks,
+      selectedAudioStreamId: widget.selectedAudioStreamId,
+      sourceDurationMs: widget.metadata.duration,
       boxFitMode: widget.boxFitMode,
       audioSyncOffset: _audioSyncOffset,
       subtitleSyncOffset: _subtitleSyncOffset,
@@ -1152,12 +1200,14 @@ class _PlexVideoControlsState extends State<PlexVideoControls> with WindowListen
       isFullscreen: _isFullscreen,
       isAlwaysOnTop: _isAlwaysOnTop,
       onTogglePIPMode: (_isPipSupported && !PlatformDetector.isTV()) ? widget.onTogglePIPMode : null,
-      onCycleBoxFitMode: widget.player.playerType != 'exoplayer' ? widget.onCycleBoxFitMode : null,
+      onCycleBoxFitMode: widget.onCycleBoxFitMode,
       onToggleRotationLock: _toggleRotationLock,
       onToggleScreenLock: _toggleScreenLock,
       onToggleFullscreen: _toggleFullscreen,
       onToggleAlwaysOnTop: onToggleAlwaysOnTop,
-      onSwitchVersion: _switchMediaVersion,
+      onSwitchVersion: (i) => _switchVersionAndQuality(newMediaIndex: i),
+      onSwitchQualityPreset: (p) => _switchVersionAndQuality(newPreset: p),
+      onSwitchAudioStreamId: (id) => _switchVersionAndQuality(newAudioStreamId: id),
       onAudioTrackChanged: widget.onAudioTrackChanged,
       onSubtitleTrackChanged: _onSubtitleTrackChanged,
       onSecondarySubtitleTrackChanged: widget.onSecondarySubtitleTrackChanged,
@@ -1293,13 +1343,24 @@ class _PlexVideoControlsState extends State<PlexVideoControls> with WindowListen
     unawaited(_seekToPosition(position));
   }
 
-  /// Handle tap in skip zone for desktop mode
-  void _handleTapInSkipZoneDesktop() {
+  /// Timing-based double-click detection: avoids `onDoubleTap`'s ~300 ms
+  /// tap-resolution delay and the arena competition it introduces.
+  void _handleOuterTap() {
     if (widget.canControl && _clickVideoTogglesPlayback) {
       _playOrPause();
+    } else {
+      _toggleControls();
     }
 
-    _toggleControls();
+    if (PlatformDetector.isMobile(context)) return;
+
+    final now = DateTime.now();
+    if (_lastSkipTapTime != null && now.difference(_lastSkipTapTime!).inMilliseconds < 250) {
+      _lastSkipTapTime = null;
+      _toggleFullscreen();
+      return;
+    }
+    _lastSkipTapTime = now;
   }
 
   /// Handle tap in skip zone with custom double-tap detection
@@ -1721,6 +1782,8 @@ class _PlexVideoControlsState extends State<PlexVideoControls> with WindowListen
         _previousChapter,
         onBack: widget.onBack ?? () => Navigator.of(context).pop(true),
         onToggleShader: _toggleShader,
+        onNextEpisode: widget.onNext,
+        onPreviousEpisode: widget.onPrevious,
         currentPositionEpoch: widget.currentPositionEpoch,
         onLiveSeek: widget.onLiveSeek,
       );
@@ -1953,6 +2016,8 @@ class _PlexVideoControlsState extends State<PlexVideoControls> with WindowListen
               onBack: widget.onBack ?? () => Navigator.of(context).pop(true),
               onToggleShader: _toggleShader,
               onSkipMarker: _performAutoSkip,
+              onNextEpisode: widget.onNext,
+              onPreviousEpisode: widget.onPrevious,
               currentPositionEpoch: widget.currentPositionEpoch,
               onLiveSeek: widget.onLiveSeek,
             );
@@ -1975,51 +2040,18 @@ class _PlexVideoControlsState extends State<PlexVideoControls> with WindowListen
                   // Flutter animations from freezing when the frame clock goes idle
                   if (Platform.isLinux || Platform.isWindows)
                     const Positioned(top: 0, left: 0, child: _LinuxKeepAlive()),
-                  // Invisible tap detector that always covers the full area
-                  // Also handles long-press for 2x speed
+                  // Invisible tap detector that always covers the full area.
+                  // Also handles long-press for 2x speed.
                   Positioned.fill(
                     child: GestureDetector(
-                      onTap: _toggleControls,
+                      onTap: _handleOuterTap,
                       onLongPressStart: (_) => _handleLongPressStart(),
                       onLongPressEnd: (_) => _handleLongPressEnd(),
                       onLongPressCancel: _handleLongPressCancel,
                       behavior: HitTestBehavior.opaque,
-                      child: Container(color: Colors.transparent),
+                      child: const ColoredBox(color: Colors.transparent),
                     ),
                   ),
-                  // Middle area double-tap detector for fullscreen (desktop only)
-                  // Only covers the clear video area (20% to 80% vertically)
-                  if (!isMobile)
-                    Positioned(
-                      top: 0,
-                      left: 0,
-                      right: 0,
-                      bottom: 0,
-                      child: LayoutBuilder(
-                        builder: (context, constraints) {
-                          final height = constraints.maxHeight;
-                          final topExclude = height * 0.2; // Top 20%
-                          final bottomExclude = height * 0.2; // Bottom 20%
-
-                          return Stack(
-                            children: [
-                              Positioned(
-                                top: topExclude,
-                                left: 0,
-                                right: 0,
-                                bottom: bottomExclude,
-                                child: GestureDetector(
-                                  onTap: _handleTapInSkipZoneDesktop,
-                                  onDoubleTap: _toggleFullscreen,
-                                  behavior: HitTestBehavior.translucent,
-                                  child: Container(color: Colors.transparent),
-                                ),
-                              ),
-                            ],
-                          );
-                        },
-                      ),
-                    ),
                   // Mobile double-tap zones for skip forward/backward
                   if (isMobile)
                     Positioned.fill(
@@ -2045,7 +2077,7 @@ class _PlexVideoControlsState extends State<PlexVideoControls> with WindowListen
                                   onLongPressEnd: (_) => _handleLongPressEnd(),
                                   onLongPressCancel: _handleLongPressCancel,
                                   behavior: HitTestBehavior.opaque,
-                                  child: Container(color: Colors.transparent),
+                                  child: const ColoredBox(color: Colors.transparent),
                                 ),
                               ),
                               // Right zone - skip forward (custom double-tap detection)
@@ -2060,7 +2092,7 @@ class _PlexVideoControlsState extends State<PlexVideoControls> with WindowListen
                                   onLongPressEnd: (_) => _handleLongPressEnd(),
                                   onLongPressCancel: _handleLongPressCancel,
                                   behavior: HitTestBehavior.opaque,
-                                  child: Container(color: Colors.transparent),
+                                  child: const ColoredBox(color: Colors.transparent),
                                 ),
                               ),
                             ],
@@ -2532,9 +2564,24 @@ class _PlexVideoControlsState extends State<PlexVideoControls> with WindowListen
     }
   }
 
-  Future<void> _switchMediaVersion(int newMediaIndex) async {
-    if (newMediaIndex == widget.selectedMediaIndex) {
-      return; // Already using this version
+  /// Switch version, quality preset, or audio stream ID. Any combination may
+  /// change in one invocation; unspecified values retain their current value.
+  /// Always routes through pushReplacement, preserving playback position and
+  /// the transcode session identifiers.
+  Future<void> _switchVersionAndQuality({
+    int? newMediaIndex,
+    TranscodeQualityPreset? newPreset,
+    int? newAudioStreamId,
+  }) async {
+    final effectiveMediaIndex = newMediaIndex ?? widget.selectedMediaIndex;
+    final effectivePreset = newPreset ?? widget.selectedQualityPreset;
+    final effectiveAudioStreamId = newAudioStreamId ?? widget.selectedAudioStreamId;
+
+    final isVersionChange = effectiveMediaIndex != widget.selectedMediaIndex;
+    final isPresetChange = effectivePreset != widget.selectedQualityPreset;
+    final isAudioChange = effectiveAudioStreamId != widget.selectedAudioStreamId;
+    if (!isVersionChange && !isPresetChange && !isAudioChange) {
+      return;
     }
 
     try {
@@ -2544,28 +2591,43 @@ class _PlexVideoControlsState extends State<PlexVideoControls> with WindowListen
       // Get state reference before async operations
       final videoPlayerState = context.findAncestorStateOfType<VideoPlayerScreenState>();
 
-      // Save the preference
-      final settingsService = await SettingsService.getInstance();
-      final seriesKey = widget.metadata.grandparentRatingKey ?? widget.metadata.ratingKey;
-      await settingsService.setMediaVersionPreference(seriesKey, newMediaIndex);
+      if (isVersionChange) {
+        final settingsService = await SettingsService.getInstance();
+        final seriesKey = widget.metadata.grandparentRatingKey ?? widget.metadata.ratingKey;
+        await settingsService.write(SettingsService.mediaVersionPreferences, {
+          ...settingsService.read(SettingsService.mediaVersionPreferences),
+          seriesKey: effectiveMediaIndex,
+        });
+      }
+
+      // Preserve session identifiers across the reload so Plex reuses the
+      // transcode session rather than spinning up a new one.
+      final sessionId = videoPlayerState?.playbackSessionIdentifier;
+      final transcodeSessionId = videoPlayerState?.playbackTranscodeSessionId;
 
       // Set flag on parent VideoPlayerScreen to skip orientation restoration
       videoPlayerState?.setReplacingWithVideo();
       // Dispose the existing player before spinning up the replacement to avoid race conditions
       await videoPlayerState?.disposePlayerForNavigation();
 
-      // Navigate to new player screen with the selected version
+      // Navigate to new player screen with the updated selection
       // Use PageRouteBuilder with zero-duration transitions to prevent orientation reset
       if (mounted) {
-        Navigator.pushReplacement(
-          context,
-          PageRouteBuilder<bool>(
-            pageBuilder: (context, animation, secondaryAnimation) => VideoPlayerScreen(
-              metadata: widget.metadata.copyWith(viewOffset: currentPosition.inMilliseconds),
-              selectedMediaIndex: newMediaIndex,
+        unawaited(
+          Navigator.pushReplacement(
+            context,
+            PageRouteBuilder<bool>(
+              pageBuilder: (context, animation, secondaryAnimation) => VideoPlayerScreen(
+                metadata: widget.metadata.copyWith(viewOffset: currentPosition.inMilliseconds),
+                selectedMediaIndex: effectiveMediaIndex,
+                selectedQualityPreset: effectivePreset,
+                selectedAudioStreamId: effectiveAudioStreamId,
+                reusedSessionIdentifier: sessionId,
+                reusedTranscodeSessionId: transcodeSessionId,
+              ),
+              transitionDuration: Duration.zero,
+              reverseTransitionDuration: Duration.zero,
             ),
-            transitionDuration: Duration.zero,
-            reverseTransitionDuration: Duration.zero,
           ),
         );
       }

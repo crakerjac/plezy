@@ -1,5 +1,5 @@
 import 'dart:async';
-import 'package:uuid/uuid.dart';
+import 'dart:io' show InternetAddress;
 import 'storage_service.dart';
 import 'plex_client.dart';
 import '../models/plex_user_profile.dart';
@@ -8,7 +8,6 @@ import '../models/user_switch_response.dart';
 import '../utils/app_logger.dart';
 import '../utils/connection_constants.dart';
 import '../utils/plex_http_client.dart';
-import '../utils/plex_http_exception.dart';
 
 /// Redacts the middle of an IP address or hostname for safe logging.
 /// E.g. `192.168.1.50` → `192.***.***.50`, `my.server.example.com` → `my.***.***. com`.
@@ -50,20 +49,17 @@ class PlexAuthService {
 
   PlexAuthService._(this._http, this._clientIdentifier);
 
+  /// Close the underlying HTTP client. Call when the service is short-lived
+  /// (created for a single API call) to avoid leaking sockets.
+  void dispose() => _http.close();
+
   static Future<PlexAuthService> create() async {
     final storage = await StorageService.getInstance();
     final http = PlexHttpClient(
       connectTimeout: ConnectionTimeouts.plexTvConnect,
       receiveTimeout: ConnectionTimeouts.plexTvReceive,
     );
-
-    // Get or create client identifier
-    String? clientIdentifier = storage.getClientIdentifier();
-    if (clientIdentifier == null) {
-      clientIdentifier = const Uuid().v4();
-      await storage.saveClientIdentifier(clientIdentifier);
-    }
-
+    final clientIdentifier = await storage.getOrCreateClientIdentifier();
     return PlexAuthService._(http, clientIdentifier);
   }
 
@@ -84,20 +80,14 @@ class PlexAuthService {
   }
 
   Future<PlexResponse> _getUser(String authToken) {
-    return _http.get('$_plexApiBase/user', headers: _getCommonHeaders(authToken: authToken));
+    return _http.get(
+      '$_plexApiBase/user',
+      headers: _getCommonHeaders(authToken: authToken),
+      timeout: ConnectionTimeouts.plexTvReceive,
+    );
   }
 
-  /// Throw [PlexHttpException] if the response indicates a client/server error.
-  void _checkStatus(PlexResponse response) {
-    if (response.statusCode >= 400) {
-      throw PlexHttpException(
-        type: PlexHttpErrorType.unknown,
-        statusCode: response.statusCode,
-        responseData: response.data,
-        message: 'HTTP ${response.statusCode}',
-      );
-    }
-  }
+  void _checkStatus(PlexResponse response) => throwIfHttpError(response);
 
   /// Verify if a plex.tv token is valid
   Future<bool> verifyToken(String authToken) async {
@@ -111,7 +101,11 @@ class PlexAuthService {
 
   /// Create a PIN for authentication
   Future<Map<String, dynamic>> createPin() async {
-    final response = await _http.post('$_plexApiBase/pins?strong=true', headers: _getCommonHeaders());
+    final response = await _http.post(
+      '$_plexApiBase/pins?strong=true',
+      headers: _getCommonHeaders(),
+      timeout: ConnectionTimeouts.plexTvReceive,
+    );
     _checkStatus(response);
     return response.data as Map<String, dynamic>;
   }
@@ -130,7 +124,11 @@ class PlexAuthService {
   /// Poll the PIN to check if it has been claimed
   Future<String?> checkPin(int pinId) async {
     try {
-      final response = await _http.get('$_plexApiBase/pins/$pinId', headers: _getCommonHeaders());
+      final response = await _http.get(
+        '$_plexApiBase/pins/$pinId',
+        headers: _getCommonHeaders(),
+        timeout: ConnectionTimeouts.plexTvReceive,
+      );
 
       final data = response.data as Map<String, dynamic>;
       return data['authToken'] as String?;
@@ -139,16 +137,20 @@ class PlexAuthService {
     }
   }
 
-  /// Poll the PIN until it's claimed or timeout
+  /// Poll the PIN until it's claimed or timeout.
+  ///
+  /// Uses an exponential backoff (1s → 2s → 4s, capped at 5s) so a stalled
+  /// claim doesn't hammer plex.tv every second for two minutes.
   Future<String?> pollPinUntilClaimed(
     int pinId, {
     Duration timeout = const Duration(minutes: 2),
     bool Function()? shouldCancel,
   }) async {
     final endTime = DateTime.now().add(timeout);
+    var backoff = const Duration(seconds: 1);
+    const maxBackoff = Duration(seconds: 5);
 
     while (DateTime.now().isBefore(endTime)) {
-      // Check if polling should be cancelled
       if (shouldCancel != null && shouldCancel()) {
         return null;
       }
@@ -158,8 +160,9 @@ class PlexAuthService {
         return token;
       }
 
-      // Wait 1 second before polling again
-      await Future.delayed(const Duration(seconds: 1));
+      await Future.delayed(backoff);
+      final next = backoff * 2;
+      backoff = next > maxBackoff ? maxBackoff : next;
     }
 
     return null; // Timeout
@@ -252,6 +255,9 @@ class PlexAuthService {
   }
 }
 
+/// Classification of an endpoint URL by the server's published connection type.
+enum PlexNetworkClass { local, remote, relay, unknown }
+
 /// Helper class to track connection candidates during testing
 class _ConnectionCandidate {
   final PlexConnection connection;
@@ -303,8 +309,8 @@ class PlexServer {
         final connection = PlexConnection.fromJson(c as Map<String, dynamic>);
         connections.add(connection);
 
-        // Generate HTTP fallback for HTTPS connections
-        if (connection.protocol == 'https') {
+        if (connection.protocol == 'https' &&
+            (connection.uri.contains('.plex.direct') || _isIpLiteral(connection.address))) {
           connections.add(connection.toHttpFallback());
         }
       } catch (e) {
@@ -385,7 +391,11 @@ class PlexServer {
   /// Priority: local > remote > relay, then HTTPS > HTTP, then lowest latency
   /// Tests both plex.direct URI and direct IP for each connection
   /// HTTPS connections are tested first, with HTTP as fallback
-  Stream<PlexConnection> findBestWorkingConnection({String? preferredUri, String? clientIdentifier}) async* {
+  Stream<PlexConnection> findBestWorkingConnection({
+    String? preferredUri,
+    String? clientIdentifier,
+    void Function(bool)? onTranscoderCapability,
+  }) async* {
     if (connections.isEmpty) {
       appLogger.w('No connections available for server discovery');
       return;
@@ -437,6 +447,7 @@ class PlexServer {
         if (result.success) {
           appLogger.i('Cached endpoint succeeded, using immediately', error: {'uri': preferredUri});
           firstCandidate = cachedCandidate;
+          if (result.transcoderVideo != null) onTranscoderCapability?.call(result.transcoderVideo!);
         } else {
           appLogger.w('Cached endpoint failed, falling back to candidate race', error: {'uri': preferredUri});
         }
@@ -451,35 +462,38 @@ class PlexServer {
       appLogger.d('Running connection race to find first working endpoint', error: {'candidateCount': totalCandidates});
 
       for (final candidate in candidates) {
-        PlexClient.testConnectionWithLatency(
-          candidate.url,
-          accessToken,
-          timeout: raceTimeout,
-          clientIdentifier: clientIdentifier,
-        ).then((result) {
-          completedTests++;
+        unawaited(
+          PlexClient.testConnectionWithLatency(
+            candidate.url,
+            accessToken,
+            timeout: raceTimeout,
+            clientIdentifier: clientIdentifier,
+          ).then((result) {
+            completedTests++;
 
-          if (!result.success) {
-            appLogger.w(
-              'Connection candidate failed',
-              error: {
-                'url': candidate.url,
-                'type': candidate.connection.displayType,
-                'https': candidate.isHttps,
-                'error': result.error,
-                'latencyMs': result.latencyMs,
-              },
-            );
-          }
+            if (!result.success) {
+              appLogger.w(
+                'Connection candidate failed',
+                error: {
+                  'url': candidate.url,
+                  'type': candidate.connection.displayType,
+                  'https': candidate.isHttps,
+                  'error': result.error,
+                  'latencyMs': result.latencyMs,
+                },
+              );
+            }
 
-          if (result.success && !completer.isCompleted) {
-            completer.complete(candidate);
-          }
+            if (result.success && !completer.isCompleted) {
+              if (result.transcoderVideo != null) onTranscoderCapability?.call(result.transcoderVideo!);
+              completer.complete(candidate);
+            }
 
-          if (completedTests == candidates.length && !completer.isCompleted) {
-            completer.complete(null);
-          }
-        });
+            if (completedTests == candidates.length && !completer.isCompleted) {
+              completer.complete(null);
+            }
+          }),
+        );
       }
 
       firstCandidate = await completer.future;
@@ -605,7 +619,14 @@ class PlexServer {
     return null;
   }
 
-  List<_ConnectionCandidate> _buildPrioritizedCandidates({Set<String>? excludeUrls}) {
+  /// Classify [url] against the server's published connections. Returns
+  /// [PlexNetworkClass.unknown] when the URL doesn't match any known endpoint
+  /// (e.g. a manually-entered custom URL).
+  PlexNetworkClass networkClassForUrl(String url) {
+    return _candidateForUrl(url)?.connection.networkClass ?? PlexNetworkClass.unknown;
+  }
+
+  List<_ConnectionCandidate> _buildPrioritizedCandidates({Set<String>? excludeUrls, PlexNetworkClass? restrictTo}) {
     final seen = <String>{};
     if (excludeUrls != null) {
       seen.addAll(excludeUrls);
@@ -650,26 +671,39 @@ class PlexServer {
       final isHttps = connection.protocol == 'https';
       addCandidate(connection, connection.uri, isPlexDirect, isHttps);
 
-      // For HTTPS connections, also add HTTP direct IP as fallback
-      // This provides backward compatibility and fallback for cert issues
-      if (isHttps) {
+      if (isHttps && (isPlexDirect || _isIpLiteral(connection.address))) {
         addCandidate(connection, connection.httpDirectUrl, false, false);
       }
     }
 
-    return [...httpsLocal, ...httpsRemote, ...httpsRelay, ...httpLocal, ...httpRemote, ...httpRelay];
+    final all = [...httpsLocal, ...httpsRemote, ...httpsRelay, ...httpLocal, ...httpRemote, ...httpRelay];
+
+    // Failover reachability filter. After discovery, failover should stay within
+    // endpoint families plausible for the current session: when a remote or relay
+    // endpoint is what's working, LAN-only endpoints are unreachable from off-LAN
+    // clients and only pollute the retry chain (see GH #902). Reconnect /
+    // reoptimization widens the search again via _reoptimizeServer. Local is kept
+    // conservative — it may still be reachable over VPN/routed-LAN, but those
+    // setups re-widen on the next connectivity event.
+    if (restrictTo == PlexNetworkClass.remote || restrictTo == PlexNetworkClass.relay) {
+      final filtered = all.where((c) => c.connection.networkClass != PlexNetworkClass.local).toList();
+      if (filtered.isNotEmpty) return filtered;
+    }
+    return all;
   }
 
   List<String> prioritizedEndpointUrls({String? preferredFirst}) {
     final urls = <String>[];
     final exclude = <String>{};
+    PlexNetworkClass? restrictTo;
 
     if (preferredFirst != null && preferredFirst.isNotEmpty) {
       urls.add(preferredFirst);
       exclude.add(preferredFirst);
+      restrictTo = networkClassForUrl(preferredFirst);
     }
 
-    final candidates = _buildPrioritizedCandidates(excludeUrls: exclude);
+    final candidates = _buildPrioritizedCandidates(excludeUrls: exclude, restrictTo: restrictTo);
     urls.addAll(candidates.map((candidate) => candidate.url));
     return urls;
   }
@@ -829,6 +863,13 @@ class PlexServer {
     return entries.first.key;
   }
 
+  /// True when the address is a raw IP (no hostname → no reverse proxy → HTTP
+  /// fallback on an HTTPS port is safe to try).
+  static bool _isIpLiteral(String address) {
+    final bare = address.startsWith('[') && address.endsWith(']') ? address.substring(1, address.length - 1) : address;
+    return InternetAddress.tryParse(bare) != null;
+  }
+
   /// Returns true if the address is known to be unreachable from external
   /// clients (IPv6 link-local or all-zeros).
   static bool _isUnreachableAddress(String address) {
@@ -934,6 +975,12 @@ class PlexConnection {
     if (relay) return 'Relay';
     if (local) return 'Local';
     return 'Remote';
+  }
+
+  PlexNetworkClass get networkClass {
+    if (relay) return PlexNetworkClass.relay;
+    if (local) return PlexNetworkClass.local;
+    return PlexNetworkClass.remote;
   }
 
   /// Create an HTTP fallback version of this HTTPS connection

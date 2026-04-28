@@ -242,7 +242,9 @@ class WatchTogetherPeerService with KeepaliveMixin {
     appLogger.w('WatchTogether: Pong timeout — closing WebSocket');
     try {
       _channel?.sink.close();
-    } catch (_) {}
+    } catch (e) {
+      appLogger.d('WatchTogether: pong-timeout close ignored', error: e);
+    }
   }
 
   /// Send a raw JSON map to the relay.
@@ -430,12 +432,14 @@ class WatchTogetherPeerService with KeepaliveMixin {
     _reconnectTimer = null;
     stopKeepalive();
 
-    _channelSubscription?.cancel();
+    unawaited(_channelSubscription?.cancel());
     _channelSubscription = null;
 
     try {
       await _channel?.sink.close();
-    } catch (_) {}
+    } catch (e) {
+      appLogger.d('WatchTogether: channel close ignored', error: e);
+    }
     _channel = null;
 
     _connectedPeers.clear();

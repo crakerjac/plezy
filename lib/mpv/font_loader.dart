@@ -1,8 +1,9 @@
 import 'dart:io';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:path/path.dart' as path;
 import 'package:path_provider/path_provider.dart';
+
+import '../utils/app_logger.dart';
 
 /// Utility class for loading font assets for libass subtitle rendering.
 ///
@@ -12,9 +13,19 @@ class SubtitleFontLoader {
   static const String _fontAssetPath = 'assets/go-noto-current-regular.ttf';
   static const String _fontName = 'Go Noto Current-Regular';
 
+  /// In-memory cache of the resolved font directory. The filesystem work
+  /// (temp dir lookup, existence checks, asset extraction) is idempotent per
+  /// process — caching the result skips ~20ms on every subsequent Player
+  /// instantiation.
+  static Future<String?>? _cachedFontDir;
+
   /// Loads the subtitle font from assets to the cache directory.
   /// Returns the directory path containing the font file.
-  static Future<String?> loadSubtitleFont() async {
+  static Future<String?> loadSubtitleFont() {
+    return _cachedFontDir ??= _loadSubtitleFontOnce();
+  }
+
+  static Future<String?> _loadSubtitleFontOnce() async {
     try {
       // Get the app's cache directory
       final cacheDir = await getTemporaryDirectory();
@@ -34,11 +45,9 @@ class SubtitleFontLoader {
       }
 
       return fontDir.path;
-    } catch (e) {
+    } catch (e, st) {
       // Return null if font loading fails - libass will fall back gracefully
-      if (kDebugMode) {
-        debugPrint('Failed to load subtitle font: $e');
-      }
+      appLogger.w('Failed to load subtitle font', error: e, stackTrace: st);
       return null;
     }
   }

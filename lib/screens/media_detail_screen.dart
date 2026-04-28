@@ -3,6 +3,8 @@ import 'dart:io';
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+
+import '../services/image_cache_service.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:flutter/services.dart';
 import 'package:plezy/utils/platform_detector.dart';
@@ -321,7 +323,7 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
         });
         // Re-fetch episodes for the currently selected season
         if (!_showEpisodesDirectly && _seasons.isNotEmpty) {
-          _fetchSeasonEpisodes(_selectedSeasonIndex);
+          unawaited(_fetchSeasonEpisodes(_selectedSeasonIndex));
         }
       } else if (widget.metadata.isSeason) {
         await _fetchAllEpisodes();
@@ -346,8 +348,8 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
           }
         });
       }
-    } catch (_) {
-      // Silently fail
+    } catch (e) {
+      appLogger.d('Episode cache sync skipped', error: e);
     }
   }
 
@@ -411,6 +413,7 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
   /// Build radial progress indicator for download button
   /// If progressPercent is null or 0, shows indeterminate spinner
   Widget _buildRadialProgress(double? progressPercent) {
+    final colorScheme = Theme.of(context).colorScheme;
     return SizedBox(
       width: 20,
       height: 20,
@@ -422,13 +425,13 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
             CircularProgressIndicator(
               value: 1.0,
               strokeWidth: 2.0,
-              valueColor: AlwaysStoppedAnimation<Color>(Theme.of(context).colorScheme.primary.withValues(alpha: 0.2)),
+              valueColor: AlwaysStoppedAnimation<Color>(colorScheme.primary.withValues(alpha: 0.2)),
             ),
           // Progress circle (indeterminate if no progress, determinate otherwise)
           CircularProgressIndicator(
             value: (progressPercent != null && progressPercent > 0) ? progressPercent : null, // null = indeterminate
             strokeWidth: 2.0,
-            valueColor: AlwaysStoppedAnimation<Color>(Theme.of(context).colorScheme.primary),
+            valueColor: AlwaysStoppedAnimation<Color>(colorScheme.primary),
           ),
         ],
       ),
@@ -576,8 +579,9 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
             ),
             const SizedBox(width: 12),
           ],
-          // Download button (hide in offline mode - already downloaded)
-          if (!widget.isOffline)
+          // Download button (hide in offline mode - already downloaded,
+          // and on Apple TV where there's no user file storage).
+          if (!widget.isOffline && !PlatformDetector.isAppleTV())
             Consumer<DownloadProvider>(
               builder: (context, downloadProvider, _) {
                 final globalKey = metadata.globalKey;
@@ -605,8 +609,8 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
                 if (progress?.status == DownloadStatus.queued) {
                   final currentFile = progress?.currentFile;
                   final tooltip = currentFile != null && currentFile.contains('episodes')
-                      ? 'Queued $currentFile'
-                      : 'Queued';
+                      ? t.downloads.queuedFilesTooltip(files: currentFile)
+                      : t.downloads.queuedTooltip;
 
                   return IconButton.filledTonal(
                     onPressed: null,
@@ -622,8 +626,8 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
                   // Show episode count in tooltip for shows/seasons
                   final currentFile = progress?.currentFile;
                   final tooltip = currentFile != null && currentFile.contains('episodes')
-                      ? 'Downloading $currentFile'
-                      : 'Downloading...';
+                      ? t.downloads.downloadingFilesTooltip(files: currentFile)
+                      : t.downloads.downloadingTooltip;
 
                   return IconButton.filledTonal(
                     onPressed: null,
@@ -869,8 +873,8 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
                       context,
                       isWatched ? t.messages.markedAsUnwatchedOffline : t.messages.markedAsWatchedOffline,
                     );
-                    _updateWatchStateOffline();
-                    _loadOfflineOnDeckEpisode();
+                    unawaited(_updateWatchStateOffline());
+                    unawaited(_loadOfflineOnDeckEpisode());
                   }
                 } else {
                   // Online mode: send to server
@@ -928,13 +932,10 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
 
   /// Build a metadata chip with optional leading icon or widget
   Widget _buildMetadataChip(String text, {IconData? icon, Widget? leading}) {
+    final colorScheme = Theme.of(context).colorScheme;
     final textWidget = Text(
       text,
-      style: TextStyle(
-        color: Theme.of(context).colorScheme.onSecondaryContainer,
-        fontSize: 13,
-        fontWeight: FontWeight.w500,
-      ),
+      style: TextStyle(color: colorScheme.onSecondaryContainer, fontSize: 13, fontWeight: FontWeight.w500),
     );
 
     final hasLeading = leading != null || icon != null;
@@ -942,7 +943,7 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.secondaryContainer.withValues(alpha: 0.8),
+        color: colorScheme.secondaryContainer.withValues(alpha: 0.8),
         borderRadius: const BorderRadius.all(Radius.circular(100)),
       ),
       child: hasLeading
@@ -952,7 +953,7 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
                 if (leading != null)
                   leading
                 else
-                  AppIcon(icon!, fill: 1, color: Theme.of(context).colorScheme.onSecondaryContainer, size: 16),
+                  AppIcon(icon!, fill: 1, color: colorScheme.onSecondaryContainer, size: 16),
                 const SizedBox(width: 4),
                 textWidget,
               ],
@@ -1092,16 +1093,13 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
 
   /// Build a combined RT chip showing critic + audience side by side.
   Widget _buildCombinedRtChip(RatingInfo critic, RatingInfo audience) {
-    final textStyle = TextStyle(
-      color: Theme.of(context).colorScheme.onSecondaryContainer,
-      fontSize: 13,
-      fontWeight: FontWeight.w500,
-    );
+    final colorScheme = Theme.of(context).colorScheme;
+    final textStyle = TextStyle(color: colorScheme.onSecondaryContainer, fontSize: 13, fontWeight: FontWeight.w500);
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.secondaryContainer.withValues(alpha: 0.8),
+        color: colorScheme.secondaryContainer.withValues(alpha: 0.8),
         borderRadius: const BorderRadius.all(Radius.circular(100)),
       ),
       child: Row(
@@ -1234,7 +1232,7 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
       if (widget.metadata.isShow) {
         _loadSeasonsFromDownloads();
         // Get offline OnDeck episode
-        _loadOfflineOnDeckEpisode();
+        unawaited(_loadOfflineOnDeckEpisode());
       } else if (widget.metadata.isSeason) {
         _seasons = [widget.metadata];
         _showEpisodesDirectly = true;
@@ -1283,16 +1281,16 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
 
         // Load seasons if it's a show
         if (metadata.isShow) {
-          _loadSeasons();
+          unawaited(_loadSeasons());
         } else if (metadata.isSeason) {
           _seasons = [widget.metadata];
           _showEpisodesDirectly = true;
-          _fetchAllEpisodes();
+          unawaited(_fetchAllEpisodes());
         }
 
         // Load extras (trailers, behind-the-scenes, etc.)
-        _loadExtras();
-        _loadRelatedHubs();
+        unawaited(_loadExtras());
+        unawaited(_loadRelatedHubs());
 
         return;
       }
@@ -1304,11 +1302,11 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
       });
 
       if (widget.metadata.isShow) {
-        _loadSeasons();
+        unawaited(_loadSeasons());
       } else if (widget.metadata.isSeason) {
         _seasons = [widget.metadata];
         _showEpisodesDirectly = true;
-        _fetchAllEpisodes();
+        unawaited(_fetchAllEpisodes());
       }
     } catch (e) {
       // Fallback to passed metadata on error
@@ -1319,11 +1317,11 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
       });
 
       if (widget.metadata.isShow) {
-        _loadSeasons();
+        unawaited(_loadSeasons());
       } else if (widget.metadata.isSeason) {
         _seasons = [widget.metadata];
         _showEpisodesDirectly = true;
-        _fetchAllEpisodes();
+        unawaited(_fetchAllEpisodes());
       }
     }
   }
@@ -1380,7 +1378,7 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
         await _fetchAllEpisodes();
       } else if (seasonsWithServerId.isNotEmpty) {
         // Fetch episodes for the auto-selected season
-        _fetchSeasonEpisodes(onDeckSeasonIndex);
+        unawaited(_fetchSeasonEpisodes(onDeckSeasonIndex));
       }
     } catch (e) {
       setStateIfMounted(() {
@@ -1719,7 +1717,7 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
   /// Uses the shared grid size calculator for consistency with library grids.
   double _getResponsiveCardWidth() {
     final density = context.read<SettingsProvider>().libraryDensity;
-    final availableWidth = MediaQuery.of(context).size.width;
+    final availableWidth = MediaQuery.sizeOf(context).width;
     return GridSizeCalculator.getCellWidth(availableWidth, context, density);
   }
 
@@ -1788,6 +1786,7 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
 
   /// Build inline season tab chips with LEFT/RIGHT/DOWN focus navigation
   Widget _buildSeasonTabs() {
+    final showPosters = context.select<SettingsProvider, bool>((p) => p.showSeasonPostersOnTabs);
     return HorizontalScrollWithArrows(
       controller: _seasonTabsScrollController,
       builder: (scrollController) => SingleChildScrollView(
@@ -1798,6 +1797,39 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
             final season = _seasons[index];
             final contextMenuKey = _seasonContextMenuKeys.putIfAbsent(index, () => GlobalKey<MediaContextMenuState>());
             Offset? tapPosition;
+            final posterPath = season.thumb;
+            Widget? topImage;
+            if (showPosters && posterPath != null && posterPath.isNotEmpty) {
+              const posterWidth = 72.0;
+              const posterHeight = 108.0;
+              final dpr = PlexImageHelper.effectiveDevicePixelRatio(context);
+              final client = _getClientForMetadata(context);
+              final imageUrl = PlexImageHelper.getOptimizedImageUrl(
+                client: client,
+                thumbPath: posterPath,
+                maxWidth: posterWidth,
+                maxHeight: posterHeight,
+                devicePixelRatio: dpr,
+                imageType: ImageType.poster,
+              );
+              final (memWidth, _) = PlexImageHelper.getMemCacheDimensions(
+                displayWidth: (posterWidth * dpr).round(),
+                displayHeight: (posterHeight * dpr).round(),
+                imageType: ImageType.poster,
+              );
+              topImage = SizedBox(
+                width: posterWidth,
+                height: posterHeight,
+                child: CachedNetworkImage(
+                  imageUrl: imageUrl,
+                  cacheManager: PlexImageCacheManager.instance,
+                  fit: BoxFit.cover,
+                  memCacheWidth: memWidth,
+                  placeholder: (context, url) => const PlaceholderContainer(),
+                  errorWidget: (context, url, error) => const PlaceholderContainer(),
+                ),
+              );
+            }
             return Padding(
               padding: const EdgeInsets.only(right: 8),
               child: MediaContextMenu(
@@ -1821,6 +1853,7 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
                   child: FocusableTabChip(
                     label: season.title!,
                     isSelected: index == _selectedSeasonIndex,
+                    topImage: topImage,
                     focusNode: _seasonTabFocusNodes.length > index ? _seasonTabFocusNodes[index] : null,
                     onSelect: () {
                       if (index == _selectedSeasonIndex) return;
@@ -2179,7 +2212,8 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
         _episodes = episodeLists.expand((e) => e).toList();
         _isLoadingEpisodes = false;
       });
-    } catch (_) {
+    } catch (e, st) {
+      appLogger.w('Failed to load episodes for all seasons', error: e, stackTrace: st);
       setStateIfMounted(() => _isLoadingEpisodes = false);
     }
   }
@@ -2323,13 +2357,8 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
     final playbackState = context.read<PlaybackStateProvider>();
 
     try {
-      // Show loading indicator
       if (context.mounted) {
-        showDialog(
-          context: context,
-          barrierDismissible: false,
-          builder: (context) => const Center(child: CircularProgressIndicator()),
-        );
+        showLoadingDialog(context);
       }
 
       // Determine the rating key for the play queue
@@ -2377,7 +2406,7 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
       if (context.mounted) {
         await navigateToVideoPlayer(context, metadata: firstEpisode);
         // Refresh metadata when returning from video player
-        _loadFullMetadata();
+        unawaited(_loadFullMetadata());
       }
     } catch (e) {
       // Close loading indicator if it's still open
@@ -2398,6 +2427,7 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
     final isShow = metadata.isShow;
     final isMobile = PlatformDetector.isMobile(context);
     final isTv = PlatformDetector.isTV();
+    final theme = Theme.of(context);
 
     KeyEventResult handleBack(FocusNode _, KeyEvent event) =>
         handleBackKeyNavigation(context, event, result: _watchStateChanged);
@@ -2424,7 +2454,7 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
     }
 
     // Determine header height based on screen size
-    final size = MediaQuery.of(context).size;
+    final size = MediaQuery.sizeOf(context);
     final headerHeight = size.height * 0.6;
 
     final content = OverlaySheetHost(
@@ -2472,21 +2502,28 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
 
                                     // Online - use network image
                                     final client = _getClientForMetadata(context);
-                                    final mediaQuery = MediaQuery.of(context);
+                                    final mqSize = MediaQuery.sizeOf(context);
                                     final dpr = PlexImageHelper.effectiveDevicePixelRatio(context);
                                     final imageUrl = PlexImageHelper.getOptimizedImageUrl(
                                       client: client,
                                       thumbPath: heroArtPath,
-                                      maxWidth: mediaQuery.size.width,
-                                      maxHeight: mediaQuery.size.height * 0.6,
+                                      maxWidth: mqSize.width,
+                                      maxHeight: mqSize.height * 0.6,
                                       devicePixelRatio: dpr,
                                       imageType: ImageType.art,
                                     );
 
+                                    final (_, memHeight) = PlexImageHelper.getMemCacheDimensions(
+                                      displayWidth: (mqSize.width * dpr).round(),
+                                      displayHeight: (mqSize.height * 0.6 * dpr).round(),
+                                      imageType: ImageType.art,
+                                    );
                                     return blurArtwork(
                                       CachedNetworkImage(
                                         imageUrl: imageUrl,
+                                        cacheManager: PlexImageCacheManager.instance,
                                         fit: BoxFit.cover,
+                                        memCacheHeight: memHeight,
                                         placeholder: (context, url) => const PlaceholderContainer(),
                                         errorWidget: (context, url, error) => const PlaceholderContainer(),
                                       ),
@@ -2575,6 +2612,7 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
                                           return blurArtwork(
                                             CachedNetworkImage(
                                               imageUrl: logoUrl,
+                                              cacheManager: PlexImageCacheManager.instance,
                                               filterQuality: FilterQuality.medium,
                                               fit: BoxFit.contain,
                                               alignment: Alignment.centerLeft,
@@ -2607,7 +2645,7 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
                                   else
                                     Text(
                                       metadata.displayTitle,
-                                      style: Theme.of(context).textTheme.displaySmall?.copyWith(
+                                      style: theme.textTheme.displaySmall?.copyWith(
                                         color: Colors.white,
                                         fontWeight: FontWeight.bold,
                                         shadows: [Shadow(color: Colors.black.withValues(alpha: 0.5), blurRadius: 8)],
@@ -2655,7 +2693,7 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
                             Text(
                               key: _overviewSectionKey,
                               t.discover.overview,
-                              style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
+                              style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
                             ),
                             const SizedBox(height: 12),
                             Focus(
@@ -2664,6 +2702,7 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
                               onFocusChange: (_) => setState(() {}),
                               child: Builder(
                                 builder: (context) {
+                                  final innerTheme = Theme.of(context);
                                   final showFocus =
                                       _overviewFocusNode.hasFocus && InputModeTracker.isKeyboardMode(context);
                                   return AnimatedContainer(
@@ -2673,13 +2712,13 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
                                       borderRadius: const BorderRadius.all(Radius.circular(8)),
                                       border: Border.all(
                                         color: showFocus
-                                            ? Theme.of(context).colorScheme.primary.withValues(alpha: 0.5)
+                                            ? innerTheme.colorScheme.primary.withValues(alpha: 0.5)
                                             : Colors.transparent,
                                         width: 2,
                                       ),
                                     ),
                                     child: () {
-                                      final summaryStyle = Theme.of(context).textTheme.bodyLarge?.copyWith(height: 1.6);
+                                      final summaryStyle = innerTheme.textTheme.bodyLarge?.copyWith(height: 1.6);
                                       if (isTv) {
                                         return Text(metadata.summary!, style: summaryStyle);
                                       }
@@ -2709,7 +2748,7 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
                                 child: Center(
                                   child: Text(
                                     t.messages.noSeasonsFound,
-                                    style: Theme.of(context).textTheme.bodyLarge?.copyWith(color: Colors.grey),
+                                    style: theme.textTheme.bodyLarge?.copyWith(color: Colors.grey),
                                   ),
                                 ),
                               )
@@ -2717,7 +2756,7 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
                               Text(
                                 key: _seasonsSectionKey,
                                 t.libraries.groupings.episodes,
-                                style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
+                                style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
                               ),
                               const SizedBox(height: 12),
                               _buildSeasonTabs(),
@@ -2734,7 +2773,7 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
                                   child: Center(
                                     child: Text(
                                       t.messages.noEpisodesFoundGeneral,
-                                      style: Theme.of(context).textTheme.bodyLarge?.copyWith(color: Colors.grey),
+                                      style: theme.textTheme.bodyLarge?.copyWith(color: Colors.grey),
                                     ),
                                   ),
                                 ),
@@ -2745,7 +2784,7 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
                             Text(
                               key: _seasonsSectionKey,
                               t.libraries.groupings.episodes,
-                              style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
+                              style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
                             ),
                             const SizedBox(height: 12),
                             if (_isLoadingSeasons || _isLoadingEpisodes)
@@ -2760,7 +2799,7 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
                                 child: Center(
                                   child: Text(
                                     t.messages.noEpisodesFoundGeneral,
-                                    style: Theme.of(context).textTheme.bodyLarge?.copyWith(color: Colors.grey),
+                                    style: theme.textTheme.bodyLarge?.copyWith(color: Colors.grey),
                                   ),
                                 ),
                               ),
@@ -2772,7 +2811,7 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
                             Text(
                               key: _castSectionKey,
                               t.discover.cast,
-                              style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
+                              style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
                             ),
                             const SizedBox(height: 12),
                             _buildCastSection(metadata),
@@ -2784,7 +2823,7 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
                             Text(
                               key: _extrasSectionKey,
                               t.discover.extras,
-                              style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
+                              style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
                             ),
                             const SizedBox(height: 12),
                             _buildExtrasSection(),
@@ -2828,7 +2867,7 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
                       ),
                     ),
                   ),
-                  SliverPadding(padding: EdgeInsets.only(bottom: MediaQuery.of(context).padding.bottom)),
+                  SliverPadding(padding: EdgeInsets.only(bottom: MediaQuery.paddingOf(context).bottom)),
                 ],
               ),
               // Sticky top bar with fading background
@@ -2847,15 +2886,15 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
                     ),
                   ),
                   child: Container(
-                    height: MediaQuery.of(context).padding.top + 58,
+                    height: MediaQuery.paddingOf(context).top + 58,
                     decoration: BoxDecoration(
                       gradient: LinearGradient(
                         begin: Alignment.topCenter,
                         end: Alignment.bottomCenter,
                         colors: [
-                          Theme.of(context).scaffoldBackgroundColor.withValues(alpha: 0.8),
-                          Theme.of(context).scaffoldBackgroundColor.withValues(alpha: 0.5),
-                          Theme.of(context).scaffoldBackgroundColor.withValues(alpha: 0),
+                          theme.scaffoldBackgroundColor.withValues(alpha: 0.8),
+                          theme.scaffoldBackgroundColor.withValues(alpha: 0.5),
+                          theme.scaffoldBackgroundColor.withValues(alpha: 0),
                         ],
                         stops: const [0.0, 0.3, 1.0],
                       ),
@@ -2929,6 +2968,9 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
     final containerHeight = imageSize + innerPadding * 2 + 66 + 16;
 
     final hasFocus = _castFocusNode.hasFocus;
+    final theme = Theme.of(context);
+    final actorNameStyle = theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600);
+    final actorRoleStyle = theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant);
 
     return Focus(
       focusNode: _castFocusNode,
@@ -2979,19 +3021,12 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text(
-                                  actor.tag,
-                                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600),
-                                  maxLines: 2,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
+                                Text(actor.tag, style: actorNameStyle, maxLines: 2, overflow: TextOverflow.ellipsis),
                                 if (actor.role != null) ...[
                                   const SizedBox(height: 2),
                                   Text(
                                     actor.role!,
-                                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                                    ),
+                                    style: actorRoleStyle,
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
                                   ),
@@ -3061,6 +3096,7 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
   }
 
   Widget _buildInfoRow(String label, String value) {
+    final theme = Theme.of(context);
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -3068,10 +3104,10 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
           width: 120,
           child: Text(
             label,
-            style: TextStyle(fontWeight: FontWeight.w600, color: Theme.of(context).colorScheme.onSurfaceVariant),
+            style: TextStyle(fontWeight: FontWeight.w600, color: theme.colorScheme.onSurfaceVariant),
           ),
         ),
-        Expanded(child: Text(value, style: Theme.of(context).textTheme.bodyLarge)),
+        Expanded(child: Text(value, style: theme.textTheme.bodyLarge)),
       ],
     );
   }

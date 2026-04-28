@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 import 'package:crypto/crypto.dart';
+import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as path;
 
@@ -9,10 +10,30 @@ import '../utils/app_logger.dart';
 import '../utils/formatters.dart';
 import 'settings_service.dart';
 
+/// Thrown when the downloads storage layer cannot create or access a directory
+/// (permission denied, quota exceeded, SAF permission revoked, etc.).
+class DownloadStorageException implements Exception {
+  final String message;
+  final String path;
+  final Object cause;
+
+  DownloadStorageException(this.message, this.path, this.cause);
+
+  @override
+  String toString() => 'DownloadStorageException: $message (path: $path, cause: $cause)';
+}
+
 class DownloadStorageService {
   static DownloadStorageService? _instance;
   static DownloadStorageService get instance => _instance ??= DownloadStorageService._();
   DownloadStorageService._();
+
+  /// Drop the cached singleton so the next [instance] call returns a fresh
+  /// service. Test-only.
+  @visibleForTesting
+  static void resetForTesting() {
+    _instance = null;
+  }
 
   Directory? _baseDownloadsDir;
   String? _artworkDirectoryPath;
@@ -34,8 +55,8 @@ class DownloadStorageService {
   /// Initialize with settings service (call during app startup)
   Future<void> initialize(SettingsService settingsService) async {
     _settingsService = settingsService;
-    _customDownloadPath = settingsService.getCustomDownloadPath();
-    _customPathType = settingsService.getCustomDownloadPathType();
+    _customDownloadPath = settingsService.read(SettingsService.customDownloadPath);
+    _customPathType = settingsService.read(SettingsService.customDownloadPathType) ?? 'file';
     // Reset cached directories to force recalculation
     _baseDownloadsDir = null;
     _artworkDirectoryPath = null;
@@ -47,8 +68,8 @@ class DownloadStorageService {
   /// Refresh custom path from settings (call when settings change)
   Future<void> refreshCustomPath() async {
     if (_settingsService != null) {
-      _customDownloadPath = _settingsService!.getCustomDownloadPath();
-      _customPathType = _settingsService!.getCustomDownloadPathType();
+      _customDownloadPath = _settingsService!.read(SettingsService.customDownloadPath);
+      _customPathType = _settingsService!.read(SettingsService.customDownloadPathType) ?? 'file';
       _baseDownloadsDir = null;
       _artworkDirectoryPath = null;
       await getArtworkDirectory();
@@ -219,12 +240,17 @@ class DownloadStorageService {
         .trim();
   }
 
-  /// Ensure a directory exists, creating it if necessary
+  /// Ensure a directory exists, creating it if necessary.
+  /// `Directory.create(recursive: true)` is idempotent — it no-ops if the
+  /// directory already exists.
   Future<Directory> _ensureDirectoryExists(Directory dir) async {
-    if (!await dir.exists()) {
+    try {
       await dir.create(recursive: true);
+      return dir;
+    } catch (e, st) {
+      appLogger.e('Failed to ensure directory exists: ${dir.path}', error: e, stackTrace: st);
+      throw DownloadStorageException('Cannot create directory', dir.path, e);
     }
-    return dir;
   }
 
   /// Format a media title with optional year: "Title (YYYY)" or "Title"
@@ -387,10 +413,12 @@ class DownloadStorageService {
       // Recover from doubled app base path corruption:
       // /data/.../app_flutter/data/.../app_flutter/downloads/...
       final firstBaseIndex = storedPath.indexOf(baseDir.path);
-      final secondBaseIndex = storedPath.indexOf(baseDir.path, firstBaseIndex + baseDir.path.length);
-      if (firstBaseIndex != -1 && secondBaseIndex != -1) {
-        final tail = trimLeadingSeparators(storedPath.substring(secondBaseIndex + baseDir.path.length));
-        addCandidate(path.join(baseDir.path, tail));
+      if (firstBaseIndex != -1) {
+        final secondBaseIndex = storedPath.indexOf(baseDir.path, firstBaseIndex + baseDir.path.length);
+        if (secondBaseIndex != -1) {
+          final tail = trimLeadingSeparators(storedPath.substring(secondBaseIndex + baseDir.path.length));
+          addCandidate(path.join(baseDir.path, tail));
+        }
       }
 
       // Recover from paths that contain downloads/ but wrong prefix.
@@ -444,6 +472,19 @@ class DownloadStorageService {
     return ['TV Shows', showFolder, 'Season $seasonNum'];
   }
 
+  /// Get SAF path components for a show directory: ['TV Shows', {showFolder}]
+  List<String> getShowSafPathComponents(PlexMetadata metadata, {int? showYear}) {
+    return ['TV Shows', _getShowFolderName(metadata, showYear: showYear)];
+  }
+
+  /// Get SAF path components for a season directory when called with season metadata:
+  /// ['TV Shows', {showFolder}, 'Season XX']. Uses season.index for the season number.
+  List<String> getSeasonSafPathComponents(PlexMetadata season, {int? showYear}) {
+    final showFolder = _getShowFolderName(season, showYear: showYear);
+    final seasonNum = padNumber(season.index ?? 0, 2);
+    return ['TV Shows', showFolder, 'Season $seasonNum'];
+  }
+
   /// Get SAF file name for a movie
   String getMovieSafFileName(PlexMetadata movie, String extension) {
     return '${_getMovieFolderName(movie)}.$extension';
@@ -454,6 +495,9 @@ class DownloadStorageService {
     final fileName = _formatEpisodeFileName(episode);
     return '$fileName.$extension';
   }
+
+  /// Get the extension-less episode filename used for SAF lookups.
+  String getEpisodeSafBaseName(PlexMetadata episode) => _formatEpisodeFileName(episode);
 
   /// Check if a path is a SAF content URI
   bool isSafUri(String storedPath) {

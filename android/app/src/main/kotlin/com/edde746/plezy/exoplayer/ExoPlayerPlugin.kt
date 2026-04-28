@@ -140,6 +140,7 @@ class ExoPlayerPlugin : FlutterPlugin, MethodChannel.MethodCallHandler,
                 result.success(am?.largeMemoryClass ?: 0)
             }
             "setSubtitleStyle" -> handleSetSubtitleStyle(call, result)
+            "setBoxFitMode" -> handleSetBoxFitMode(call, result)
             "observeProperty" -> handleObserveProperty(call, result)
             "setMpvProperty" -> handleSetMpvProperty(call, result)
             "setLogLevel" -> {
@@ -433,14 +434,19 @@ class ExoPlayerPlugin : FlutterPlugin, MethodChannel.MethodCallHandler,
     private fun handleSetVideoFrameRate(call: MethodCall, result: MethodChannel.Result) {
         val fps = call.argument<Double>("fps")?.toFloat() ?: 0f
         val duration = call.argument<Number>("duration")?.toLong() ?: 0L
+        val extraDelayMs = call.argument<Number>("extraDelayMs")?.toLong() ?: 0L
 
-        Log.d(TAG, "setVideoFrameRate: fps=$fps, duration=$duration")
+        Log.d(TAG, "setVideoFrameRate: fps=$fps, duration=$duration, extraDelayMs=$extraDelayMs")
+        val onComplete: (Boolean) -> Unit = { switched -> result.success(switched) }
         if (usingMpvFallback) {
-            mpvCore?.setVideoFrameRate(fps, duration)
+            val core = mpvCore
+            if (core == null) result.success(false)
+            else core.setVideoFrameRate(fps, duration, extraDelayMs, onComplete)
         } else {
-            playerCore?.setVideoFrameRate(fps, duration)
+            val core = playerCore
+            if (core == null) result.success(false)
+            else core.setVideoFrameRate(fps, duration, extraDelayMs, onComplete)
         }
-        result.success(null)
     }
 
     private fun handleClearVideoFrameRate(result: MethodChannel.Result) {
@@ -505,6 +511,25 @@ class ExoPlayerPlugin : FlutterPlugin, MethodChannel.MethodCallHandler,
 
         playerCore?.setSubtitleStyle(fontSize, textColor, borderSize, borderColor, bgColor, bgOpacity, subtitlePosition, bold, italic)
         result.success(null)
+    }
+
+    private fun handleSetBoxFitMode(call: MethodCall, result: MethodChannel.Result) {
+        val mode = call.argument<Number>("mode")?.toInt()
+        if (mode == null) {
+            result.error("INVALID_ARGS", "Missing 'mode'", null)
+            return
+        }
+        // The MPV-property side (panscan / sub-ass-force-margins / video-aspect-override)
+        // is driven from Dart via setProperty and routed through setMpvProperty, which
+        // already handles both the fallback and pendingMpvProperties cases.
+        if (usingMpvFallback) {
+            result.success(null)
+            return
+        }
+        activity?.runOnUiThread {
+            playerCore?.setBoxFitMode(mode)
+            result.success(null)
+        } ?: result.success(null)
     }
 
     private fun handleSetMpvProperty(call: MethodCall, result: MethodChannel.Result) {

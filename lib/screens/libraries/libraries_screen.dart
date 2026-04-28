@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:plezy/widgets/app_icon.dart';
@@ -6,7 +8,6 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../../focus/focus_theme.dart';
 import '../../focus/focusable_action_bar.dart';
-import '../../focus/focusable_button.dart';
 import '../../focus/dpad_navigator.dart';
 import '../../focus/input_mode_tracker.dart';
 import '../../focus/key_event_utils.dart';
@@ -18,6 +19,7 @@ import '../../providers/hidden_libraries_provider.dart';
 import '../../providers/libraries_provider.dart';
 import '../../providers/multi_server_provider.dart';
 import '../../utils/app_logger.dart';
+import '../../utils/dialogs.dart';
 import '../../utils/platform_detector.dart';
 import '../../utils/provider_extensions.dart';
 import '../../utils/snackbar_helper.dart';
@@ -132,6 +134,7 @@ class _LibrariesScreenState extends State<LibrariesScreen>
 
     // Initialize with libraries from the provider
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
       _initializeWithLibraries();
     });
   }
@@ -173,7 +176,7 @@ class _LibrariesScreenState extends State<LibrariesScreen>
     }
 
     if (libraryGlobalKeyToLoad != null && mounted) {
-      _loadLibraryContent(libraryGlobalKeyToLoad);
+      unawaited(_loadLibraryContent(libraryGlobalKeyToLoad));
     }
   }
 
@@ -423,22 +426,16 @@ class _LibrariesScreenState extends State<LibrariesScreen>
   }
 
   Future<void> _loadLibraryContent(String libraryGlobalKey) async {
-    // Get libraries from provider
     final librariesProvider = context.read<LibrariesProvider>();
     final allLibraries = librariesProvider.libraries;
 
-    // Compute visible libraries based on current provider state
-    final hiddenLibrariesProvider = Provider.of<HiddenLibrariesProvider>(context, listen: false);
-    final hiddenKeys = hiddenLibrariesProvider.hiddenLibraryKeys;
-    final visibleLibraries = allLibraries.where((lib) => !hiddenKeys.contains(lib.globalKey)).toList();
-
-    // Find the library by key
-    final libraryIndex = visibleLibraries.indexWhere((lib) => lib.globalKey == libraryGlobalKey);
-    if (libraryIndex == -1) return; // Library not found or hidden
+    // Resolve from allLibraries — hidden libraries are still navigable from the
+    // sidebar's "Hidden libraries" section.
+    final selectedLibrary = allLibraries.where((lib) => lib.globalKey == libraryGlobalKey).firstOrNull;
+    if (selectedLibrary == null) return;
 
     // Update visible tabs and state in the same synchronous block so no
     // intermediate rebuild can see a mismatched controller/key pair.
-    final selectedLibrary = visibleLibraries[libraryIndex];
     _updateVisibleTabs(_getVisibleTabs(selectedLibrary));
 
     _updateState(() {
@@ -541,7 +538,7 @@ class _LibrariesScreenState extends State<LibrariesScreen>
             .toList();
 
         if (visibleLibraries.isNotEmpty) {
-          _loadLibraryContent(visibleLibraries.first.globalKey);
+          unawaited(_loadLibraryContent(visibleLibraries.first.globalKey));
         }
       }
     }
@@ -593,43 +590,28 @@ class _LibrariesScreenState extends State<LibrariesScreen>
     if (item == null) return;
 
     if (item.requiresConfirmation) {
-      final confirmed = await showDialog<bool>(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: Text(item.confirmationTitle ?? t.dialog.confirmAction),
-          content: Text(item.confirmationMessage ?? t.libraries.confirmActionMessage),
-          actions: [
-            FocusableButton(
-              autofocus: true,
-              onPressed: () => Navigator.pop(context, false),
-              child: TextButton(onPressed: () => Navigator.pop(context, false), child: Text(t.common.cancel)),
-            ),
-            FocusableButton(
-              onPressed: () => Navigator.pop(context, true),
-              child: TextButton(
-                onPressed: () => Navigator.pop(context, true),
-                style: item.isDestructive ? TextButton.styleFrom(foregroundColor: Colors.red) : null,
-                child: Text(t.common.confirm),
-              ),
-            ),
-          ],
-        ),
+      final confirmed = await showConfirmDialog(
+        context,
+        title: item.confirmationTitle ?? t.dialog.confirmAction,
+        message: item.confirmationMessage ?? t.libraries.confirmActionMessage,
+        confirmText: t.common.confirm,
+        isDestructive: item.isDestructive,
       );
-      if (confirmed != true) return;
+      if (!confirmed) return;
     }
 
     switch (action) {
       case 'scan':
-        _scanLibrary(library);
+        unawaited(_scanLibrary(library));
         break;
       case 'analyze':
-        _analyzeLibrary(library);
+        unawaited(_analyzeLibrary(library));
         break;
       case 'refresh':
-        _refreshLibraryMetadata(library);
+        unawaited(_refreshLibraryMetadata(library));
         break;
       case 'empty_trash':
-        _emptyLibraryTrash(library);
+        unawaited(_emptyLibraryTrash(library));
         break;
     }
   }
@@ -798,9 +780,9 @@ class _LibrariesScreenState extends State<LibrariesScreen>
   }
 
   /// Build the app bar title - either dropdown on mobile or simple title on desktop
-  Widget _buildAppBarTitle(List<PlexLibrary> visibleLibraries) {
-    // No libraries or no selection
-    if (visibleLibraries.isEmpty || _selectedLibraryGlobalKey == null) {
+  Widget _buildAppBarTitle(List<PlexLibrary> visibleLibraries, PlexLibrary? selectedLibrary) {
+    // No selection at all, or visible list is empty AND we're not browsing a hidden library
+    if (_selectedLibraryGlobalKey == null || (visibleLibraries.isEmpty && selectedLibrary == null)) {
       return Text(t.libraries.title);
     }
 
@@ -898,7 +880,7 @@ class _LibrariesScreenState extends State<LibrariesScreen>
           controller: _outerScrollController,
           slivers: [
             DesktopSliverAppBar(
-              title: _buildAppBarTitle(visibleLibraries),
+              title: _buildAppBarTitle(visibleLibraries, selectedLibrary),
               pinned: true,
               backgroundColor: Theme.of(context).scaffoldBackgroundColor,
               surfaceTintColor: Colors.transparent,
@@ -927,7 +909,7 @@ class _LibrariesScreenState extends State<LibrariesScreen>
             ),
             if (isLoadingLibraries)
               const SliverFillRemaining(child: Center(child: CircularProgressIndicator()))
-            else if (_errorMessage != null && visibleLibraries.isEmpty)
+            else if (_errorMessage != null && visibleLibraries.isEmpty && selectedLibrary == null)
               SliverFillRemaining(
                 child: ErrorStateWidget(
                   message: _errorMessage!,
@@ -938,9 +920,17 @@ class _LibrariesScreenState extends State<LibrariesScreen>
                   },
                 ),
               )
-            else if (visibleLibraries.isEmpty)
+            else if (visibleLibraries.isEmpty && selectedLibrary == null)
               SliverFillRemaining(
-                child: EmptyStateWidget(message: t.libraries.noLibrariesFound, icon: Symbols.video_library_rounded),
+                child: allLibraries.isEmpty
+                    ? EmptyStateWidget(message: t.libraries.noLibrariesFound, icon: Symbols.video_library_rounded)
+                    : EmptyStateWidget(
+                        message: t.libraries.allLibrariesHidden,
+                        icon: Symbols.visibility_off_rounded,
+                        onAction: _showLibraryManagementSheet,
+                        actionLabel: t.libraries.manageLibraries,
+                        actionIcon: Symbols.edit_rounded,
+                      ),
               )
             else ...[
               // Tab selector chips (only on mobile - desktop has them in app bar)

@@ -13,12 +13,15 @@ import '../services/download_manager_service.dart';
 import '../services/manifest_import_service.dart';
 import '../services/download_storage_service.dart';
 import '../services/multi_server_manager.dart';
+import '../services/offline_mode_source.dart';
 import '../services/storage_service.dart';
 import '../services/plex_api_cache.dart';
 import '../services/plex_client.dart';
 import '../services/sync_rule_executor.dart';
 import '../utils/app_logger.dart';
+import '../utils/episode_collection.dart';
 import '../utils/global_key_utils.dart';
+import '../mixins/disposable_change_notifier_mixin.dart';
 
 /// Filter mode for batch downloads (shows/seasons).
 /// Use [all] to download everything, or [unwatched] with an optional maxCount.
@@ -40,7 +43,7 @@ class DownloadedArtwork {
 }
 
 /// Provider for managing download state and operations.
-class DownloadProvider extends ChangeNotifier {
+class DownloadProvider extends ChangeNotifier with DisposableChangeNotifierMixin {
   final DownloadManagerService _downloadManager;
   final AppDatabase _database;
   final SyncRuleExecutor _syncRuleExecutor;
@@ -70,6 +73,8 @@ class DownloadProvider extends ChangeNotifier {
   // Persistent sync rules: globalKey -> SyncRuleItem
   final Map<String, SyncRuleItem> _syncRules = {};
 
+  OfflineModeSource? _offlineSource;
+
   DownloadProvider({required DownloadManagerService downloadManager, required AppDatabase database})
     : _downloadManager = downloadManager,
       _database = database,
@@ -82,6 +87,30 @@ class DownloadProvider extends ChangeNotifier {
 
     // Load persisted downloads from database
     _initFuture = _loadPersistedDownloads();
+  }
+
+  /// Test-only constructor that skips the heavy initial load (artwork dir,
+  /// pinned-metadata bulk fetch, episode counts). Only sync rules are loaded
+  /// from the database. Use this in tests that exercise the provider's public
+  /// database-backed API without mocking [PlexApiCache], [DownloadStorageService],
+  /// or path_provider.
+  @visibleForTesting
+  DownloadProvider.forTesting({required DownloadManagerService downloadManager, required AppDatabase database})
+    : _downloadManager = downloadManager,
+      _database = database,
+      _syncRuleExecutor = SyncRuleExecutor(database: database) {
+    _progressSubscription = _downloadManager.progressStream.listen(_onProgressUpdate);
+    _deletionProgressSubscription = _downloadManager.deletionProgressStream.listen(_onDeletionProgressUpdate);
+    _initFuture = _loadSyncRules();
+  }
+
+  /// Inject the offline-mode source so queueing paths can short-circuit when
+  /// the device has no Plex connectivity. Propagates to the download manager
+  /// and the sync-rule executor so background paths see the same flag.
+  void setOfflineSource(OfflineModeSource? source) {
+    _offlineSource = source;
+    _downloadManager.setOfflineSource(source);
+    _syncRuleExecutor.setOfflineSource(source);
   }
 
   /// Ensures persisted downloads have been loaded from disk.
@@ -148,7 +177,7 @@ class DownloadProvider extends ChangeNotifier {
         'Loaded ${_downloads.length} downloads, ${_metadata.length} metadata entries, '
         '${_totalEpisodeCounts.length} episode counts, and ${_syncRules.length} sync rules',
       );
-      notifyListeners();
+      safeNotifyListeners();
     } catch (e) {
       appLogger.e('Failed to load persisted downloads', error: e);
     }
@@ -226,7 +255,7 @@ class DownloadProvider extends ChangeNotifier {
     }
 
     appLogger.d('Notifying listeners for ${progress.globalKey}');
-    notifyListeners();
+    safeNotifyListeners();
   }
 
   @override
@@ -596,7 +625,7 @@ class DownloadProvider extends ChangeNotifier {
     try {
       // Mark as queueing to show loading state in UI
       _queueing.add(globalKey);
-      notifyListeners();
+      safeNotifyListeners();
 
       final mt = metadata.mediaType;
 
@@ -614,7 +643,7 @@ class DownloadProvider extends ChangeNotifier {
       }
     } finally {
       _queueing.remove(globalKey);
-      notifyListeners();
+      safeNotifyListeners();
     }
   }
 
@@ -697,14 +726,22 @@ class DownloadProvider extends ChangeNotifier {
     // Hub items may have summary but the cache at /library/metadata/$ratingKey
     // won't have the full API response (with Media/Part data needed for video URL)
     // unless getMetadataWithImages has been called.
+    //
+    // Skip the fetch when offline — it would just fail. The partial metadata
+    // from whatever hub/grid invoked the queue is good enough to enqueue; the
+    // actual video URL resolves later when we're back online.
     PlexMetadata metadataToStore = metadata;
-    try {
-      final fullMetadata = await client.getMetadataWithImages(metadata.ratingKey);
-      if (fullMetadata != null) {
-        metadataToStore = fullMetadata.copyWith(serverId: metadata.serverId, serverName: metadata.serverName);
+    if (_offlineSource?.isOffline ?? false) {
+      appLogger.d('Offline — using partial metadata for ${metadata.ratingKey}');
+    } else {
+      try {
+        final fullMetadata = await client.getMetadataWithImages(metadata.ratingKey);
+        if (fullMetadata != null) {
+          metadataToStore = fullMetadata.copyWith(serverId: metadata.serverId, serverName: metadata.serverName);
+        }
+      } catch (e) {
+        appLogger.w('Failed to fetch full metadata for ${metadata.ratingKey}, using partial', error: e);
       }
-    } catch (e) {
-      appLogger.w('Failed to fetch full metadata for ${metadata.ratingKey}, using partial', error: e);
     }
 
     // Smart version matching for series/season downloads
@@ -734,7 +771,7 @@ class DownloadProvider extends ChangeNotifier {
 
     // Update local state immediately for UI feedback
     _downloads[globalKey] = DownloadProgress(globalKey: globalKey, status: DownloadStatus.queued);
-    notifyListeners();
+    safeNotifyListeners();
 
     // Actually trigger download via DownloadManagerService
     await _downloadManager.queueDownload(metadata: metadataToStore, client: client, mediaIndex: resolvedIndex);
@@ -799,29 +836,15 @@ class DownloadProvider extends ChangeNotifier {
     DownloadFilter filter = DownloadFilter.all,
     int? maxCount,
   }) async {
-    int count = 0;
-    final seasons = await client.getChildren(show.ratingKey);
-
     await _storeLeafCount(show.globalKey, show);
-
-    int? remaining = maxCount;
-    for (final season in seasons) {
-      if (season.type == 'season') {
-        if (remaining != null && remaining <= 0) break;
-        final seasonWithServer = _ensureServerId(season, show.serverId);
-        final queued = await _queueSeasonDownload(
-          seasonWithServer,
-          client,
-          versionConfig: versionConfig,
-          filter: filter,
-          maxCount: remaining,
-        );
-        count += queued;
-        if (remaining != null) remaining -= queued;
-      }
-    }
-
-    return count;
+    return _expandAndQueue(
+      container: show,
+      client: client,
+      versionConfig: versionConfig,
+      filter: filter,
+      maxCount: maxCount,
+      skipExisting: false,
+    );
   }
 
   /// Queue all episodes from a season for download
@@ -832,97 +855,81 @@ class DownloadProvider extends ChangeNotifier {
     DownloadFilter filter = DownloadFilter.all,
     int? maxCount,
   }) async {
-    int count = 0;
-    final episodes = await client.getChildren(season.ratingKey);
-
     await _storeLeafCount(season.globalKey, season);
-
-    for (final episode in episodes) {
-      if (episode.type == 'episode') {
-        if (filter == DownloadFilter.unwatched && episode.isWatched && !episode.hasActiveProgress) continue;
-        if (maxCount != null && count >= maxCount) break;
-
-        final episodeWithServer = _ensureServerId(episode, season.serverId);
-        final queued = await _queueSingleDownload(episodeWithServer, client, versionConfig: versionConfig);
-        if (queued) count++;
-      }
-    }
-
-    return count;
+    return _expandAndQueue(
+      container: season,
+      client: client,
+      versionConfig: versionConfig,
+      filter: filter,
+      maxCount: maxCount,
+      skipExisting: false,
+    );
   }
 
-  /// Queue only the missing (not downloaded) episodes for a show/season
-  /// Used for resuming partial downloads
-  /// Returns the number of episodes queued
+  /// Queue only the missing (not downloaded) episodes for a show/season.
+  /// Used for resuming partial downloads. Returns the number of episodes queued.
   Future<int> queueMissingEpisodes(
     PlexMetadata metadata,
     PlexClient client, {
     DownloadVersionConfig? versionConfig,
   }) async {
     final mt = metadata.mediaType;
-
-    if (mt == PlexMediaType.show) {
-      return await _queueMissingShowEpisodes(metadata, client, versionConfig: versionConfig);
-    } else if (mt == PlexMediaType.season) {
-      return await _queueMissingSeasonEpisodes(metadata, client, versionConfig: versionConfig);
-    } else {
+    if (mt != PlexMediaType.show && mt != PlexMediaType.season) {
       throw Exception('queueMissingEpisodes only supports shows/seasons');
     }
+    final queued = await _expandAndQueue(
+      container: metadata,
+      client: client,
+      versionConfig: versionConfig,
+      filter: DownloadFilter.all,
+      maxCount: null,
+      skipExisting: true,
+    );
+    if (mt == PlexMediaType.show) {
+      appLogger.i('Queued $queued missing episodes for show ${metadata.title}');
+    }
+    return queued;
   }
 
-  /// Queue missing episodes for a show
-  Future<int> _queueMissingShowEpisodes(
-    PlexMetadata show,
-    PlexClient client, {
-    DownloadVersionConfig? versionConfig,
+  /// Shared expansion: fetch all episodes under [container] (show or season),
+  /// apply [filter] and optional [maxCount], optionally skip items already
+  /// queued/downloading/completed ([skipExisting]), and queue each one.
+  Future<int> _expandAndQueue({
+    required PlexMetadata container,
+    required PlexClient client,
+    required DownloadVersionConfig? versionConfig,
+    required DownloadFilter filter,
+    required int? maxCount,
+    required bool skipExisting,
   }) async {
-    int queuedCount = 0;
-
-    final seasons = await client.getChildren(show.ratingKey);
-
-    for (final season in seasons) {
-      if (season.type == 'season') {
-        final seasonWithServer = _ensureServerId(season, show.serverId);
-        queuedCount += await _queueMissingSeasonEpisodes(seasonWithServer, client, versionConfig: versionConfig);
-      }
+    final unwatchedOnly = filter == DownloadFilter.unwatched;
+    final episodes = <PlexMetadata>[];
+    if (container.mediaType == PlexMediaType.show) {
+      await collectEpisodesForShow(client, container.ratingKey, unwatchedOnly: unwatchedOnly, out: episodes);
+    } else {
+      await collectEpisodesForSeason(client, container.ratingKey, unwatchedOnly: unwatchedOnly, out: episodes);
     }
 
-    appLogger.i('Queued $queuedCount missing episodes for show ${show.title}');
-    return queuedCount;
-  }
-
-  /// Queue missing episodes for a season
-  Future<int> _queueMissingSeasonEpisodes(
-    PlexMetadata season,
-    PlexClient client, {
-    DownloadVersionConfig? versionConfig,
-  }) async {
-    int queuedCount = 0;
-
-    final episodes = await client.getChildren(season.ratingKey);
-
+    int count = 0;
     for (final episode in episodes) {
-      if (episode.type == 'episode') {
-        final episodeWithServer = _ensureServerId(episode, season.serverId);
+      if (maxCount != null && count >= maxCount) break;
 
-        final episodeGlobalKey = episodeWithServer.globalKey;
+      final episodeWithServer = _ensureServerId(episode, container.serverId);
 
-        // Only queue if NOT already downloaded or in progress
-        final progress = _downloads[episodeGlobalKey];
-        if (progress == null ||
-            (progress.status != DownloadStatus.completed &&
-                progress.status != DownloadStatus.downloading &&
-                progress.status != DownloadStatus.queued)) {
-          final queued = await _queueSingleDownload(episodeWithServer, client, versionConfig: versionConfig);
-          if (queued) {
-            queuedCount++;
-            appLogger.d('Queued missing episode: ${episode.title} ($episodeGlobalKey)');
-          }
+      if (skipExisting) {
+        final progress = _downloads[episodeWithServer.globalKey];
+        if (progress != null &&
+            (progress.status == DownloadStatus.completed ||
+                progress.status == DownloadStatus.downloading ||
+                progress.status == DownloadStatus.queued)) {
+          continue;
         }
       }
-    }
 
-    return queuedCount;
+      final queued = await _queueSingleDownload(episodeWithServer, client, versionConfig: versionConfig);
+      if (queued) count++;
+    }
+    return count;
   }
 
   /// Pause a download (works for both downloading and queued items)
@@ -957,7 +964,7 @@ class DownloadProvider extends ChangeNotifier {
       await _downloadManager.cancelDownload(globalKey);
       _downloads.remove(globalKey);
       _metadata.remove(globalKey);
-      notifyListeners();
+      safeNotifyListeners();
     }
   }
 
@@ -987,11 +994,11 @@ class DownloadProvider extends ChangeNotifier {
       _metadata.remove(globalKey);
       _artworkPaths.remove(globalKey);
 
-      notifyListeners();
+      safeNotifyListeners();
     } catch (e) {
       // Remove from deletion tracking on error
       _deletionProgress.remove(globalKey);
-      notifyListeners();
+      safeNotifyListeners();
       rethrow;
     }
   }
@@ -1005,7 +1012,7 @@ class DownloadProvider extends ChangeNotifier {
       // Update progress
       _deletionProgress[progress.globalKey] = progress;
     }
-    notifyListeners();
+    safeNotifyListeners();
   }
 
   /// Get deletion progress for an item
@@ -1272,7 +1279,7 @@ class DownloadProvider extends ChangeNotifier {
 
     if (updatedCount > 0) {
       appLogger.i('Refreshed metadata from cache for $updatedCount items');
-      notifyListeners();
+      safeNotifyListeners();
     }
   }
 
@@ -1357,7 +1364,7 @@ class DownloadProvider extends ChangeNotifier {
     final rule = await _database.getSyncRule(globalKey);
     if (rule != null) {
       _syncRules[globalKey] = rule;
-      notifyListeners();
+      safeNotifyListeners();
     }
     appLogger.i('Created sync rule: $globalKey ($targetType, filter=$downloadFilter, keep $episodeCount)');
   }
@@ -1368,7 +1375,7 @@ class DownloadProvider extends ChangeNotifier {
     final existing = _syncRules[globalKey];
     if (existing != null) {
       _syncRules[globalKey] = existing.copyWith(episodeCount: episodeCount);
-      notifyListeners();
+      safeNotifyListeners();
     }
     appLogger.i('Updated sync rule $globalKey: keep $episodeCount');
   }
@@ -1379,7 +1386,7 @@ class DownloadProvider extends ChangeNotifier {
     final existing = _syncRules[globalKey];
     if (existing != null) {
       _syncRules[globalKey] = existing.copyWith(downloadFilter: downloadFilter);
-      notifyListeners();
+      safeNotifyListeners();
     }
     appLogger.i('Updated sync rule $globalKey: filter=$downloadFilter');
   }
@@ -1390,7 +1397,7 @@ class DownloadProvider extends ChangeNotifier {
     final existing = _syncRules[globalKey];
     if (existing != null) {
       _syncRules[globalKey] = existing.copyWith(enabled: enabled);
-      notifyListeners();
+      safeNotifyListeners();
     }
     appLogger.i('${enabled ? 'Enabled' : 'Disabled'} sync rule: $globalKey');
   }
@@ -1399,7 +1406,7 @@ class DownloadProvider extends ChangeNotifier {
   Future<void> deleteSyncRule(String globalKey) async {
     await _database.deleteSyncRule(globalKey);
     _syncRules.remove(globalKey);
-    notifyListeners();
+    safeNotifyListeners();
     appLogger.i('Deleted sync rule: $globalKey');
   }
 

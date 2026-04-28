@@ -1,18 +1,38 @@
+import 'package:json_annotation/json_annotation.dart';
+
 import '../utils/json_utils.dart';
 
+part 'plex_subtitle_search_result.g.dart';
+
+int _flexibleIntOrZero(Object? v) => flexibleInt(v) ?? 0;
+
+@JsonSerializable()
 class PlexSubtitleSearchResult {
+  @JsonKey(fromJson: _flexibleIntOrZero)
   final int id;
+  @JsonKey(readValue: readStringField, defaultValue: '')
   final String key;
+  @JsonKey(readValue: readStringField)
   final String? codec;
+  @JsonKey(readValue: readStringField)
   final String? language;
+  @JsonKey(readValue: readStringField)
   final String? languageCode;
+  @JsonKey(fromJson: flexibleDouble)
   final double? score;
+  @JsonKey(readValue: readStringField)
   final String? providerTitle;
+  @JsonKey(readValue: readStringField)
   final String? title;
+  @JsonKey(readValue: readStringField)
   final String? displayTitle;
+  @JsonKey(fromJson: flexibleBool)
   final bool hearingImpaired;
+  @JsonKey(fromJson: flexibleBool)
   final bool perfectMatch;
+  @JsonKey(fromJson: flexibleBool)
   final bool downloaded;
+  @JsonKey(fromJson: flexibleBool)
   final bool forced;
 
   PlexSubtitleSearchResult({
@@ -31,35 +51,7 @@ class PlexSubtitleSearchResult {
     this.forced = false,
   });
 
-  factory PlexSubtitleSearchResult.fromJson(Map<String, dynamic> json) {
-    return PlexSubtitleSearchResult(
-      id: _parseInt(json['id']),
-      key: json['key']?.toString() ?? '',
-      codec: json['codec']?.toString(),
-      language: json['language']?.toString(),
-      languageCode: json['languageCode']?.toString(),
-      score: _parseDouble(json['score']),
-      providerTitle: json['providerTitle']?.toString(),
-      title: json['title']?.toString(),
-      displayTitle: json['displayTitle']?.toString(),
-      hearingImpaired: flexibleBool(json['hearingImpaired']),
-      perfectMatch: flexibleBool(json['perfectMatch']),
-      downloaded: flexibleBool(json['downloaded']),
-      forced: flexibleBool(json['forced']),
-    );
-  }
+  factory PlexSubtitleSearchResult.fromJson(Map<String, dynamic> json) => _$PlexSubtitleSearchResultFromJson(json);
 
-  static int _parseInt(dynamic v) {
-    if (v is int) return v;
-    if (v is num) return v.toInt();
-    if (v is String) return int.tryParse(v) ?? 0;
-    return 0;
-  }
-
-  static double? _parseDouble(dynamic v) {
-    if (v is double) return v;
-    if (v is num) return v.toDouble();
-    if (v is String) return double.tryParse(v);
-    return null;
-  }
+  Map<String, dynamic> toJson() => _$PlexSubtitleSearchResultToJson(this);
 }

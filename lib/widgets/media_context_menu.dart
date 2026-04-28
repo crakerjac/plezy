@@ -10,6 +10,7 @@ import '../models/plex_metadata.dart';
 import '../models/plex_playlist.dart';
 import '../utils/download_version_utils.dart';
 import '../utils/download_utils.dart';
+import '../utils/quality_preset_labels.dart';
 import '../utils/content_utils.dart';
 import '../utils/global_key_utils.dart';
 import '../providers/download_provider.dart';
@@ -20,12 +21,14 @@ import '../providers/user_profile_provider.dart';
 import '../utils/provider_extensions.dart';
 import '../utils/app_logger.dart';
 import '../utils/library_refresh_notifier.dart';
+import '../utils/platform_detector.dart';
 import '../utils/snackbar_helper.dart';
 import '../utils/dialogs.dart';
 import '../utils/focus_utils.dart';
 import '../services/external_player_service.dart';
 import '../focus/focusable_button.dart';
 import '../focus/dpad_navigator.dart';
+import '../screens/match_screen.dart';
 import '../screens/media_detail_screen.dart';
 import '../screens/metadata_edit_screen.dart';
 import '../utils/smart_deletion_handler.dart';
@@ -158,7 +161,7 @@ class MediaContextMenuState extends State<MediaContextMenu> {
       // Download + sync-rule management. Video playlists and any collection
       // qualify — collections can contain movies, episodes, and shows.
       final isVideoPlaylist = isPlaylist && (widget.item as PlexPlaylist).playlistType == 'video';
-      if (isVideoPlaylist || isCollection) {
+      if ((isVideoPlaylist || isCollection) && !PlatformDetector.isAppleTV()) {
         final hasRule = Provider.of<DownloadProvider>(context, listen: false).hasSyncRule(_itemGlobalKey());
         if (hasRule) {
           menuActions.add(
@@ -240,6 +243,19 @@ class MediaContextMenuState extends State<MediaContextMenu> {
         );
       }
 
+      if (isAdmin && (mediaType == PlexMediaType.movie || mediaType == PlexMediaType.show)) {
+        menuActions.add(
+          _MenuAction(
+            value: 'match',
+            icon: Symbols.search_rounded,
+            label: metadata.isUnmatched ? t.matchScreen.match : t.matchScreen.fixMatch,
+          ),
+        );
+        if (!metadata.isUnmatched) {
+          menuActions.add(_MenuAction(value: 'unmatch', icon: Symbols.link_off_rounded, label: t.matchScreen.unmatch));
+        }
+      }
+
       // Remove from Collection (only when viewing items within a collection)
       if (widget.collectionId != null) {
         menuActions.add(
@@ -283,10 +299,11 @@ class MediaContextMenuState extends State<MediaContextMenu> {
         );
       }
 
-      // Play Version (for episodes and movies with multiple versions)
-      if ((mediaType == PlexMediaType.episode || mediaType == PlexMediaType.movie) &&
-          metadata.mediaVersions != null &&
-          metadata.mediaVersions!.length > 1) {
+      // Play Version (for episodes and movies). Always shown — even for
+      // single-version items — so the user can still pick a streaming
+      // quality. The handler skips the version picker if only one version
+      // is present, jumping straight to the quality picker.
+      if (mediaType == PlexMediaType.episode || mediaType == PlexMediaType.movie) {
         menuActions.add(
           _MenuAction(value: 'play_version', icon: Symbols.video_file_rounded, label: t.mediaMenu.playVersion),
         );
@@ -308,11 +325,13 @@ class MediaContextMenuState extends State<MediaContextMenu> {
         );
       }
 
-      // Download options (for episodes, movies, shows, and seasons)
-      if (mediaType == PlexMediaType.episode ||
-          mediaType == PlexMediaType.movie ||
-          mediaType == PlexMediaType.show ||
-          mediaType == PlexMediaType.season) {
+      // Download options (for episodes, movies, shows, and seasons).
+      // Apple TV has no user-accessible file storage — skip entirely.
+      if (!PlatformDetector.isAppleTV() &&
+          (mediaType == PlexMediaType.episode ||
+              mediaType == PlexMediaType.movie ||
+              mediaType == PlexMediaType.show ||
+              mediaType == PlexMediaType.season)) {
         final downloadProvider = Provider.of<DownloadProvider>(context, listen: false);
         final globalKey = metadata.globalKey;
         final isDownloaded = downloadProvider.isDownloaded(globalKey);
@@ -505,6 +524,18 @@ class MediaContextMenuState extends State<MediaContextMenu> {
           }
           break;
 
+        case 'match':
+          didNavigate = true;
+          if (context.mounted) {
+            await Navigator.push(context, MaterialPageRoute(builder: (context) => MatchScreen(metadata: metadata!)));
+            widget.onRefresh?.call(metadata!.ratingKey);
+          }
+          break;
+
+        case 'unmatch':
+          await _handleUnmatch(context, metadata!);
+          break;
+
         case 'remove_from_collection':
           await _handleRemoveFromCollection(context, metadata!);
           break;
@@ -624,6 +655,33 @@ class MediaContextMenuState extends State<MediaContextMenu> {
     }
   }
 
+  Future<void> _handleUnmatch(BuildContext context, PlexMetadata metadata) async {
+    final confirmed = await showConfirmDialog(
+      context,
+      title: t.matchScreen.unmatch,
+      message: t.matchScreen.unmatchConfirm,
+      confirmText: t.matchScreen.unmatch,
+      isDestructive: true,
+    );
+    if (!confirmed || !context.mounted) return;
+
+    final client = _getClientForItem();
+    try {
+      final success = await client.unmatchItem(metadata.ratingKey);
+      if (!context.mounted) return;
+      if (success) {
+        showSuccessSnackBar(context, t.matchScreen.unmatchSuccess);
+        widget.onRefresh?.call(metadata.ratingKey);
+      } else {
+        showErrorSnackBar(context, t.matchScreen.unmatchFailed);
+      }
+    } catch (e) {
+      if (context.mounted) {
+        showErrorSnackBar(context, t.messages.errorLoading(error: e.toString()));
+      }
+    }
+  }
+
   /// Navigate to a related item (series or season)
   Future<void> _navigateToRelated(
     BuildContext context,
@@ -653,13 +711,8 @@ class MediaContextMenuState extends State<MediaContextMenu> {
     final client = _getClientForItem();
 
     try {
-      // Show loading indicator
       if (context.mounted) {
-        showDialog(
-          context: context,
-          barrierDismissible: false,
-          builder: (context) => const Center(child: CircularProgressIndicator()),
-        );
+        showLoadingDialog(context);
       }
 
       // Fetch file info
@@ -693,18 +746,32 @@ class MediaContextMenuState extends State<MediaContextMenu> {
     }
   }
 
-  /// Handle play version selection
   Future<bool> _handlePlayVersion(BuildContext context) async {
     final metadata = widget.item as PlexMetadata;
-    final versions = metadata.mediaVersions!;
+    final versions = metadata.mediaVersions ?? const [];
 
-    final selectedIndex = await showVersionPickerDialog(context, versions, t.mediaMenu.playVersion);
-
-    if (selectedIndex != null && context.mounted) {
-      await navigateToVideoPlayer(context, metadata: metadata, selectedMediaIndex: selectedIndex);
-      return true;
+    int selectedVersionIndex = 0;
+    if (versions.length > 1) {
+      final picked = await showVersionPickerDialog(context, versions, t.mediaMenu.playVersion);
+      if (picked == null || !context.mounted) return false;
+      selectedVersionIndex = picked;
     }
-    return false;
+
+    final selectedVersion = selectedVersionIndex < versions.length ? versions[selectedVersionIndex] : null;
+    final selectedQuality = await showQualityPickerDialog(
+      context,
+      sourceBitrateKbps: selectedVersion?.bitrate,
+      sourceDurationMs: metadata.duration,
+    );
+    if (selectedQuality == null || !context.mounted) return false;
+
+    await navigateToVideoPlayer(
+      context,
+      metadata: metadata,
+      selectedMediaIndex: selectedVersionIndex,
+      selectedQualityPreset: selectedQuality,
+    );
+    return true;
   }
 
   /// Handle shuffle play using play queues
@@ -881,7 +948,7 @@ class MediaContextMenuState extends State<MediaContextMenu> {
 
       if (sectionId == null) {
         if (context.mounted) {
-          showErrorSnackBar(context, 'Unable to determine library section for this item');
+          showErrorSnackBar(context, t.messages.unableToDetermineLibrarySection);
         }
         return;
       }
@@ -1168,7 +1235,7 @@ class MediaContextMenuState extends State<MediaContextMenu> {
     final client = _getClientForItem();
 
     try {
-      final items = await client.getCollectionItems(collection.ratingKey);
+      final items = await client.fetchAllCollectionItems(collection.ratingKey);
       if (!context.mounted) return;
 
       final result = await showCollectionDownloadOptionsAndQueue(
@@ -1200,7 +1267,7 @@ class MediaContextMenuState extends State<MediaContextMenu> {
     final client = _getClientForItem();
 
     try {
-      final items = await client.getPlaylist(playlist.ratingKey);
+      final items = await client.fetchAllPlaylistItems(playlist.ratingKey);
       if (!context.mounted) return;
 
       final playlistMetadata = PlexMetadata(
@@ -1514,7 +1581,9 @@ class _CollectionSelectionDialogState extends State<_CollectionSelectionDialog> 
                   return ListTile(
                     leading: const AppIcon(Symbols.collections_rounded, fill: 1),
                     title: Text(collection.title!),
-                    subtitle: collection.childCount != null ? Text('${collection.childCount} items') : null,
+                    subtitle: collection.childCount != null
+                        ? Text(t.playlists.itemCount(count: collection.childCount!))
+                        : null,
                     onTap: () => Navigator.pop(context, collection.ratingKey),
                   );
                 },
@@ -1633,7 +1702,7 @@ class _FocusablePopupMenuState extends State<_FocusablePopupMenu> {
 
   @override
   Widget build(BuildContext context) {
-    final screenSize = MediaQuery.of(context).size;
+    final screenSize = MediaQuery.sizeOf(context);
     const menuWidth = 220.0;
 
     // Clamp menu position to stay within screen bounds
@@ -1682,7 +1751,7 @@ class _FocusablePopupMenuState extends State<_FocusablePopupMenu> {
               child: GestureDetector(
                 onTap: () => Navigator.pop(context),
                 behavior: HitTestBehavior.opaque,
-                child: Container(color: Colors.transparent),
+                child: const ColoredBox(color: Colors.transparent),
               ),
             ),
             // Menu

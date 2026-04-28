@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io';
 
 import 'package:dart_discord_presence/dart_discord_presence.dart';
 import 'package:http/http.dart' as http;
@@ -7,6 +6,7 @@ import 'package:http/http.dart' as http;
 import '../models/plex_metadata.dart';
 import '../utils/app_logger.dart';
 import '../utils/future_extensions.dart';
+import '../utils/platform_detector.dart';
 import '../utils/plex_http_client.dart';
 import 'plex_client.dart';
 import 'settings_service.dart';
@@ -59,7 +59,7 @@ class DiscordRPCService {
 
   /// Check if Discord RPC is available on this platform
   static bool get isAvailable {
-    if (!Platform.isMacOS && !Platform.isWindows && !Platform.isLinux) {
+    if (!PlatformDetector.isDesktopOS()) {
       return false;
     }
     return DiscordRPC.isAvailable;
@@ -76,7 +76,7 @@ class DiscordRPCService {
     _isInitialized = true;
 
     final settings = await SettingsService.getInstance();
-    _isEnabled = settings.getEnableDiscordRPC();
+    _isEnabled = settings.read(SettingsService.enableDiscordRPC);
 
     if (_isEnabled) {
       await _connect();
@@ -112,7 +112,7 @@ class DiscordRPCService {
 
     if (_isEnabled && _isConnected) {
       // Upload thumbnail in background, don't block playback
-      _uploadThumbnailAndUpdatePresence();
+      unawaited(_uploadThumbnailAndUpdatePresence());
     }
   }
 
@@ -183,7 +183,7 @@ class DiscordRPCService {
   /// Clear the presence
   Future<void> clearPresence() async {
     try {
-      _rpc?.clearPresence();
+      unawaited(_rpc?.clearPresence());
     } catch (e) {
       appLogger.d('Failed to clear Discord presence', error: e);
     }
@@ -237,8 +237,10 @@ class DiscordRPCService {
       _disconnectedSubscription = null;
       _errorSubscription = null;
       try {
-        _rpc?.dispose();
-      } catch (_) {}
+        unawaited(_rpc?.dispose());
+      } catch (e) {
+        appLogger.d('DiscordRPC: dispose ignored', error: e);
+      }
       _rpc = null;
       _scheduleReconnect();
     }
@@ -256,7 +258,7 @@ class DiscordRPCService {
     _errorSubscription = null;
 
     try {
-      _rpc?.dispose();
+      unawaited(_rpc?.dispose());
     } catch (e) {
       appLogger.d('Error disposing Discord RPC', error: e);
     }

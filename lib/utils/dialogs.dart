@@ -4,6 +4,7 @@ import '../focus/focusable_button.dart';
 import '../focus/input_mode_tracker.dart';
 import '../i18n/strings.g.dart';
 import '../widgets/app_icon.dart';
+import '../widgets/dialog_action_button.dart';
 import '../widgets/focusable_list_tile.dart';
 import 'focus_utils.dart';
 
@@ -55,6 +56,16 @@ Future<bool> showConfirmDialog(
   );
 
   return confirmed ?? false;
+}
+
+/// Shows a non-dismissible loading-spinner dialog. Caller is responsible for
+/// closing it via `Navigator.pop(context)` when the work completes.
+void showLoadingDialog(BuildContext context) {
+  showDialog<void>(
+    context: context,
+    barrierDismissible: false,
+    builder: (_) => const Center(child: CircularProgressIndicator()),
+  );
 }
 
 /// Shows the server-side 500 modal (bandwidth/transcoding limit rejection).
@@ -198,6 +209,29 @@ Future<String?> showMultilineTextInputDialog(
   );
 }
 
+/// Shared lifecycle for the two private text-input dialogs below: a single
+/// [TextEditingController] seeded from [initialValue], plus a focus node for
+/// the save button.
+mixin _TextInputDialogStateMixin<T extends StatefulWidget> on State<T> {
+  late final TextEditingController _controller;
+  final _saveFocusNode = FocusNode();
+
+  String? get initialValue;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: initialValue);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    _saveFocusNode.dispose();
+    super.dispose();
+  }
+}
+
 class _MultilineTextInputDialog extends StatefulWidget {
   final String title;
   final String labelText;
@@ -209,22 +243,10 @@ class _MultilineTextInputDialog extends StatefulWidget {
   State<_MultilineTextInputDialog> createState() => _MultilineTextInputDialogState();
 }
 
-class _MultilineTextInputDialogState extends State<_MultilineTextInputDialog> {
-  late final TextEditingController _controller;
-  final _saveFocusNode = FocusNode();
-
+class _MultilineTextInputDialogState extends State<_MultilineTextInputDialog>
+    with _TextInputDialogStateMixin<_MultilineTextInputDialog> {
   @override
-  void initState() {
-    super.initState();
-    _controller = TextEditingController(text: widget.initialValue);
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    _saveFocusNode.dispose();
-    super.dispose();
-  }
+  String? get initialValue => widget.initialValue;
 
   @override
   Widget build(BuildContext context) {
@@ -241,14 +263,11 @@ class _MultilineTextInputDialogState extends State<_MultilineTextInputDialog> {
         ),
       ),
       actions: [
-        FocusableButton(
-          onPressed: () => Navigator.pop(context),
-          child: TextButton(onPressed: () => Navigator.pop(context), child: Text(t.common.cancel)),
-        ),
-        FocusableButton(
-          focusNode: _saveFocusNode,
+        DialogActionButton(onPressed: () => Navigator.pop(context), label: t.common.cancel),
+        DialogActionButton(
           onPressed: () => Navigator.pop(context, _controller.text),
-          child: TextButton(onPressed: () => Navigator.pop(context, _controller.text), child: Text(t.common.save)),
+          label: t.common.save,
+          focusNode: _saveFocusNode,
         ),
       ],
     );
@@ -280,22 +299,9 @@ class _TextInputDialog extends StatefulWidget {
   State<_TextInputDialog> createState() => _TextInputDialogState();
 }
 
-class _TextInputDialogState extends State<_TextInputDialog> {
-  late final TextEditingController _controller;
-  final _saveFocusNode = FocusNode();
-
+class _TextInputDialogState extends State<_TextInputDialog> with _TextInputDialogStateMixin<_TextInputDialog> {
   @override
-  void initState() {
-    super.initState();
-    _controller = TextEditingController(text: widget.initialValue);
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    _saveFocusNode.dispose();
-    super.dispose();
-  }
+  String? get initialValue => widget.initialValue;
 
   void _submit() {
     final text = _controller.text;
@@ -318,26 +324,21 @@ class _TextInputDialogState extends State<_TextInputDialog> {
         onSubmitted: (_) => _saveFocusNode.requestFocus(),
       ),
       actions: [
-        FocusableButton(
-          onPressed: () => Navigator.pop(context),
-          child: TextButton(onPressed: () => Navigator.pop(context), child: Text(t.common.cancel)),
-        ),
-        FocusableButton(
-          focusNode: _saveFocusNode,
-          onPressed: _submit,
-          child: TextButton(onPressed: _submit, child: Text(widget.confirmText ?? t.common.save)),
-        ),
+        DialogActionButton(onPressed: () => Navigator.pop(context), label: t.common.cancel),
+        DialogActionButton(onPressed: _submit, label: widget.confirmText ?? t.common.save, focusNode: _saveFocusNode),
       ],
     );
   }
 }
 
 /// Shows a simple option picker dialog with focusable items for TV/keyboard navigation.
-/// Returns the selected value, or null if cancelled.
+/// Returns the selected value, or null if cancelled. Each option's [icon] may
+/// be `null` to render a label-only row (useful when the choices are variants
+/// of the same thing and a repeated icon would just be noise).
 Future<T?> showOptionPickerDialog<T>(
   BuildContext context, {
   required String title,
-  required List<({IconData icon, String label, T value})> options,
+  required List<({IconData? icon, String label, T value})> options,
   Future<T?> Function(T value)? onBeforeClose,
 }) {
   final focusFirstItem = InputModeTracker.isKeyboardMode(context);
@@ -354,7 +355,7 @@ Future<T?> showOptionPickerDialog<T>(
 
 class _OptionPickerDialog<T> extends StatefulWidget {
   final String title;
-  final List<({IconData icon, String label, T value})> options;
+  final List<({IconData? icon, String label, T value})> options;
   final bool focusFirstItem;
   final Future<T?> Function(T value)? onBeforeClose;
 
@@ -394,9 +395,10 @@ class _OptionPickerDialogState<T> extends State<_OptionPickerDialog<T>> {
       contentPadding: const EdgeInsets.symmetric(vertical: 8),
       children: List.generate(widget.options.length, (index) {
         final option = widget.options[index];
+        final icon = option.icon;
         return FocusableListTile(
           focusNode: index == 0 && widget.focusFirstItem ? _initialFocusNode : null,
-          leading: AppIcon(option.icon, fill: 1, size: 24),
+          leading: icon != null ? AppIcon(icon, fill: 1, size: 24) : null,
           title: Text(option.label, style: Theme.of(context).textTheme.bodyLarge),
           contentPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 4),
           onTap: () async {

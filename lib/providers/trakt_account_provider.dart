@@ -2,7 +2,9 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 
-import '../models/trakt/trakt_device_code.dart';
+import '../mixins/disposable_change_notifier_mixin.dart';
+import '../models/trackers/device_code.dart';
+import '../services/trackers/tracker_connect_runner.dart';
 import '../services/trakt/trakt_account_store.dart';
 import '../services/trakt/trakt_auth_service.dart';
 import '../services/trakt/trakt_client.dart';
@@ -14,16 +16,15 @@ import '../utils/app_logger.dart';
 /// Owns the active Trakt session for the currently-selected Plex profile.
 ///
 /// Single rebind seam: `onActiveProfileChanged` loads the new profile's
-/// session from `TraktAccountStore` and pushes it to both
-/// `TraktScrobbleService` and `TraktSyncService`.
-class TraktAccountProvider extends ChangeNotifier {
+/// session and pushes it to both `TraktScrobbleService` and `TraktSyncService`.
+class TraktAccountProvider extends ChangeNotifier with DisposableChangeNotifierMixin {
   final TraktAuthService _auth = TraktAuthService();
-  final TraktAccountStore _store = TraktAccountStore.instance;
+  final _store = traktAccountStore;
 
   TraktSession? _session;
   String _activeUserUuid = '';
   bool _isConnecting = false;
-  bool _cancelRequested = false;
+  Completer<void>? _cancelCompleter;
 
   TraktSession? get session => _session;
   bool get isConnected => _session != null;
@@ -31,9 +32,11 @@ class TraktAccountProvider extends ChangeNotifier {
   bool get isConnecting => _isConnecting;
 
   /// Cancel an in-flight `connect()` (e.g. user dismissed the device-code
-  /// dialog). The poll loop checks this flag between iterations.
+  /// dialog). Completing the completer both wakes the blocking `Future.any`
+  /// race and flips `isCompleted` for the next sync check.
   void cancelConnect() {
-    _cancelRequested = true;
+    final c = _cancelCompleter;
+    if (c != null && !c.isCompleted) c.complete();
   }
 
   /// Called whenever the active Plex profile changes (or on initial load).
@@ -47,50 +50,42 @@ class TraktAccountProvider extends ChangeNotifier {
   ///
   /// [onCodeReady] is invoked once with the user code + verification URL so
   /// the UI can render the dialog.
-  Future<bool> connect({required void Function(TraktDeviceCode code) onCodeReady}) async {
-    if (_isConnecting) return false;
+  Future<bool> connect({required void Function(DeviceCode code) onCodeReady}) async {
+    if (_isConnecting || isConnected) return false;
     _isConnecting = true;
-    _cancelRequested = false;
+    _cancelCompleter = Completer<void>();
     notifyListeners();
-
     try {
-      final code = await _auth.createDeviceCode();
-      onCodeReady(code);
-
-      await for (final event in _auth.pollDeviceCode(code, shouldCancel: () => _cancelRequested)) {
-        if (event is TraktDevicePollSuccess) {
-          await _completeConnect(event.tokenResponse);
-          return true;
-        }
-        if (event is TraktDevicePollDenied || event is TraktDevicePollExpired) {
-          return false;
-        }
-      }
-      return false;
-    } catch (e) {
-      appLogger.w('Trakt connect failed', error: e);
-      return false;
+      return await runConnectPipeline<TraktSession>(
+        logLabel: 'Trakt',
+        authorize: () => _auth.authorize(
+          onCodeReady: onCodeReady,
+          shouldCancel: () => _cancelCompleter?.isCompleted ?? false,
+          onCancel: _cancelCompleter!.future,
+        ),
+        enrich: _enrichUsername,
+        save: (s) => _store.save(_activeUserUuid, s),
+        assign: _setSessionAndRebind,
+      );
     } finally {
+      final c = _cancelCompleter;
+      if (c != null && !c.isCompleted) c.complete();
+      _cancelCompleter = null;
       _isConnecting = false;
-      notifyListeners();
+      safeNotifyListeners();
     }
   }
 
-  Future<void> _completeConnect(Map<String, dynamic> tokenResponse) async {
-    final raw = TraktSession.fromTokenResponse(tokenResponse);
-    // Best-effort fetch of the username for display.
-    TraktSession enriched = raw;
+  Future<TraktSession> _enrichUsername(TraktSession raw) async {
     try {
-      final tmpClient = TraktClient(raw, onSessionInvalidated: () {});
-      final user = await tmpClient.getUserSettings();
-      enriched = raw.copyWith(username: user.username);
-      tmpClient.dispose();
+      final tmp = TraktClient(raw, onSessionInvalidated: () {});
+      final user = await tmp.getUserSettings();
+      tmp.dispose();
+      return raw.copyWith(username: user.username);
     } catch (e) {
       appLogger.d('Trakt: getUserSettings failed (non-fatal)', error: e);
+      return raw;
     }
-
-    await _store.save(_activeUserUuid, enriched);
-    _setSessionAndRebind(enriched);
   }
 
   /// Revoke the access token and clear local state.
@@ -113,7 +108,7 @@ class TraktAccountProvider extends ChangeNotifier {
       session,
       onSessionInvalidated: _handleSessionInvalidated,
     );
-    notifyListeners();
+    safeNotifyListeners();
   }
 
   /// Called by [TraktClient] when refresh fails permanently. Clears local state
