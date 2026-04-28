@@ -137,7 +137,7 @@ class ManifestImportService {
     final saf        = SafStorageService.instance;
 
     // Navigate into the PlexSyncer subfolder first.
-    final psRoot = await saf.getChild(safBaseUri, kPlexSyncerFolder);
+    final psRoot = await saf.getChild(safBaseUri, [kPlexSyncerFolder]);
     if (psRoot == null) {
       return const ManifestReadResult(
         error: 'PlexSyncer folder not found in the configured SAF root.\n'
@@ -260,7 +260,7 @@ class ManifestImportService {
       if (safBaseUri == null) return false;
 
       final saf = SafStorageService.instance;
-      final psRoot = await saf.getChild(safBaseUri, kPlexSyncerFolder);
+      final psRoot = await saf.getChild(safBaseUri, [kPlexSyncerFolder]);
       if (psRoot == null) return false;
 
       final manifestJson = await _readManifestBytes(saf, psRoot.uri);
@@ -295,10 +295,10 @@ class ManifestImportService {
     SafStorageService saf,
     String safBaseUri,
   ) async {
-    final metaDir = await saf.getChild(safBaseUri, '_plezy_meta');
+    final metaDir = await saf.getChild(safBaseUri, ['_plezy_meta']);
     if (metaDir == null) throw Exception('_plezy_meta directory not found');
 
-    final manifestFile = await saf.getChild(metaDir.uri, 'manifest.json');
+    final manifestFile = await saf.getChild(metaDir.uri, ['manifest.json']);
     if (manifestFile == null) throw Exception('manifest.json not found');
 
     final bytes = await SafStream().readFileBytes(manifestFile.uri);
@@ -317,7 +317,7 @@ class ManifestImportService {
 
     String currentUri = safBaseUri;
     for (final segment in segments) {
-      final child = await saf.getChild(currentUri, segment);
+      final child = await saf.getChild(currentUri, [segment]);
       if (child == null) return null;
       currentUri = child.uri;
     }
