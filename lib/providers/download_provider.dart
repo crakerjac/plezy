@@ -335,7 +335,10 @@ class DownloadProvider extends ChangeNotifier with DisposableChangeNotifierMixin
   /// Returns null if artwork directory isn't initialized or artworkPath is null
   String? getArtworkLocalPath(String serverId, String? artworkPath) {
     if (artworkPath == null) return null;
-    return DownloadStorageService.instance.getArtworkPathSync(serverId, artworkPath);
+    // PlexSyncer: strip Plex timestamp suffix (e.g. /1777409847) before hashing
+    // so both timestamped and stripped URLs resolve to the same local file.
+    final canonical = artworkPath.replaceAll(RegExp(r'/\d+$'), '');
+    return DownloadStorageService.instance.getArtworkPathSync(serverId, canonical);
   }
 
   /// Get downloaded episodes for a specific show (by grandparentRatingKey)
