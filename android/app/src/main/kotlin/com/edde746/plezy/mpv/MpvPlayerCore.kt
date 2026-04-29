@@ -77,7 +77,7 @@ class MpvPlayerCore(private val activity: Activity) : SurfaceHolder.Callback {
                 flutterOverlayApplied = true
                 return@post
             }
-            FlutterOverlayHelper.configureFlutterZOrder(contentView, container, zOrderOnTop = true)
+            FlutterOverlayHelper.configureFlutterZOrder(contentView, container, compositionOrder = 1)
             flutterOverlayApplied = true
         }
     }
@@ -134,9 +134,6 @@ class MpvPlayerCore(private val activity: Activity) : SurfaceHolder.Callback {
             frameRateManager = FrameRateManager(
                 activity = activity,
                 handler = handler,
-                onDisplayChanged = {
-                    requestAutoResume("display change")
-                }
             )
 
             // Create FrameLayout container for video
@@ -157,6 +154,7 @@ class MpvPlayerCore(private val activity: Activity) : SurfaceHolder.Callback {
                 holder.addCallback(this@MpvPlayerCore)
                 setZOrderOnTop(false)
                 setZOrderMediaOverlay(false)
+                FlutterOverlayHelper.applyCompositionOrder(this, 0)
             }
 
             // Add SurfaceView to container
@@ -166,9 +164,10 @@ class MpvPlayerCore(private val activity: Activity) : SurfaceHolder.Callback {
             val contentView = activity.findViewById<ViewGroup>(android.R.id.content)
             contentView.addView(surfaceContainer, 0)
 
-            // Find FlutterView and set it on top of our video surface
+            // Find FlutterView and set it on top of our video surface.
+            // Stack (top → bottom): Flutter UI (compositionOrder=1) > video (0).
             FlutterOverlayHelper.findFlutterContainer(contentView, surfaceContainer)?.let { container ->
-                FlutterOverlayHelper.configureFlutterZOrder(contentView, container, zOrderOnTop = true)
+                FlutterOverlayHelper.configureFlutterZOrder(contentView, container, compositionOrder = 1)
                 flutterOverlayApplied = true
             }
             ensureFlutterOverlayOnTop()
@@ -707,8 +706,18 @@ class MpvPlayerCore(private val activity: Activity) : SurfaceHolder.Callback {
 
     // Frame Rate Matching
 
-    fun setVideoFrameRate(fps: Float, videoDurationMs: Long) {
-        frameRateManager?.setVideoFrameRate(fps, videoDurationMs, surfaceView?.holder?.surface)
+    fun setVideoFrameRate(
+        fps: Float,
+        videoDurationMs: Long,
+        extraDelayMs: Long,
+        onComplete: (switched: Boolean) -> Unit,
+    ) {
+        val mgr = frameRateManager
+        if (mgr == null) {
+            onComplete(false)
+            return
+        }
+        mgr.setVideoFrameRate(fps, videoDurationMs, surfaceView?.holder?.surface, extraDelayMs, onComplete)
     }
 
     fun clearVideoFrameRate() {

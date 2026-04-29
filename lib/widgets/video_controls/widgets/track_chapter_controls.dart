@@ -1,5 +1,3 @@
-import 'dart:io' show Platform;
-
 import 'package:flutter/material.dart';
 import 'package:material_symbols_icons/symbols.dart';
 import 'package:flutter/services.dart';
@@ -14,10 +12,11 @@ import '../../../i18n/strings.g.dart';
 import '../../../widgets/overlay_sheet.dart';
 import '../../../models/plex_metadata.dart';
 import '../models/track_controls_state.dart';
+import '../../../models/transcode_quality_preset.dart';
 import '../sheets/chapter_sheet.dart';
 import '../sheets/queue_sheet.dart';
 import '../sheets/track_sheet.dart';
-import '../sheets/version_sheet.dart';
+import '../sheets/version_quality_sheet.dart';
 import '../sheets/video_settings_sheet.dart';
 import '../../../services/shader_service.dart';
 import '../helpers/track_filter_helper.dart';
@@ -66,6 +65,9 @@ class TrackChapterControls extends StatelessWidget {
 
   List<PlexMediaVersion> get availableVersions => trackControlsState.availableVersions;
   int get selectedMediaIndex => trackControlsState.selectedMediaIndex;
+  TranscodeQualityPreset get selectedQualityPreset => trackControlsState.selectedQualityPreset;
+  bool get serverSupportsTranscoding => trackControlsState.serverSupportsTranscoding;
+  ValueChanged<TranscodeQualityPreset>? get onSwitchQualityPreset => trackControlsState.onSwitchQualityPreset;
   int get boxFitMode => trackControlsState.boxFitMode;
   int get audioSyncOffset => trackControlsState.audioSyncOffset;
   int get subtitleSyncOffset => trackControlsState.subtitleSyncOffset;
@@ -181,7 +183,7 @@ class TrackChapterControls extends StatelessWidget {
       builder: (context, snapshot) {
         final tracks = snapshot.data;
         final isMobile = PlatformDetector.isMobile(context);
-        final isDesktop = Platform.isWindows || Platform.isLinux || Platform.isMacOS;
+        final isDesktop = PlatformDetector.isDesktopOS();
 
         // Build list of buttons dynamically to track indices
         final buttons = <Widget>[];
@@ -267,6 +269,10 @@ class TrackChapterControls extends StatelessWidget {
                         onAudioTrackChanged: onAudioTrackChanged,
                         onSubtitleTrackChanged: onSubtitleTrackChanged,
                         onSecondarySubtitleTrackChanged: onSecondarySubtitleTrackChanged,
+                        isTranscoding: trackControlsState.isTranscoding,
+                        sourceAudioTracks: trackControlsState.sourceAudioTracks,
+                        selectedAudioStreamId: trackControlsState.selectedAudioStreamId,
+                        onSwitchAudioStreamId: trackControlsState.onSwitchAudioStreamId,
                       ),
                     )
                     .whenComplete(() => onStartAutoHide?.call());
@@ -282,7 +288,7 @@ class TrackChapterControls extends StatelessWidget {
           buttons.add(
             _buildTrackButton(
               buttonIndex: currentIndex,
-              icon: Symbols.video_library_rounded,
+              icon: Symbols.bookmarks_rounded,
               tooltip: t.videoControls.chaptersButton,
               semanticLabel: t.videoControls.chaptersButton,
               tracks: tracks,
@@ -313,7 +319,7 @@ class TrackChapterControls extends StatelessWidget {
           buttons.add(
             _buildTrackButton(
               buttonIndex: currentIndex,
-              icon: Symbols.queue_music_rounded,
+              icon: Symbols.queue_rounded,
               tooltip: t.videoControls.queue,
               semanticLabel: t.videoControls.queue,
               tracks: tracks,
@@ -330,15 +336,18 @@ class TrackChapterControls extends StatelessWidget {
           buttonIndex++;
         }
 
-        // Versions button
-        if (availableVersions.length > 1 && onSwitchVersion != null) {
+        // Version & Quality button
+        final showVersionQuality =
+            (availableVersions.length > 1 || serverSupportsTranscoding) &&
+            (onSwitchVersion != null || onSwitchQualityPreset != null);
+        if (showVersionQuality) {
           final currentIndex = buttonIndex;
           buttons.add(
             _buildTrackButton(
               buttonIndex: currentIndex,
-              icon: Symbols.video_file_rounded,
-              tooltip: t.videoControls.versionsButton,
-              semanticLabel: t.videoControls.versionsButton,
+              icon: Symbols.high_quality_rounded,
+              tooltip: t.videoControls.versionQualityButton,
+              semanticLabel: t.videoControls.versionQualityButton,
               tracks: tracks,
               isMobile: isMobile,
               isDesktop: isDesktop,
@@ -346,10 +355,14 @@ class TrackChapterControls extends StatelessWidget {
                 onCancelAutoHide?.call();
                 OverlaySheetController.of(context)
                     .show(
-                      builder: (_) => VersionSheet(
+                      builder: (_) => VersionQualitySheet(
                         availableVersions: availableVersions,
                         selectedMediaIndex: selectedMediaIndex,
-                        onVersionSelected: onSwitchVersion!,
+                        selectedQualityPreset: selectedQualityPreset,
+                        serverSupportsTranscoding: serverSupportsTranscoding,
+                        sourceDurationMs: trackControlsState.sourceDurationMs,
+                        onVersionSelected: (i) => onSwitchVersion?.call(i),
+                        onQualitySelected: (p) => onSwitchQualityPreset?.call(p),
                       ),
                     )
                     .whenComplete(() => onStartAutoHide?.call());
@@ -480,7 +493,10 @@ class TrackChapterControls extends StatelessWidget {
     count++; // Audio & subtitles button always shown
     if (chapters.isNotEmpty && !hideChaptersAndQueue) count++;
     if (showQueueButton && onQueueItemSelected != null && !hideChaptersAndQueue) count++;
-    if (availableVersions.length > 1 && onSwitchVersion != null) count++;
+    if ((availableVersions.length > 1 || serverSupportsTranscoding) &&
+        (onSwitchVersion != null || onSwitchQualityPreset != null)) {
+      count++;
+    }
     if (onTogglePIPMode != null) count++;
     if (onCycleBoxFitMode != null) count++;
     if (isMobile && !PlatformDetector.isTV()) count++; // Rotation lock (not on TV)

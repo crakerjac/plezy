@@ -153,7 +153,7 @@ class CompanionRemotePeerService with KeepaliveMixin {
           }
         } else {
           request.response.statusCode = HttpStatus.notFound;
-          request.response.close();
+          unawaited(request.response.close());
         }
       });
 
@@ -229,7 +229,7 @@ class CompanionRemotePeerService with KeepaliveMixin {
                   deviceName == null ||
                   platform == null) {
                 socket.add(jsonEncode({'type': 'authFailed'}));
-                socket.close(4003, 'Authentication failed');
+                unawaited(socket.close(4003, 'Authentication failed'));
                 return;
               }
 
@@ -240,7 +240,7 @@ class CompanionRemotePeerService with KeepaliveMixin {
                 _recordFailedAuth(sourceIp);
                 appLogger.w('CompanionRemote: Auth failed — unknown user');
                 socket.add(jsonEncode({'type': 'authFailed'}));
-                socket.close(4003, 'Authentication failed');
+                unawaited(socket.close(4003, 'Authentication failed'));
                 return;
               }
 
@@ -261,7 +261,7 @@ class CompanionRemotePeerService with KeepaliveMixin {
                 _recordFailedAuth(sourceIp);
                 appLogger.w('CompanionRemote: Auth failed — invalid auth tag');
                 socket.add(jsonEncode({'type': 'authFailed'}));
-                socket.close(4003, 'Authentication failed');
+                unawaited(socket.close(4003, 'Authentication failed'));
                 return;
               }
 
@@ -275,7 +275,7 @@ class CompanionRemotePeerService with KeepaliveMixin {
               // Close existing client if present
               if (_clientSocket != null) {
                 appLogger.d('CompanionRemote: Replacing existing client connection');
-                _clientSocket!.close(4004, 'Replaced by new connection');
+                unawaited(_clientSocket!.close(4004, 'Replaced by new connection'));
               }
 
               _clientSocket = socket;
@@ -298,7 +298,7 @@ class CompanionRemotePeerService with KeepaliveMixin {
               sendDeviceInfo(hostDeviceName, hostPlatform);
             } else {
               appLogger.w('CompanionRemote: Expected auth, got ${json['type']}');
-              socket.close(4002, 'Authentication required');
+              unawaited(socket.close(4002, 'Authentication required'));
             }
           } else {
             // Encrypted command — data is binary
@@ -546,7 +546,9 @@ class CompanionRemotePeerService with KeepaliveMixin {
         if (_channel != null) {
           try {
             await _channel!.sink.close();
-          } catch (_) {}
+          } catch (e) {
+            appLogger.d('CompanionRemote: channel close on timeout failed', error: e);
+          }
           _channel = null;
         }
         throw const RemotePeerError(type: RemotePeerErrorType.timeout, message: 'Timed out joining session');
@@ -591,7 +593,9 @@ class CompanionRemotePeerService with KeepaliveMixin {
       for (final ch in channels) {
         try {
           ch.sink.close();
-        } catch (_) {}
+        } catch (e) {
+          appLogger.d('CompanionRemote: race-loser close ignored', error: e);
+        }
       }
     }
 
@@ -610,7 +614,9 @@ class CompanionRemotePeerService with KeepaliveMixin {
                 appLogger.d('CompanionRemote: Race winner: $address');
                 completer.complete(address);
               }
-            } catch (_) {}
+            } catch (e) {
+              appLogger.d('CompanionRemote: race message parse skipped', error: e);
+            }
           },
           onError: (_) {},
           onDone: () {},
@@ -762,14 +768,18 @@ class CompanionRemotePeerService with KeepaliveMixin {
     if (_clientSocket != null) {
       try {
         await _clientSocket!.close();
-      } catch (_) {}
+      } catch (e) {
+        appLogger.d('CompanionRemote: client socket close ignored', error: e);
+      }
       _clientSocket = null;
     }
 
     if (_channel != null) {
       try {
         await _channel!.sink.close();
-      } catch (_) {}
+      } catch (e) {
+        appLogger.d('CompanionRemote: channel close ignored', error: e);
+      }
       _channel = null;
     }
 

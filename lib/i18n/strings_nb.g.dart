@@ -74,8 +74,10 @@ class TranslationsNb with BaseTranslations<AppLocale, Translations> implements T
 	@override late final _TranslationsVideoSettingsNb videoSettings = _TranslationsVideoSettingsNb._(_root);
 	@override late final _TranslationsExternalPlayerNb externalPlayer = _TranslationsExternalPlayerNb._(_root);
 	@override late final _TranslationsMetadataEditNb metadataEdit = _TranslationsMetadataEditNb._(_root);
+	@override late final _TranslationsMatchScreenNb matchScreen = _TranslationsMatchScreenNb._(_root);
 	@override late final _TranslationsServerTasksNb serverTasks = _TranslationsServerTasksNb._(_root);
 	@override late final _TranslationsTraktNb trakt = _TranslationsTraktNb._(_root);
+	@override late final _TranslationsTrackersNb trackers = _TranslationsTrackersNb._(_root);
 }
 
 // Path: app
@@ -153,6 +155,8 @@ class _TranslationsCommonNb implements TranslationsCommonEn {
 	@override String get connectingToServers => 'Kobler til servere...';
 	@override String get startingOfflineMode => 'Starter frakoblet modus...';
 	@override String get loading => 'Laster...';
+	@override String get fullscreen => 'Fullskjerm';
+	@override String get exitFullscreen => 'Avslutt fullskjerm';
 }
 
 // Path: screens
@@ -226,10 +230,16 @@ class _TranslationsSettingsNb implements TranslationsSettingsEn {
 	@override String get useGlobalHubsDescription => 'Vis hjemmeside-huber som den offisielle Plex-klienten. Når av, vises per-bibliotek-anbefalinger i stedet.';
 	@override String get showServerNameOnHubs => 'Vis servernavn på huber';
 	@override String get showServerNameOnHubsDescription => 'Vis alltid servernavnet i hubtitler. Når av, vises kun for dupliserte hubnavn.';
+	@override String get groupLibrariesByServer => 'Grupper biblioteker etter server';
+	@override String get groupLibrariesByServerDescription => 'Vis en overskrift for hver Plex-server i sidefeltet når du er koblet til flere servere.';
 	@override String get alwaysKeepSidebarOpen => 'Hold sidefeltet alltid åpent';
 	@override String get alwaysKeepSidebarOpenDescription => 'Sidefeltet forblir utvidet og innholdsområdet tilpasser seg';
 	@override String get showUnwatchedCount => 'Vis antall usette';
 	@override String get showUnwatchedCountDescription => 'Vis antall usette episoder på serier og sesonger';
+	@override String get showEpisodeNumberOnCards => 'Vis episodenummer på kort';
+	@override String get showEpisodeNumberOnCardsDescription => 'Vis episodenummer ved siden av sesongen (f.eks. S2 E3) på episodekort';
+	@override String get showSeasonPostersOnTabs => 'Vis sesongplakater på faner';
+	@override String get showSeasonPostersOnTabsDescription => 'Vis sesongens plakat over hver sesongfane på en series detaljside';
 	@override String get hideSpoilers => 'Skjul spoilere for usette episoder';
 	@override String get hideSpoilersDescription => 'Slør miniatyrbilder og skjul beskrivelser for episoder du ikke har sett ennå';
 	@override String get playerBackend => 'Spillermotor';
@@ -241,6 +251,8 @@ class _TranslationsSettingsNb implements TranslationsSettingsEn {
 	@override String bufferSizeMB({required Object size}) => '${size}MB';
 	@override String get bufferSizeAuto => 'Auto (Anbefalt)';
 	@override String bufferSizeWarning({required Object heap, required Object size}) => 'Enheten din har ${heap}MB minne. En ${size}MB buffer kan forårsake avspillingsproblemer.';
+	@override String get defaultQualityTitle => 'Standardkvalitet';
+	@override String get defaultQualityDescription => 'Brukes ved start av avspilling. Lavere verdier reduserer båndbredden.';
 	@override String get subtitleStyling => 'Undertekststil';
 	@override String get subtitleStylingDescription => 'Tilpass utseendet på undertekster';
 	@override String get smallSkipDuration => 'Kort hoppvarighet';
@@ -273,12 +285,26 @@ class _TranslationsSettingsNb implements TranslationsSettingsEn {
 	@override String get resetSettings => 'Tilbakestill innstillinger';
 	@override String get resetSettingsDescription => 'Dette vil tilbakestille alle innstillinger til standardverdier. Denne handlingen kan ikke angres.';
 	@override String get resetSettingsSuccess => 'Innstillinger tilbakestilt';
+	@override String get backup => 'Sikkerhetskopi';
+	@override String get exportSettings => 'Eksporter innstillinger';
+	@override String get exportSettingsDescription => 'Lagre innstillingene i en fil';
+	@override String get exportSettingsSuccess => 'Innstillinger eksportert';
+	@override String get exportSettingsFailed => 'Kunne ikke eksportere innstillinger';
+	@override String get importSettings => 'Importer innstillinger';
+	@override String get importSettingsDescription => 'Gjenopprett innstillinger fra en fil';
+	@override String get importSettingsConfirm => 'Dette vil erstatte nåværende innstillinger. Fortsette?';
+	@override String get importSettingsSuccess => 'Innstillinger importert';
+	@override String get importSettingsFailed => 'Kunne ikke importere innstillinger';
+	@override String get importSettingsInvalidFile => 'Denne filen er ikke en gyldig Plezy-innstillingseksport';
+	@override String get importSettingsNoUser => 'Logg inn før import av innstillinger';
 	@override String get shortcutsReset => 'Snarveier tilbakestilt til standard';
 	@override String get about => 'Om';
 	@override String get aboutDescription => 'Appinformasjon og lisenser';
 	@override String get updates => 'Oppdateringer';
 	@override String get updateAvailable => 'Oppdatering tilgjengelig';
 	@override String get checkForUpdates => 'Se etter oppdateringer';
+	@override String get autoCheckUpdatesOnStartup => 'Se automatisk etter oppdateringer ved oppstart';
+	@override String get autoCheckUpdatesOnStartupDescription => 'Vis et varsel når en ny versjon er tilgjengelig ved oppstart';
 	@override String get validationErrorEnterNumber => 'Vennligst skriv inn et gyldig tall';
 	@override String validationErrorDuration({required Object min, required Object max, required Object unit}) => 'Varigheten må være mellom ${min} og ${max} ${unit}';
 	@override String shortcutAlreadyAssigned({required Object action}) => 'Snarvei allerede tilordnet til ${action}';
@@ -318,6 +344,8 @@ class _TranslationsSettingsNb implements TranslationsSettingsEn {
 	@override String get discordRichPresenceDescription => 'Vis hva du ser på Discord';
 	@override String get trakt => 'Trakt';
 	@override String get traktDescription => 'Synkroniser visningshistorikk med Trakt';
+	@override String get trackers => 'Trackere';
+	@override String get trackersDescription => 'Synkroniser fremdrift til Trakt, MyAnimeList, AniList og Simkl';
 	@override String get companionRemoteServer => 'Companion Remote-server';
 	@override String get companionRemoteServerDescription => 'Tillat mobilenheter på nettverket ditt å styre denne appen';
 	@override String get autoPip => 'Auto bilde-i-bilde';
@@ -337,6 +365,8 @@ class _TranslationsSettingsNb implements TranslationsSettingsEn {
 	@override String get confirmExitOnBackDescription => 'Vis en bekreftelsesdialog når du trykker tilbake for å avslutte appen';
 	@override String get forceTvMode => 'Tving TV-modus';
 	@override String get forceTvModeDescription => 'Bruk TV-oppsettet uavhengig av automatisk gjenkjenning. Nyttig på Android TV-enheter som ikke rapporterer leanback-funksjonen. Starter appen på nytt ved endring.';
+	@override String get startInFullscreen => 'Start i fullskjerm';
+	@override String get startInFullscreenDescription => 'Åpne Plezy i fullskjermmodus ved oppstart';
 	@override String get autoHidePerformanceOverlay => 'Skjul ytelsesoverlegg automatisk';
 	@override String get autoHidePerformanceOverlayDescription => 'Fade ytelsesoverlegget med avspillingskontrollene';
 	@override String get showNavBarLabels => 'Vis navigasjonsfeltlabeler';
@@ -346,6 +376,7 @@ class _TranslationsSettingsNb implements TranslationsSettingsEn {
 	@override String get display => 'Display';
 	@override String get homeScreen => 'Home Screen';
 	@override String get navigation => 'Navigation';
+	@override String get window => 'Window';
 	@override String get content => 'Content';
 	@override String get player => 'Player';
 	@override String get subtitlesAndConfig => 'Subtitles & Configuration';
@@ -507,6 +538,13 @@ class _TranslationsVideoControlsNb implements TranslationsVideoControlsEn {
 	@override String get tracksButton => 'Lyd og undertekster';
 	@override String get chaptersButton => 'Kapitler';
 	@override String get versionsButton => 'Videoversjoner';
+	@override String get versionQualityButton => 'Versjon og kvalitet';
+	@override String get versionColumnHeader => 'Versjon';
+	@override String get qualityColumnHeader => 'Kvalitet';
+	@override String get qualityOriginal => 'Original';
+	@override String qualityPresetLabel({required Object resolution, required Object bitrate}) => '${resolution}p ${bitrate} Mbps';
+	@override String qualityBandwidthEstimate({required Object bitrate}) => '~${bitrate} Mbps';
+	@override String get transcodeUnavailableFallback => 'Transkoding utilgjengelig — spiller av i original kvalitet';
 	@override String get pipButton => 'Bilde-i-bilde-modus';
 	@override String get aspectRatioButton => 'Sideforhold';
 	@override String get ambientLighting => 'Omgivelseslys';
@@ -567,6 +605,10 @@ class _TranslationsMessagesNb implements TranslationsMessagesEn {
 	@override String get errorLoadingSeries => 'Feil ved lasting av serie';
 	@override String get errorLoadingSeason => 'Feil ved lasting av sesong';
 	@override String get musicNotSupported => 'Musikkavspilling støttes ikke ennå';
+	@override String get noDescriptionAvailable => 'Ingen beskrivelse tilgjengelig';
+	@override String get noProfilesAvailable => 'Ingen profiler tilgjengelige';
+	@override String get contactAdminForProfiles => 'Kontakt Plex-administratoren for å legge til profiler';
+	@override String get unableToDetermineLibrarySection => 'Kan ikke fastslå bibliotekseksjonen for dette elementet';
 	@override String get logsCleared => 'Logger tømt';
 	@override String get logsCopied => 'Logger kopiert til utklippstavle';
 	@override String get noLogsAvailable => 'Ingen logger tilgjengelig';
@@ -712,6 +754,8 @@ class _TranslationsLibrariesNb implements TranslationsLibrariesEn {
 	@override String analysisStarted({required Object title}) => 'Analyse startet for "${title}"';
 	@override String failedToAnalyze({required Object error}) => 'Kunne ikke analysere bibliotek: ${error}';
 	@override String get noLibrariesFound => 'Ingen biblioteker funnet';
+	@override String get allLibrariesHidden => 'Alle biblioteker er skjult';
+	@override String hiddenLibrariesCount({required Object count}) => 'Skjulte biblioteker (${count})';
 	@override String get thisLibraryIsEmpty => 'Dette biblioteket er tomt';
 	@override String get all => 'Alle';
 	@override String get clearAll => 'Tøm alle';
@@ -1001,6 +1045,11 @@ class _TranslationsDownloadsNb implements TranslationsDownloadsEn {
 	@override String get downloadDeleted => 'Nedlasting slettet';
 	@override String deleteConfirm({required Object title}) => 'Er du sikker på at du vil slette "${title}"? Dette vil fjerne den nedlastede filen fra enheten din.';
 	@override String deletingWithProgress({required Object title, required Object current, required Object total}) => 'Sletter ${title}... (${current} av ${total})';
+	@override String get deleting => 'Sletter...';
+	@override String get queuedTooltip => 'I kø';
+	@override String queuedFilesTooltip({required Object files}) => 'I kø: ${files}';
+	@override String get downloadingTooltip => 'Laster ned...';
+	@override String downloadingFilesTooltip({required Object files}) => 'Laster ned ${files}';
 	@override String get noDownloadsTree => 'Ingen nedlastinger';
 	@override String get pauseAll => 'Pause alle';
 	@override String get resumeAll => 'Gjenoppta alle';
@@ -1042,6 +1091,9 @@ class _TranslationsShadersNb implements TranslationsShadersEn {
 	@override String get title => 'Shadere';
 	@override String get noShaderDescription => 'Ingen videoforbedring';
 	@override String get nvscalerDescription => 'NVIDIA bildeskalering for skarpere video';
+	@override String get artcnnVariantNeutral => 'Nøytral';
+	@override String get artcnnVariantDenoise => 'Støyreduksjon';
+	@override String get artcnnVariantDenoiseSharpen => 'Støyreduksjon + skarphet';
 	@override String get qualityFast => 'Rask';
 	@override String get qualityHQ => 'Høy kvalitet';
 	@override String get mode => 'Modus';
@@ -1083,7 +1135,7 @@ class _TranslationsVideoSettingsNb implements TranslationsVideoSettingsEn {
 	@override String get audioOutput => 'Lydutgang';
 	@override String get performanceOverlay => 'Ytelsesoverlegg';
 	@override String get audioPassthrough => 'Lydgjennomgang';
-	@override String get audioNormalization => 'Lydnormalisering';
+	@override String get audioNormalization => 'Normaliser lydstyrke';
 }
 
 // Path: externalPlayer
@@ -1193,6 +1245,27 @@ class _TranslationsMetadataEditNb implements TranslationsMetadataEditEn {
 	@override String get mood => 'Stemning';
 }
 
+// Path: matchScreen
+class _TranslationsMatchScreenNb implements TranslationsMatchScreenEn {
+	_TranslationsMatchScreenNb._(this._root);
+
+	final TranslationsNb _root; // ignore: unused_field
+
+	// Translations
+	@override String get match => 'Match...';
+	@override String get fixMatch => 'Rett match...';
+	@override String get unmatch => 'Fjern match';
+	@override String get unmatchConfirm => 'Fjerne gjeldende match for dette elementet? Plex behandler det som umatchet til du matcher det igjen.';
+	@override String get unmatchSuccess => 'Match fjernet';
+	@override String get unmatchFailed => 'Kunne ikke fjerne match';
+	@override String get matchApplied => 'Match anvendt';
+	@override String get matchFailed => 'Kunne ikke anvende match';
+	@override String get titleHint => 'Tittel';
+	@override String get yearHint => 'År';
+	@override String get search => 'Søk';
+	@override String get noMatchesFound => 'Ingen treff funnet';
+}
+
 // Path: serverTasks
 class _TranslationsServerTasksNb implements TranslationsServerTasksEn {
 	_TranslationsServerTasksNb._(this._root);
@@ -1221,12 +1294,28 @@ class _TranslationsTraktNb implements TranslationsTraktEn {
 	@override String get scrobbleDescription => 'Send avspillings-, pause- og stopphendelser til Trakt under avspilling.';
 	@override String get watchedSync => 'Synkroniser sett-status';
 	@override String get watchedSyncDescription => 'Når du markerer noe som sett i Plezy, markeres det også på Trakt.';
-	@override String get deviceCodeTitle => 'Aktiver Plezy på Trakt';
-	@override String deviceCodeBody({required Object url}) => 'Besøk ${url} og skriv inn denne koden:';
-	@override String get openTraktActivate => 'Åpne Trakt for å aktivere';
-	@override String get waitingForAuthorization => 'Venter på autorisering…';
-	@override String get codeCopied => 'Kode kopiert';
-	@override String get connectFailed => 'Kunne ikke koble til Trakt. Prøv igjen.';
+}
+
+// Path: trackers
+class _TranslationsTrackersNb implements TranslationsTrackersEn {
+	_TranslationsTrackersNb._(this._root);
+
+	final TranslationsNb _root; // ignore: unused_field
+
+	// Translations
+	@override String get title => 'Trackere';
+	@override String get hubSubtitle => 'Hold visningsfremdriften synkronisert med Trakt og andre tjenester.';
+	@override String get notConnected => 'Ikke tilkoblet';
+	@override String connectedAs({required Object username}) => 'Tilkoblet som @${username}';
+	@override String get scrobble => 'Registrer fremdrift automatisk';
+	@override String get scrobbleDescription => 'Oppdater listen din når du er ferdig med en episode eller film.';
+	@override String disconnectConfirm({required Object service}) => 'Koble fra ${service}?';
+	@override String disconnectConfirmBody({required Object service}) => 'Plezy slutter å oppdatere ${service}-listen din. Du kan koble til igjen når som helst.';
+	@override String connectFailed({required Object service}) => 'Kunne ikke koble til ${service}. Prøv igjen.';
+	@override late final _TranslationsTrackersServicesNb services = _TranslationsTrackersServicesNb._(_root);
+	@override late final _TranslationsTrackersDeviceCodeNb deviceCode = _TranslationsTrackersDeviceCodeNb._(_root);
+	@override late final _TranslationsTrackersOauthProxyNb oauthProxy = _TranslationsTrackersOauthProxyNb._(_root);
+	@override late final _TranslationsTrackersLibraryFilterNb libraryFilter = _TranslationsTrackersLibraryFilterNb._(_root);
 }
 
 // Path: hotkeys.actions
@@ -1248,6 +1337,8 @@ class _TranslationsHotkeysActionsNb implements TranslationsHotkeysActionsEn {
 	@override String get subtitleTrackNext => 'Neste undertekstspor';
 	@override String get chapterNext => 'Neste kapittel';
 	@override String get chapterPrevious => 'Forrige kapittel';
+	@override String get episodeNext => 'Neste episode';
+	@override String get episodePrevious => 'Forrige episode';
 	@override String get speedIncrease => 'Øk hastighet';
 	@override String get speedDecrease => 'Reduser hastighet';
 	@override String get speedReset => 'Tilbakestill hastighet';
@@ -1383,6 +1474,66 @@ class _TranslationsCompanionRemoteRemoteNb implements TranslationsCompanionRemot
 	@override String get searchHint => 'Søk på stasjonær...';
 }
 
+// Path: trackers.services
+class _TranslationsTrackersServicesNb implements TranslationsTrackersServicesEn {
+	_TranslationsTrackersServicesNb._(this._root);
+
+	final TranslationsNb _root; // ignore: unused_field
+
+	// Translations
+	@override String get mal => 'MyAnimeList';
+	@override String get anilist => 'AniList';
+	@override String get simkl => 'Simkl';
+}
+
+// Path: trackers.deviceCode
+class _TranslationsTrackersDeviceCodeNb implements TranslationsTrackersDeviceCodeEn {
+	_TranslationsTrackersDeviceCodeNb._(this._root);
+
+	final TranslationsNb _root; // ignore: unused_field
+
+	// Translations
+	@override String title({required Object service}) => 'Aktiver Plezy på ${service}';
+	@override String body({required Object url}) => 'Besøk ${url} og skriv inn denne koden:';
+	@override String openToActivate({required Object service}) => 'Åpne ${service} for å aktivere';
+	@override String get waitingForAuthorization => 'Venter på godkjenning…';
+	@override String get codeCopied => 'Kode kopiert';
+}
+
+// Path: trackers.oauthProxy
+class _TranslationsTrackersOauthProxyNb implements TranslationsTrackersOauthProxyEn {
+	_TranslationsTrackersOauthProxyNb._(this._root);
+
+	final TranslationsNb _root; // ignore: unused_field
+
+	// Translations
+	@override String title({required Object service}) => 'Logg inn på ${service}';
+	@override String get body => 'Skann denne QR-koden med telefonen din, eller åpne URL-en under på en enhet med nettleser.';
+	@override String openToSignIn({required Object service}) => 'Åpne ${service} for å logge inn';
+	@override String get urlCopied => 'URL kopiert';
+}
+
+// Path: trackers.libraryFilter
+class _TranslationsTrackersLibraryFilterNb implements TranslationsTrackersLibraryFilterEn {
+	_TranslationsTrackersLibraryFilterNb._(this._root);
+
+	final TranslationsNb _root; // ignore: unused_field
+
+	// Translations
+	@override String get title => 'Biblioteksfilter';
+	@override String get subtitleAllSyncing => 'Synkroniserer alle biblioteker';
+	@override String get subtitleNoneSyncing => 'Ingenting synkroniseres';
+	@override String subtitleBlocked({required Object count}) => '${count} blokkert';
+	@override String subtitleAllowed({required Object count}) => '${count} tillatt';
+	@override String get mode => 'Filtermodus';
+	@override String get modeBlacklist => 'Svarteliste';
+	@override String get modeWhitelist => 'Hviteliste';
+	@override String get modeHintBlacklist => 'Synkroniser alle biblioteker bortsett fra dem du markerer nedenfor.';
+	@override String get modeHintWhitelist => 'Synkroniser kun bibliotekene du markerer nedenfor.';
+	@override String get libraries => 'Biblioteker';
+	@override String get noLibraries => 'Ingen biblioteker tilgjengelige';
+}
+
 /// The flat map containing all translations for locale <nb>.
 /// Only for edge cases! For simple maps, use the map function of this library.
 ///
@@ -1441,6 +1592,8 @@ extension on TranslationsNb {
 			'common.connectingToServers' => 'Kobler til servere...',
 			'common.startingOfflineMode' => 'Starter frakoblet modus...',
 			'common.loading' => 'Laster...',
+			'common.fullscreen' => 'Fullskjerm',
+			'common.exitFullscreen' => 'Avslutt fullskjerm',
 			'screens.licenses' => 'Lisenser',
 			'screens.switchProfile' => 'Bytt profil',
 			'screens.subtitleStyling' => 'Undertekststil',
@@ -1487,10 +1640,16 @@ extension on TranslationsNb {
 			'settings.useGlobalHubsDescription' => 'Vis hjemmeside-huber som den offisielle Plex-klienten. Når av, vises per-bibliotek-anbefalinger i stedet.',
 			'settings.showServerNameOnHubs' => 'Vis servernavn på huber',
 			'settings.showServerNameOnHubsDescription' => 'Vis alltid servernavnet i hubtitler. Når av, vises kun for dupliserte hubnavn.',
+			'settings.groupLibrariesByServer' => 'Grupper biblioteker etter server',
+			'settings.groupLibrariesByServerDescription' => 'Vis en overskrift for hver Plex-server i sidefeltet når du er koblet til flere servere.',
 			'settings.alwaysKeepSidebarOpen' => 'Hold sidefeltet alltid åpent',
 			'settings.alwaysKeepSidebarOpenDescription' => 'Sidefeltet forblir utvidet og innholdsområdet tilpasser seg',
 			'settings.showUnwatchedCount' => 'Vis antall usette',
 			'settings.showUnwatchedCountDescription' => 'Vis antall usette episoder på serier og sesonger',
+			'settings.showEpisodeNumberOnCards' => 'Vis episodenummer på kort',
+			'settings.showEpisodeNumberOnCardsDescription' => 'Vis episodenummer ved siden av sesongen (f.eks. S2 E3) på episodekort',
+			'settings.showSeasonPostersOnTabs' => 'Vis sesongplakater på faner',
+			'settings.showSeasonPostersOnTabsDescription' => 'Vis sesongens plakat over hver sesongfane på en series detaljside',
 			'settings.hideSpoilers' => 'Skjul spoilere for usette episoder',
 			'settings.hideSpoilersDescription' => 'Slør miniatyrbilder og skjul beskrivelser for episoder du ikke har sett ennå',
 			'settings.playerBackend' => 'Spillermotor',
@@ -1502,6 +1661,8 @@ extension on TranslationsNb {
 			'settings.bufferSizeMB' => ({required Object size}) => '${size}MB',
 			'settings.bufferSizeAuto' => 'Auto (Anbefalt)',
 			'settings.bufferSizeWarning' => ({required Object heap, required Object size}) => 'Enheten din har ${heap}MB minne. En ${size}MB buffer kan forårsake avspillingsproblemer.',
+			'settings.defaultQualityTitle' => 'Standardkvalitet',
+			'settings.defaultQualityDescription' => 'Brukes ved start av avspilling. Lavere verdier reduserer båndbredden.',
 			'settings.subtitleStyling' => 'Undertekststil',
 			'settings.subtitleStylingDescription' => 'Tilpass utseendet på undertekster',
 			'settings.smallSkipDuration' => 'Kort hoppvarighet',
@@ -1534,12 +1695,26 @@ extension on TranslationsNb {
 			'settings.resetSettings' => 'Tilbakestill innstillinger',
 			'settings.resetSettingsDescription' => 'Dette vil tilbakestille alle innstillinger til standardverdier. Denne handlingen kan ikke angres.',
 			'settings.resetSettingsSuccess' => 'Innstillinger tilbakestilt',
+			'settings.backup' => 'Sikkerhetskopi',
+			'settings.exportSettings' => 'Eksporter innstillinger',
+			'settings.exportSettingsDescription' => 'Lagre innstillingene i en fil',
+			'settings.exportSettingsSuccess' => 'Innstillinger eksportert',
+			'settings.exportSettingsFailed' => 'Kunne ikke eksportere innstillinger',
+			'settings.importSettings' => 'Importer innstillinger',
+			'settings.importSettingsDescription' => 'Gjenopprett innstillinger fra en fil',
+			'settings.importSettingsConfirm' => 'Dette vil erstatte nåværende innstillinger. Fortsette?',
+			'settings.importSettingsSuccess' => 'Innstillinger importert',
+			'settings.importSettingsFailed' => 'Kunne ikke importere innstillinger',
+			'settings.importSettingsInvalidFile' => 'Denne filen er ikke en gyldig Plezy-innstillingseksport',
+			'settings.importSettingsNoUser' => 'Logg inn før import av innstillinger',
 			'settings.shortcutsReset' => 'Snarveier tilbakestilt til standard',
 			'settings.about' => 'Om',
 			'settings.aboutDescription' => 'Appinformasjon og lisenser',
 			'settings.updates' => 'Oppdateringer',
 			'settings.updateAvailable' => 'Oppdatering tilgjengelig',
 			'settings.checkForUpdates' => 'Se etter oppdateringer',
+			'settings.autoCheckUpdatesOnStartup' => 'Se automatisk etter oppdateringer ved oppstart',
+			'settings.autoCheckUpdatesOnStartupDescription' => 'Vis et varsel når en ny versjon er tilgjengelig ved oppstart',
 			'settings.validationErrorEnterNumber' => 'Vennligst skriv inn et gyldig tall',
 			'settings.validationErrorDuration' => ({required Object min, required Object max, required Object unit}) => 'Varigheten må være mellom ${min} og ${max} ${unit}',
 			'settings.shortcutAlreadyAssigned' => ({required Object action}) => 'Snarvei allerede tilordnet til ${action}',
@@ -1579,6 +1754,8 @@ extension on TranslationsNb {
 			'settings.discordRichPresenceDescription' => 'Vis hva du ser på Discord',
 			'settings.trakt' => 'Trakt',
 			'settings.traktDescription' => 'Synkroniser visningshistorikk med Trakt',
+			'settings.trackers' => 'Trackere',
+			'settings.trackersDescription' => 'Synkroniser fremdrift til Trakt, MyAnimeList, AniList og Simkl',
 			'settings.companionRemoteServer' => 'Companion Remote-server',
 			'settings.companionRemoteServerDescription' => 'Tillat mobilenheter på nettverket ditt å styre denne appen',
 			'settings.autoPip' => 'Auto bilde-i-bilde',
@@ -1598,6 +1775,8 @@ extension on TranslationsNb {
 			'settings.confirmExitOnBackDescription' => 'Vis en bekreftelsesdialog når du trykker tilbake for å avslutte appen',
 			'settings.forceTvMode' => 'Tving TV-modus',
 			'settings.forceTvModeDescription' => 'Bruk TV-oppsettet uavhengig av automatisk gjenkjenning. Nyttig på Android TV-enheter som ikke rapporterer leanback-funksjonen. Starter appen på nytt ved endring.',
+			'settings.startInFullscreen' => 'Start i fullskjerm',
+			'settings.startInFullscreenDescription' => 'Åpne Plezy i fullskjermmodus ved oppstart',
 			'settings.autoHidePerformanceOverlay' => 'Skjul ytelsesoverlegg automatisk',
 			'settings.autoHidePerformanceOverlayDescription' => 'Fade ytelsesoverlegget med avspillingskontrollene',
 			'settings.showNavBarLabels' => 'Vis navigasjonsfeltlabeler',
@@ -1607,6 +1786,7 @@ extension on TranslationsNb {
 			'settings.display' => 'Display',
 			'settings.homeScreen' => 'Home Screen',
 			'settings.navigation' => 'Navigation',
+			'settings.window' => 'Window',
 			'settings.content' => 'Content',
 			'settings.player' => 'Player',
 			'settings.subtitlesAndConfig' => 'Subtitles & Configuration',
@@ -1630,6 +1810,8 @@ extension on TranslationsNb {
 			'hotkeys.actions.subtitleTrackNext' => 'Neste undertekstspor',
 			'hotkeys.actions.chapterNext' => 'Neste kapittel',
 			'hotkeys.actions.chapterPrevious' => 'Forrige kapittel',
+			'hotkeys.actions.episodeNext' => 'Neste episode',
+			'hotkeys.actions.episodePrevious' => 'Forrige episode',
 			'hotkeys.actions.speedIncrease' => 'Øk hastighet',
 			'hotkeys.actions.speedDecrease' => 'Reduser hastighet',
 			'hotkeys.actions.speedReset' => 'Tilbakestill hastighet',
@@ -1723,6 +1905,13 @@ extension on TranslationsNb {
 			'videoControls.tracksButton' => 'Lyd og undertekster',
 			'videoControls.chaptersButton' => 'Kapitler',
 			'videoControls.versionsButton' => 'Videoversjoner',
+			'videoControls.versionQualityButton' => 'Versjon og kvalitet',
+			'videoControls.versionColumnHeader' => 'Versjon',
+			'videoControls.qualityColumnHeader' => 'Kvalitet',
+			'videoControls.qualityOriginal' => 'Original',
+			'videoControls.qualityPresetLabel' => ({required Object resolution, required Object bitrate}) => '${resolution}p ${bitrate} Mbps',
+			'videoControls.qualityBandwidthEstimate' => ({required Object bitrate}) => '~${bitrate} Mbps',
+			'videoControls.transcodeUnavailableFallback' => 'Transkoding utilgjengelig — spiller av i original kvalitet',
 			'videoControls.pipButton' => 'Bilde-i-bilde-modus',
 			'videoControls.aspectRatioButton' => 'Sideforhold',
 			'videoControls.ambientLighting' => 'Omgivelseslys',
@@ -1771,6 +1960,10 @@ extension on TranslationsNb {
 			'messages.errorLoadingSeries' => 'Feil ved lasting av serie',
 			'messages.errorLoadingSeason' => 'Feil ved lasting av sesong',
 			'messages.musicNotSupported' => 'Musikkavspilling støttes ikke ennå',
+			'messages.noDescriptionAvailable' => 'Ingen beskrivelse tilgjengelig',
+			'messages.noProfilesAvailable' => 'Ingen profiler tilgjengelige',
+			'messages.contactAdminForProfiles' => 'Kontakt Plex-administratoren for å legge til profiler',
+			'messages.unableToDetermineLibrarySection' => 'Kan ikke fastslå bibliotekseksjonen for dette elementet',
 			'messages.logsCleared' => 'Logger tømt',
 			'messages.logsCopied' => 'Logger kopiert til utklippstavle',
 			'messages.noLogsAvailable' => 'Ingen logger tilgjengelig',
@@ -1861,7 +2054,11 @@ extension on TranslationsNb {
 			'libraries.analyzing' => ({required Object title}) => 'Analyserer "${title}"...',
 			'libraries.analysisStarted' => ({required Object title}) => 'Analyse startet for "${title}"',
 			'libraries.failedToAnalyze' => ({required Object error}) => 'Kunne ikke analysere bibliotek: ${error}',
+			_ => null,
+		} ?? switch (path) {
 			'libraries.noLibrariesFound' => 'Ingen biblioteker funnet',
+			'libraries.allLibrariesHidden' => 'Alle biblioteker er skjult',
+			'libraries.hiddenLibrariesCount' => ({required Object count}) => 'Skjulte biblioteker (${count})',
 			'libraries.thisLibraryIsEmpty' => 'Dette biblioteket er tomt',
 			'libraries.all' => 'Alle',
 			'libraries.clearAll' => 'Tøm alle',
@@ -1903,8 +2100,6 @@ extension on TranslationsNb {
 			'serverSelection.allServerConnectionsFailed' => 'Kunne ikke koble til noen servere. Sjekk nettverket ditt og prøv igjen.',
 			'serverSelection.noServersFoundForAccount' => ({required Object username, required Object email}) => 'Ingen servere funnet for ${username} (${email})',
 			'serverSelection.failedToLoadServers' => ({required Object error}) => 'Kunne ikke laste servere: ${error}',
-			_ => null,
-		} ?? switch (path) {
 			'hubDetail.title' => 'Tittel',
 			'hubDetail.releaseYear' => 'Utgivelsesår',
 			'hubDetail.dateAdded' => 'Dato lagt til',
@@ -2063,6 +2258,11 @@ extension on TranslationsNb {
 			'downloads.downloadDeleted' => 'Nedlasting slettet',
 			'downloads.deleteConfirm' => ({required Object title}) => 'Er du sikker på at du vil slette "${title}"? Dette vil fjerne den nedlastede filen fra enheten din.',
 			'downloads.deletingWithProgress' => ({required Object title, required Object current, required Object total}) => 'Sletter ${title}... (${current} av ${total})',
+			'downloads.deleting' => 'Sletter...',
+			'downloads.queuedTooltip' => 'I kø',
+			'downloads.queuedFilesTooltip' => ({required Object files}) => 'I kø: ${files}',
+			'downloads.downloadingTooltip' => 'Laster ned...',
+			'downloads.downloadingFilesTooltip' => ({required Object files}) => 'Laster ned ${files}',
 			'downloads.noDownloadsTree' => 'Ingen nedlastinger',
 			'downloads.pauseAll' => 'Pause alle',
 			'downloads.resumeAll' => 'Gjenoppta alle',
@@ -2095,6 +2295,9 @@ extension on TranslationsNb {
 			'shaders.title' => 'Shadere',
 			'shaders.noShaderDescription' => 'Ingen videoforbedring',
 			'shaders.nvscalerDescription' => 'NVIDIA bildeskalering for skarpere video',
+			'shaders.artcnnVariantNeutral' => 'Nøytral',
+			'shaders.artcnnVariantDenoise' => 'Støyreduksjon',
+			'shaders.artcnnVariantDenoiseSharpen' => 'Støyreduksjon + skarphet',
 			'shaders.qualityFast' => 'Rask',
 			'shaders.qualityHQ' => 'Høy kvalitet',
 			'shaders.mode' => 'Modus',
@@ -2169,7 +2372,7 @@ extension on TranslationsNb {
 			'videoSettings.audioOutput' => 'Lydutgang',
 			'videoSettings.performanceOverlay' => 'Ytelsesoverlegg',
 			'videoSettings.audioPassthrough' => 'Lydgjennomgang',
-			'videoSettings.audioNormalization' => 'Lydnormalisering',
+			'videoSettings.audioNormalization' => 'Normaliser lydstyrke',
 			'externalPlayer.title' => 'Ekstern spiller',
 			'externalPlayer.useExternalPlayer' => 'Bruk ekstern spiller',
 			'externalPlayer.useExternalPlayerDescription' => 'Åpne videoer i en ekstern app i stedet for den innebygde spilleren',
@@ -2259,6 +2462,18 @@ extension on TranslationsNb {
 			'metadataEdit.label' => 'Etikett',
 			'metadataEdit.style' => 'Stil',
 			'metadataEdit.mood' => 'Stemning',
+			'matchScreen.match' => 'Match...',
+			'matchScreen.fixMatch' => 'Rett match...',
+			'matchScreen.unmatch' => 'Fjern match',
+			'matchScreen.unmatchConfirm' => 'Fjerne gjeldende match for dette elementet? Plex behandler det som umatchet til du matcher det igjen.',
+			'matchScreen.unmatchSuccess' => 'Match fjernet',
+			'matchScreen.unmatchFailed' => 'Kunne ikke fjerne match',
+			'matchScreen.matchApplied' => 'Match anvendt',
+			'matchScreen.matchFailed' => 'Kunne ikke anvende match',
+			'matchScreen.titleHint' => 'Tittel',
+			'matchScreen.yearHint' => 'År',
+			'matchScreen.search' => 'Søk',
+			'matchScreen.noMatchesFound' => 'Ingen treff funnet',
 			'serverTasks.title' => 'Serveroppgaver',
 			'serverTasks.failedToLoad' => 'Kunne ikke laste oppgaver',
 			'serverTasks.noTasks' => 'Ingen oppgaver kjører',
@@ -2271,12 +2486,39 @@ extension on TranslationsNb {
 			'trakt.scrobbleDescription' => 'Send avspillings-, pause- og stopphendelser til Trakt under avspilling.',
 			'trakt.watchedSync' => 'Synkroniser sett-status',
 			'trakt.watchedSyncDescription' => 'Når du markerer noe som sett i Plezy, markeres det også på Trakt.',
-			'trakt.deviceCodeTitle' => 'Aktiver Plezy på Trakt',
-			'trakt.deviceCodeBody' => ({required Object url}) => 'Besøk ${url} og skriv inn denne koden:',
-			'trakt.openTraktActivate' => 'Åpne Trakt for å aktivere',
-			'trakt.waitingForAuthorization' => 'Venter på autorisering…',
-			'trakt.codeCopied' => 'Kode kopiert',
-			'trakt.connectFailed' => 'Kunne ikke koble til Trakt. Prøv igjen.',
+			'trackers.title' => 'Trackere',
+			'trackers.hubSubtitle' => 'Hold visningsfremdriften synkronisert med Trakt og andre tjenester.',
+			'trackers.notConnected' => 'Ikke tilkoblet',
+			'trackers.connectedAs' => ({required Object username}) => 'Tilkoblet som @${username}',
+			'trackers.scrobble' => 'Registrer fremdrift automatisk',
+			'trackers.scrobbleDescription' => 'Oppdater listen din når du er ferdig med en episode eller film.',
+			'trackers.disconnectConfirm' => ({required Object service}) => 'Koble fra ${service}?',
+			'trackers.disconnectConfirmBody' => ({required Object service}) => 'Plezy slutter å oppdatere ${service}-listen din. Du kan koble til igjen når som helst.',
+			'trackers.connectFailed' => ({required Object service}) => 'Kunne ikke koble til ${service}. Prøv igjen.',
+			'trackers.services.mal' => 'MyAnimeList',
+			'trackers.services.anilist' => 'AniList',
+			'trackers.services.simkl' => 'Simkl',
+			'trackers.deviceCode.title' => ({required Object service}) => 'Aktiver Plezy på ${service}',
+			'trackers.deviceCode.body' => ({required Object url}) => 'Besøk ${url} og skriv inn denne koden:',
+			'trackers.deviceCode.openToActivate' => ({required Object service}) => 'Åpne ${service} for å aktivere',
+			'trackers.deviceCode.waitingForAuthorization' => 'Venter på godkjenning…',
+			'trackers.deviceCode.codeCopied' => 'Kode kopiert',
+			'trackers.oauthProxy.title' => ({required Object service}) => 'Logg inn på ${service}',
+			'trackers.oauthProxy.body' => 'Skann denne QR-koden med telefonen din, eller åpne URL-en under på en enhet med nettleser.',
+			'trackers.oauthProxy.openToSignIn' => ({required Object service}) => 'Åpne ${service} for å logge inn',
+			'trackers.oauthProxy.urlCopied' => 'URL kopiert',
+			'trackers.libraryFilter.title' => 'Biblioteksfilter',
+			'trackers.libraryFilter.subtitleAllSyncing' => 'Synkroniserer alle biblioteker',
+			'trackers.libraryFilter.subtitleNoneSyncing' => 'Ingenting synkroniseres',
+			'trackers.libraryFilter.subtitleBlocked' => ({required Object count}) => '${count} blokkert',
+			'trackers.libraryFilter.subtitleAllowed' => ({required Object count}) => '${count} tillatt',
+			'trackers.libraryFilter.mode' => 'Filtermodus',
+			'trackers.libraryFilter.modeBlacklist' => 'Svarteliste',
+			'trackers.libraryFilter.modeWhitelist' => 'Hviteliste',
+			'trackers.libraryFilter.modeHintBlacklist' => 'Synkroniser alle biblioteker bortsett fra dem du markerer nedenfor.',
+			'trackers.libraryFilter.modeHintWhitelist' => 'Synkroniser kun bibliotekene du markerer nedenfor.',
+			'trackers.libraryFilter.libraries' => 'Biblioteker',
+			'trackers.libraryFilter.noLibraries' => 'Ingen biblioteker tilgjengelige',
 			_ => null,
 		};
 	}

@@ -1,6 +1,7 @@
 import 'dart:io' show Platform;
 import 'package:flutter/foundation.dart';
 import 'package:window_manager/window_manager.dart';
+import '../utils/platform_detector.dart';
 import 'macos_window_service.dart';
 import 'native_window_service.dart';
 
@@ -60,6 +61,21 @@ class FullscreenStateManager extends ChangeNotifier with WindowListener {
     }
   }
 
+  /// Enter fullscreen, preserving maximized state on Windows/Linux for restoration on exit.
+  Future<void> enterFullscreen() async {
+    if (Platform.isMacOS) {
+      await MacOSWindowService.enterFullscreen();
+    } else if (Platform.isWindows) {
+      await NativeWindowService.setFullScreen(true);
+    } else {
+      _wasMaximized = await windowManager.isMaximized();
+      if (_wasMaximized) {
+        await windowManager.unmaximize();
+      }
+      await windowManager.setFullScreen(true);
+    }
+  }
+
   /// Exit fullscreen, restoring maximized state if needed
   Future<void> exitFullscreen() async {
     if (Platform.isMacOS) {
@@ -96,7 +112,7 @@ class FullscreenStateManager extends ChangeNotifier with WindowListener {
   }
 
   bool _shouldMonitor() {
-    return Platform.isMacOS || Platform.isWindows || Platform.isLinux;
+    return PlatformDetector.isDesktopOS();
   }
 
   // WindowListener callbacks for Windows/Linux

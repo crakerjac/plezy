@@ -77,27 +77,32 @@ class TrackManager {
     _lastExternalSubtitles = externalSubtitles;
   }
 
-  /// Add external subtitle tracks to the player one by one.
+  /// Add external subtitle tracks to the player in parallel.
+  ///
+  /// Each sub-add does its own HTTP fetch of the sidecar file, so sequential
+  /// adds dominate startup (~170ms × N). Firing them in parallel lets
+  /// libavformat's network IO overlap and stops Dart → method channel → native
+  /// round-trips from stacking.
   Future<void> addExternalSubtitles(List<SubtitleTrack> externalSubtitles) async {
     if (externalSubtitles.isEmpty) return;
 
     appLogger.d('Adding ${externalSubtitles.length} external subtitle(s) to player');
 
-    for (final subtitleTrack in externalSubtitles) {
-      if (subtitleTrack.uri == null) continue;
-
-      try {
-        await player.addSubtitleTrack(
-          uri: subtitleTrack.uri!,
-          title: subtitleTrack.title,
-          language: subtitleTrack.language,
-          select: false,
-        );
-        appLogger.d('Added external subtitle: ${subtitleTrack.title ?? subtitleTrack.uri}');
-      } catch (e) {
-        appLogger.w('Failed to add external subtitle: ${subtitleTrack.title ?? subtitleTrack.uri}', error: e);
-      }
-    }
+    await Future.wait(
+      externalSubtitles.where((s) => s.uri != null).map((subtitleTrack) async {
+        try {
+          await player.addSubtitleTrack(
+            uri: subtitleTrack.uri!,
+            title: subtitleTrack.title,
+            language: subtitleTrack.language,
+            select: false,
+          );
+          appLogger.d('Added external subtitle: ${subtitleTrack.title ?? subtitleTrack.uri}');
+        } catch (e) {
+          appLogger.w('Failed to add external subtitle: ${subtitleTrack.title ?? subtitleTrack.uri}', error: e);
+        }
+      }),
+    );
   }
 
   /// Resume playback after external subtitles have been loaded (or failed).
@@ -117,7 +122,7 @@ class TrackManager {
       // play() failed — clear the flag immediately since playbackRestart won't fire
       appLogger.w('Resume after subtitle load failed, applying track selection directly', error: e);
       waitingForExternalSubsTrackSelection = false;
-      applyTrackSelection();
+      unawaited(applyTrackSelection());
       return;
     }
 
@@ -175,7 +180,7 @@ class TrackManager {
         preferredAudioTrack: preferredAudioTrack,
         preferredSubtitleTrack: preferredSubtitleTrack,
         preferredSecondarySubtitleTrack: preferredSecondarySubtitleTrack,
-        defaultPlaybackSpeed: settingsService.getDefaultPlaybackSpeed(),
+        defaultPlaybackSpeed: settingsService.read(SettingsService.defaultPlaybackSpeed),
         onAudioTrackChanged: onAudioTrackChanged,
         onSubtitleTrackChanged: onSubtitleTrackChanged,
       );
@@ -349,7 +354,7 @@ class TrackManager {
   /// Common guard checks for track change handlers.
   Future<int?> _guardTrackChange(PlexMediaInfo? info) async {
     final settings = await SettingsService.getInstance();
-    if (!settings.getRememberTrackSelections()) return null;
+    if (!settings.read(SettingsService.rememberTrackSelections)) return null;
 
     if (info == null) {
       appLogger.w('No media info available, cannot save stream selection');

@@ -1,9 +1,11 @@
 import 'dart:async';
+import 'dart:io' show Platform, ProcessInfo;
 import 'dart:ui' show AppExitResponse;
 import 'package:flutter/foundation.dart';
+// ignore: depend_on_referenced_packages
+import 'package:shared_preferences_foundation/shared_preferences_foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
-import 'dart:io' show Platform, ProcessInfo;
 import 'package:flutter/services.dart';
 import 'package:window_manager/window_manager.dart';
 import 'package:provider/provider.dart';
@@ -21,7 +23,9 @@ import 'services/discord_rpc_service.dart';
 import 'services/gamepad_service.dart';
 import 'services/trakt/trakt_scrobble_service.dart';
 import 'services/trakt/trakt_sync_service.dart';
+import 'services/trackers/tracker_coordinator.dart';
 import 'providers/trakt_account_provider.dart';
+import 'providers/trackers_provider.dart';
 import 'providers/user_profile_provider.dart';
 import 'providers/multi_server_provider.dart';
 import 'providers/theme_provider.dart';
@@ -35,7 +39,7 @@ import 'providers/offline_watch_provider.dart';
 import 'providers/companion_remote_provider.dart';
 import 'providers/shader_provider.dart';
 import 'utils/snackbar_helper.dart';
-import 'watch_together/watch_together.dart';
+import 'watch_together/providers/watch_together_provider.dart';
 import 'services/multi_server_manager.dart';
 import 'services/offline_watch_sync_service.dart';
 import 'services/server_connection_orchestrator.dart';
@@ -50,6 +54,7 @@ import 'services/plex_api_cache.dart';
 import 'database/app_database.dart';
 import 'screens/video_player_screen.dart';
 import 'utils/app_logger.dart';
+import 'utils/plex_http_client.dart' show httpClient;
 import 'utils/orientation_helper.dart';
 import 'utils/global_key_utils.dart';
 import 'utils/watch_state_notifier.dart';
@@ -83,9 +88,25 @@ void _absorbZeroOffsetPointerEvent(PointerEvent event) {
   }
 }
 
+/// Register platform plugin stores manually for tvOS. Flutter's tool
+/// doesn't support tvOS so it never generates a plugin registrant for it.
+/// Each plugin whose iOS Swift implementation is tvOS-compatible must be
+/// wired here; the Swift side (GeneratedPluginRegistrant.m / AppDelegate)
+/// also needs to call the plugin's Swift register(with:) to attach its
+/// message channels.
+void _registerTvosPlatformPlugins() {
+  if (!Platform.isIOS) return; // tvOS reports as iOS via dart:io.
+  SharedPreferencesFoundation.registerWith();
+}
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   _installZeroOffsetPointerGuard(); // Workaround for iPadOS 26.1+ modal dismissal bug
+
+  // On tvOS, Flutter's generated plugin registrant doesn't run (no tvOS
+  // target in Flutter's tool), so register platform stores manually for
+  // the plugins we use.
+  _registerTvosPlatformPlugins();
 
   if (_enableSentry) {
     final packageInfo = await PackageInfo.fromPlatform();
@@ -101,6 +122,8 @@ Future<void> main() async {
       options.enableAutoSessionTracking = false;
       options.recordHttpBreadcrumbs = false;
       options.captureNativeFailedRequests = false;
+      options.enableAppHangTracking = !kDebugMode;
+      options.appHangTimeoutInterval = const Duration(seconds: 3);
       options.beforeSend = _beforeSend;
       options.beforeBreadcrumb = _beforeBreadcrumb;
     }, appRunner: _bootstrapApp);
@@ -113,16 +136,16 @@ Future<void> main() async {
 Future<void> _bootstrapApp() async {
   // Initialize settings first to get saved locale
   final settings = await SettingsService.getInstance();
-  final savedLocale = settings.getAppLocale();
+  final savedLocale = settings.read(SettingsService.appLocale);
 
   // Initialize localization with saved locale
-  LocaleSettings.setLocale(savedLocale);
+  unawaited(LocaleSettings.setLocale(savedLocale));
 
   // Needed for formatting dates in different locales
   await initializeDateFormatting(savedLocale.languageCode, null);
 
   // Configure image cache — keep budget modest to leave headroom for Skia decode buffers
-  if (Platform.isWindows || Platform.isMacOS || Platform.isLinux) {
+  if (PlatformDetector.isDesktopOS()) {
     PaintingBinding.instance.imageCache.maximumSize = 1000;
     PaintingBinding.instance.imageCache.maximumSizeBytes = 150 << 20; // 150MB
   } else {
@@ -134,14 +157,16 @@ Future<void> _bootstrapApp() async {
   final futures = <Future<void>>[];
 
   // Initialize window_manager for desktop platforms
-  if (Platform.isMacOS || Platform.isWindows || Platform.isLinux) {
+  if (PlatformDetector.isDesktopOS()) {
     futures.add(windowManager.ensureInitialized());
   }
 
-  // Initialize TV detection and PiP service for Android
+  // Initialize TV detection (Android leanback or Apple TV) and PiP on Android.
+  if (Platform.isAndroid || Platform.isIOS) {
+    futures.add(TvDetectionService.getInstance(forceTv: settings.read(SettingsService.forceTvMode)));
+  }
   if (Platform.isAndroid) {
-    futures.add(TvDetectionService.getInstance(forceTv: settings.getForceTvMode()));
-    // Initialize PiP service to listen for PiP state changes
+    // Initialize PiP service to listen for PiP state changes (Android only).
     PipService();
   }
 
@@ -164,7 +189,7 @@ Future<void> _bootstrapApp() async {
   }
 
   // Initialize logger level based on debug setting
-  final debugEnabled = settings.getEnableDebugLogging();
+  final debugEnabled = settings.read(SettingsService.enableDebugLogging);
   setLoggerLevel(debugEnabled);
 
   // Log app version and git commit at startup
@@ -182,13 +207,20 @@ Future<void> _bootstrapApp() async {
   // Start global fullscreen state monitoring
   FullscreenStateManager().startMonitoring();
 
+  // Apply "start in fullscreen" preference on Windows/Linux. macOS is
+  // excluded — its native fullscreen animation is awkward at launch and
+  // the OS already restores window state.
+  if ((Platform.isWindows || Platform.isLinux) && settings.read(SettingsService.startInFullscreen)) {
+    unawaited(FullscreenStateManager().enterFullscreen());
+  }
+
   // Initialize gamepad service (all platforms — universal_gamepad auto-registers
   // and intercepts input events, so we must listen to re-dispatch them)
   GamepadService.instance.start();
 
   // Desktop-only services
-  if (Platform.isMacOS || Platform.isWindows || Platform.isLinux) {
-    DiscordRPCService.instance.initialize();
+  if (PlatformDetector.isDesktopOS()) {
+    unawaited(DiscordRPCService.instance.initialize());
   }
 
   // Trakt scrobble service (all platforms)
@@ -224,10 +256,10 @@ Breadcrumb? _beforeBreadcrumb(Breadcrumb? breadcrumb, Hint _) {
 FutureOr<SentryEvent?> _beforeSend(SentryEvent event, Hint _) {
   // Drop event if user opted out of crash reporting
   final instance = SettingsService.instanceOrNull;
-  if (instance != null && !instance.getCrashReporting()) return null;
+  if (instance != null && !instance.read(SettingsService.crashReporting)) return null;
 
   // Drop unactionable errors
-  var exceptions = event.exceptions;
+  final exceptions = event.exceptions;
   if (exceptions != null) {
     bool shouldDrop(SentryException e) {
       final v = e.value;
@@ -390,7 +422,7 @@ class _MainAppState extends State<MainApp> with WidgetsBindingObserver {
     WidgetsBinding.instance.addObserver(this);
 
     // On desktop, periodically check RSS and evict image cache if too high
-    if (Platform.isWindows || Platform.isMacOS || Platform.isLinux) {
+    if (PlatformDetector.isDesktopOS()) {
       _memoryCheckTimer = Timer.periodic(const Duration(seconds: 30), (_) {
         final rss = ProcessInfo.currentRss;
         if (rss > 1536 * 1024 * 1024) {
@@ -420,6 +452,7 @@ class _MainAppState extends State<MainApp> with WidgetsBindingObserver {
 
     _appLifecycleListener = AppLifecycleListener(
       onExitRequested: () async {
+        httpClient.close();
         await _appDatabase.close();
         return AppExitResponse.exit;
       },
@@ -436,6 +469,7 @@ class _MainAppState extends State<MainApp> with WidgetsBindingObserver {
     _connectivitySubscription?.cancel();
     _memoryCheckTimer?.cancel();
     _appLifecycleListener.dispose();
+    _downloadManager.dispose();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
@@ -504,7 +538,7 @@ class _MainAppState extends State<MainApp> with WidgetsBindingObserver {
       await downloadProvider.refreshMetadataFromCache();
       final activeKey = VideoPlayerScreenState.activeRatingKey;
       final settings = SettingsService.instanceOrNull;
-      if (settings != null && settings.getAutoRemoveWatchedDownloads()) {
+      if (settings != null && settings.read(SettingsService.autoRemoveWatchedDownloads)) {
         final deleted = await downloadProvider.autoDeleteWatchedDownloads(activeRatingKey: activeKey);
         if (deleted.isNotEmpty) {
           final msg = deleted.length == 1
@@ -565,7 +599,7 @@ class _MainAppState extends State<MainApp> with WidgetsBindingObserver {
         // (sync, downloads, cache) still hold references to the executor.
         // SQLite WAL mode handles process death; desktop uses onExitRequested.
         InAppReviewService.instance.endSession();
-        if (Platform.isWindows || Platform.isMacOS || Platform.isLinux) {
+        if (PlatformDetector.isDesktopOS()) {
           if (ProcessInfo.currentRss > 1024 * 1024 * 1024) {
             // 1GB
             _evictImageCaches();
@@ -635,6 +669,10 @@ class _MainAppState extends State<MainApp> with WidgetsBindingObserver {
 
             _startConnectivitySyncTrigger(downloadProvider);
 
+            // Thread the offline flag into services so queue/resume paths can
+            // short-circuit instead of hitting the network and failing.
+            downloadProvider.setOfflineSource(offlineModeProvider);
+
             _offlineWatchSyncService.startConnectivityMonitoring(offlineModeProvider);
             return _offlineWatchSyncService;
           },
@@ -652,9 +690,10 @@ class _MainAppState extends State<MainApp> with WidgetsBindingObserver {
         // Existing providers
         ChangeNotifierProvider(create: (context) => UserProfileProvider()),
         ChangeNotifierProvider(create: (context) => ThemeProvider()),
-        // Trakt account — depends on UserProfileProvider for per-profile token scoping.
-        // Hydrated and rebound in `_TraktBootstrap` below.
+        // Tracker accounts — depend on UserProfileProvider for per-profile
+        // session scoping. Hydrated and rebound by `_TrackerProfileBootstrap`.
         ChangeNotifierProvider(create: (context) => TraktAccountProvider()),
+        ChangeNotifierProvider(create: (context) => TrackersProvider()),
         ChangeNotifierProvider(create: (context) => SettingsProvider(), lazy: true),
         ChangeNotifierProvider(create: (context) => HiddenLibrariesProvider(), lazy: true),
         ChangeNotifierProvider(create: (context) => LibrariesProvider()),
@@ -666,31 +705,53 @@ class _MainAppState extends State<MainApp> with WidgetsBindingObserver {
       child: Consumer<ThemeProvider>(
         builder: (context, themeProvider, child) {
           return TranslationProvider(
-            child: _TraktProfileBootstrap(
-              child: Listener(
-                onPointerDown: (event) {
-                  if ((event.buttons & kBackMouseButton) != 0) {
-                    rootNavigatorKey.currentState?.maybePop();
-                  }
-                },
-                behavior: HitTestBehavior.translucent,
-                child: InputModeTracker(
-                  child: MaterialApp(
-                    title: t.app.title,
-                    debugShowCheckedModeBanner: false,
-                    theme: themeProvider.lightTheme,
-                    darkTheme: themeProvider.darkTheme,
-                    themeMode: themeProvider.materialThemeMode,
-                    navigatorKey: rootNavigatorKey,
-                    navigatorObservers: [routeObserver, BackKeySuppressorObserver()],
-                    home: const OrientationAwareSetup(),
-                    builder: (context, child) => ScaffoldMessenger(
-                      key: rootScaffoldMessengerKey,
-                      child: Scaffold(backgroundColor: Colors.transparent, body: child),
+            child: Builder(
+              builder: (context) {
+                final trakt = context.read<TraktAccountProvider>();
+                final trackers = context.read<TrackersProvider>();
+                return _TrackerProfileBootstrap(
+                  onProfileChanged: [trakt.onActiveProfileChanged, trackers.onActiveProfileChanged],
+                  onFirstMount: TrackerCoordinator.instance.initialize,
+                  child: Listener(
+                    onPointerDown: (event) {
+                      if ((event.buttons & kBackMouseButton) != 0) {
+                        rootNavigatorKey.currentState?.maybePop();
+                      }
+                    },
+                    behavior: HitTestBehavior.translucent,
+                    child: InputModeTracker(
+                      child: MaterialApp(
+                        title: t.app.title,
+                        debugShowCheckedModeBanner: false,
+                        theme: themeProvider.lightTheme,
+                        darkTheme: themeProvider.darkTheme,
+                        themeMode: themeProvider.materialThemeMode,
+                        navigatorKey: rootNavigatorKey,
+                        navigatorObservers: [routeObserver, BackKeySuppressorObserver()],
+                        home: const OrientationAwareSetup(),
+                        // Siri Remote select + gamepad A report as
+                        // LogicalKeyboardKey.{select,gameButtonA} which aren't
+                        // in Flutter's default shortcut set — Material-level
+                        // widgets (PopupMenuItem, showModalBottomSheet actions)
+                        // ignore them. Map both to ActivateIntent so tapping
+                        // select on tvOS activates the focused widget.
+                        shortcuts: <ShortcutActivator, Intent>{
+                          ...WidgetsApp.defaultShortcuts,
+                          const SingleActivator(LogicalKeyboardKey.select): const ActivateIntent(),
+                          const SingleActivator(LogicalKeyboardKey.gameButtonA): const ActivateIntent(),
+                        },
+                        builder: (context, child) => ScaffoldMessenger(
+                          key: rootScaffoldMessengerKey,
+                          child: Scaffold(
+                            backgroundColor: Colors.transparent,
+                            body: _AppleTvScale(child: child),
+                          ),
+                        ),
+                      ),
                     ),
                   ),
-                ),
-              ),
+                );
+              },
             ),
           );
         },
@@ -699,40 +760,91 @@ class _MainAppState extends State<MainApp> with WidgetsBindingObserver {
   }
 }
 
-/// Hydrates the [TraktAccountProvider] with the active Plex profile's session
-/// and rebinds the scrobble + sync services whenever the user switches.
-///
-/// Lives high in the widget tree (above MaterialApp) so the listener survives
-/// route changes.
-class _TraktProfileBootstrap extends StatefulWidget {
-  final Widget child;
-  const _TraktProfileBootstrap({required this.child});
+/// On Apple TV the system hands Flutter a 1920×1080 surface at
+/// devicePixelRatio 1.0, the same logical pixel count as a phablet. That's
+/// too dense for a 10ft viewing distance, so everything ends up tiny. We
+/// shrink the effective logical size to half and scale the rendered output
+/// back up so fonts, icons, and paddings end up visually ~2× larger — roughly
+/// matching the UI feel of Android TV (which renders at lower logical DPI).
+class _AppleTvScale extends StatelessWidget {
+  final Widget? child;
+  const _AppleTvScale({required this.child});
+
+  static const double _scale = 2.0;
 
   @override
-  State<_TraktProfileBootstrap> createState() => _TraktProfileBootstrapState();
+  Widget build(BuildContext context) {
+    if (child == null || !PlatformDetector.isAppleTV()) {
+      return child ?? const SizedBox.shrink();
+    }
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final logicalSize = Size(constraints.maxWidth / _scale, constraints.maxHeight / _scale);
+        final outerQ = MediaQuery.of(context);
+        // tvOS reports conservative overscan insets (~60pt top/bottom,
+        // ~90pt left/right). Modern TVs don't overscan, so treat them as
+        // dead margin and zero them out — the UI can use the full surface.
+        return Transform.scale(
+          scale: _scale,
+          alignment: Alignment.topLeft,
+          transformHitTests: true,
+          child: SizedBox(
+            width: logicalSize.width,
+            height: logicalSize.height,
+            child: MediaQuery(
+              data: outerQ.copyWith(
+                size: logicalSize,
+                devicePixelRatio: outerQ.devicePixelRatio * _scale,
+                padding: EdgeInsets.zero,
+                viewPadding: EdgeInsets.zero,
+                viewInsets: EdgeInsets.zero,
+                systemGestureInsets: EdgeInsets.zero,
+              ),
+              child: child!,
+            ),
+          ),
+        );
+      },
+    );
+  }
 }
 
-class _TraktProfileBootstrapState extends State<_TraktProfileBootstrap> {
+/// Hydrates Trakt and MAL/AniList/Simkl providers with the active Plex
+/// profile's sessions and rebinds their services whenever the user switches.
+///
+/// Lives high in the widget tree (above MaterialApp) so the listener survives
+/// route changes. [onFirstMount] runs exactly once after the first
+/// `didChangeDependencies`.
+class _TrackerProfileBootstrap extends StatefulWidget {
+  final Widget child;
+  final List<Future<void> Function(String? uuid)> onProfileChanged;
+  final VoidCallback? onFirstMount;
+
+  const _TrackerProfileBootstrap({required this.child, required this.onProfileChanged, this.onFirstMount});
+
+  @override
+  State<_TrackerProfileBootstrap> createState() => _TrackerProfileBootstrapState();
+}
+
+class _TrackerProfileBootstrapState extends State<_TrackerProfileBootstrap> {
   UserProfileProvider? _profile;
-  TraktAccountProvider? _trakt;
   String? _lastUuid;
-  bool _hydrated = false;
+  bool _initialized = false;
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
     final profile = context.read<UserProfileProvider>();
-    final trakt = context.read<TraktAccountProvider>();
 
     if (!identical(_profile, profile)) {
       _profile?.removeListener(_onProfileChanged);
       _profile = profile;
       _profile!.addListener(_onProfileChanged);
     }
-    _trakt = trakt;
 
-    if (!_hydrated) {
-      _hydrated = true;
+    if (!_initialized) {
+      _initialized = true;
+      widget.onFirstMount?.call();
       _onProfileChanged();
     }
   }
@@ -741,7 +853,13 @@ class _TraktProfileBootstrapState extends State<_TraktProfileBootstrap> {
     final uuid = _profile?.currentUser?.uuid;
     if (uuid == _lastUuid) return;
     _lastUuid = uuid;
-    _trakt?.onActiveProfileChanged(uuid);
+    for (final fn in widget.onProfileChanged) {
+      unawaited(
+        fn(uuid).catchError((Object e, StackTrace s) {
+          appLogger.w('Tracker profile bootstrap failed', error: e, stackTrace: s);
+        }),
+      );
+    }
   }
 
   @override
@@ -810,7 +928,7 @@ class _SetupScreenState extends State<SetupScreen> {
     // Check network connectivity early to fast-path airplane mode.
     // Timeout guards against connectivity_plus hanging on some Android TV devices after force-close.
     bool hasNetwork;
-    Sentry.addBreadcrumb(Breadcrumb(message: 'Checking network connectivity', category: 'setup'));
+    unawaited(Sentry.addBreadcrumb(Breadcrumb(message: 'Checking network connectivity', category: 'setup')));
     try {
       final connectivityResult = await Connectivity().checkConnectivity().timeout(
         const Duration(seconds: 3),
@@ -822,7 +940,9 @@ class _SetupScreenState extends State<SetupScreen> {
       hasNetwork = true;
     }
 
-    Sentry.addBreadcrumb(Breadcrumb(message: 'Network check done: hasNetwork=$hasNetwork', category: 'setup'));
+    unawaited(
+      Sentry.addBreadcrumb(Breadcrumb(message: 'Network check done: hasNetwork=$hasNetwork', category: 'setup')),
+    );
 
     if (hasNetwork) {
       _setStatus(t.common.refreshingServers);
@@ -834,7 +954,7 @@ class _SetupScreenState extends State<SetupScreen> {
       if (refreshResult == ServerRefreshResult.authError) {
         await storage.clearCredentials();
         if (mounted) {
-          Navigator.pushReplacement(context, fadeRoute(const AuthScreen()));
+          unawaited(Navigator.pushReplacement(context, fadeRoute(const AuthScreen())));
         }
         return;
       }
@@ -847,7 +967,7 @@ class _SetupScreenState extends State<SetupScreen> {
 
     if (servers.isEmpty) {
       if (mounted) {
-        Navigator.pushReplacement(context, fadeRoute(const AuthScreen()));
+        unawaited(Navigator.pushReplacement(context, fadeRoute(const AuthScreen())));
       }
       return;
     }
@@ -859,11 +979,13 @@ class _SetupScreenState extends State<SetupScreen> {
       _setStatus(t.common.startingOfflineMode);
       await context.read<DownloadProvider>().ensureInitialized();
       if (!mounted) return;
-      Navigator.pushReplacement(context, fadeRoute(const MainScreen(isOfflineMode: true)));
+      unawaited(Navigator.pushReplacement(context, fadeRoute(const MainScreen(isOfflineMode: true))));
       return;
     }
 
-    Sentry.addBreadcrumb(Breadcrumb(message: 'Connecting to ${servers.length} server(s)', category: 'setup'));
+    unawaited(
+      Sentry.addBreadcrumb(Breadcrumb(message: 'Connecting to ${servers.length} server(s)', category: 'setup')),
+    );
     _setStatus(t.common.connectingToServers);
 
     // Populate per-server status for splash display
@@ -899,16 +1021,18 @@ class _SetupScreenState extends State<SetupScreen> {
       if (result.hasConnections && result.firstClient != null) {
         // Resume any downloads that were interrupted by app kill
         final downloadProvider = context.read<DownloadProvider>();
-        downloadProvider.ensureInitialized().then((_) {
-          downloadProvider.resumeQueuedDownloads(result.firstClient!);
-        });
+        unawaited(
+          downloadProvider.ensureInitialized().then((_) {
+            downloadProvider.resumeQueuedDownloads(result.firstClient!);
+          }),
+        );
 
-        Navigator.pushReplacement(context, fadeRoute(MainScreen(client: result.firstClient!)));
+        unawaited(Navigator.pushReplacement(context, fadeRoute(MainScreen(client: result.firstClient!))));
       } else {
         _setStatus(t.common.startingOfflineMode);
         await context.read<DownloadProvider>().ensureInitialized();
         if (!mounted) return;
-        Navigator.pushReplacement(context, fadeRoute(const MainScreen(isOfflineMode: true)));
+        unawaited(Navigator.pushReplacement(context, fadeRoute(const MainScreen(isOfflineMode: true))));
       }
     } catch (e, stackTrace) {
       appLogger.e('Error during multi-server connection', error: e, stackTrace: stackTrace);
@@ -917,7 +1041,7 @@ class _SetupScreenState extends State<SetupScreen> {
         _setStatus(t.common.startingOfflineMode);
         await context.read<DownloadProvider>().ensureInitialized();
         if (!mounted) return;
-        Navigator.pushReplacement(context, fadeRoute(const MainScreen(isOfflineMode: true)));
+        unawaited(Navigator.pushReplacement(context, fadeRoute(const MainScreen(isOfflineMode: true))));
       }
     }
   }
@@ -986,13 +1110,13 @@ class _SetupScreenState extends State<SetupScreen> {
           Positioned(
             left: 0,
             right: 0,
-            bottom: MediaQuery.of(context).size.height * 0.5 - 170,
+            bottom: MediaQuery.sizeOf(context).height * 0.5 - 170,
             child: _buildStatusText(context),
           ),
           Positioned(
             left: 0,
             right: 0,
-            top: MediaQuery.of(context).size.height * 0.5 + 180,
+            top: MediaQuery.sizeOf(context).height * 0.5 + 180,
             child: Center(
               child: _serverStatus.isEmpty
                   ? const SizedBox(

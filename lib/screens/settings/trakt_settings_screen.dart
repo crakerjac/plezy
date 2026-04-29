@@ -1,71 +1,34 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:material_symbols_icons/symbols.dart';
 import 'package:provider/provider.dart';
-import 'package:url_launcher/url_launcher.dart';
 
-import '../../focus/input_mode_tracker.dart';
 import '../../i18n/strings.g.dart';
-import '../../models/trakt/trakt_device_code.dart';
+import '../../models/trackers/device_code.dart';
 import '../../providers/trakt_account_provider.dart';
 import '../../services/settings_service.dart';
+import '../../services/trackers/tracker_constants.dart';
 import '../../services/trakt/trakt_scrobble_service.dart';
 import '../../services/trakt/trakt_sync_service.dart';
-import '../../utils/app_logger.dart';
-import '../../utils/snackbar_helper.dart';
+import '../../utils/dialogs.dart';
 import '../../widgets/app_icon.dart';
+import '../../widgets/device_code_dialog.dart';
 import '../../widgets/focused_scroll_scaffold.dart';
 import '../../widgets/settings_section.dart';
+import 'tracker_connect_launcher.dart';
+import 'tracker_library_filter_screen.dart';
 
-/// Start the Trakt device-code OAuth flow from anywhere in the app.
-///
-/// Shows the code dialog + polls until the user completes authorization.
-/// On pointer-driven platforms (desktop + mobile when dpad/keyboard mode
-/// isn't active) this additionally auto-launches the browser at
-/// `trakt.tv/activate` with the code prefilled — the dialog still shows
-/// as a fallback/progress indicator.
-Future<void> startTraktConnection(BuildContext context) async {
+Future<void> startTraktConnection(BuildContext context) {
   final account = context.read<TraktAccountProvider>();
-  if (account.isConnecting || account.isConnected) return;
-
-  final autoLaunchBrowser = !InputModeTracker.isKeyboardMode(context);
-  var dialogOpen = false;
-
-  final ok = await account.connect(
-    onCodeReady: (code) {
-      if (!context.mounted) return;
-      dialogOpen = true;
-      showDialog<void>(
-        context: context,
-        barrierDismissible: false,
-        builder: (_) => _DeviceCodeDialog(code: code, account: account),
-      ).whenComplete(() => dialogOpen = false);
-      if (autoLaunchBrowser) {
-        final url = code.verificationUrlComplete ?? code.verificationUrl;
-        unawaited(
-          launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication).catchError((Object e) {
-            appLogger.d('Trakt: failed to auto-launch browser', error: e);
-            return false;
-          }),
-        );
-      }
-    },
+  final name = t.trakt.title;
+  return launchTrackerConnect<DeviceCode>(
+    context,
+    isBusyOrConnected: account.isConnecting || account.isConnected,
+    serviceName: name,
+    connect: (cb) => account.connect(onCodeReady: cb),
+    onCancel: account.cancelConnect,
+    buildDialog: (code, cancel) => DeviceCodeDialog(code: code, serviceName: name, onCancel: cancel),
+    urlFor: (code) => code.verificationUrlComplete ?? code.verificationUrl,
   );
-
-  if (!context.mounted) return;
-
-  // Close the dialog iff we showed one and it's still up (not already closed by
-  // the Cancel button). This is the ONLY site that dismisses the dialog —
-  // popping here and having the dialog self-pop would pop the screen behind.
-  if (dialogOpen) {
-    Navigator.of(context, rootNavigator: true).pop();
-  }
-
-  if (!ok && account.session == null) {
-    showAppSnackBar(context, t.trakt.connectFailed);
-  }
 }
 
 class TraktSettingsScreen extends StatefulWidget {
@@ -92,28 +55,21 @@ class _TraktSettingsScreenState extends State<TraktSettingsScreen> {
     if (!mounted) return;
     setState(() {
       _settings = s;
-      _scrobbleEnabled = s.getEnableTraktScrobble();
-      _watchedSyncEnabled = s.getEnableTraktWatchedSync();
+      _scrobbleEnabled = s.read(SettingsService.enableTraktScrobble);
+      _watchedSyncEnabled = s.read(SettingsService.enableTraktWatchedSync);
       _loaded = true;
     });
   }
 
   Future<void> _disconnect(TraktAccountProvider account) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(t.trakt.disconnectConfirm),
-        content: Text(t.trakt.disconnectConfirmBody),
-        actions: [
-          TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: Text(t.common.cancel)),
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(true),
-            child: Text(t.common.disconnect, style: TextStyle(color: Theme.of(ctx).colorScheme.error)),
-          ),
-        ],
-      ),
+    final confirmed = await showConfirmDialog(
+      context,
+      title: t.trakt.disconnectConfirm,
+      message: t.trakt.disconnectConfirmBody,
+      confirmText: t.common.disconnect,
+      isDestructive: true,
     );
-    if (confirmed != true) return;
+    if (!confirmed) return;
     await account.disconnect();
     // build()'s post-frame handler pops the screen once the provider rebuilds
     // with isConnected == false — don't pop here too.
@@ -162,7 +118,7 @@ class _TraktSettingsScreenState extends State<TraktSettingsScreen> {
                   value: _scrobbleEnabled,
                   onChanged: (value) async {
                     setState(() => _scrobbleEnabled = value);
-                    await _settings!.setEnableTraktScrobble(value);
+                    await _settings!.write(SettingsService.enableTraktScrobble, value);
                     await TraktScrobbleService.instance.setEnabled(value);
                   },
                 ),
@@ -173,8 +129,22 @@ class _TraktSettingsScreenState extends State<TraktSettingsScreen> {
                   value: _watchedSyncEnabled,
                   onChanged: (value) async {
                     setState(() => _watchedSyncEnabled = value);
-                    await _settings!.setEnableTraktWatchedSync(value);
+                    await _settings!.write(SettingsService.enableTraktWatchedSync, value);
                     await TraktSyncService.instance.setEnabled(value);
+                  },
+                ),
+                ListTile(
+                  leading: const AppIcon(Symbols.filter_list_rounded, fill: 1),
+                  title: Text(t.trackers.libraryFilter.title),
+                  subtitle: Text(TrackerLibraryFilterScreen.subtitleFor(_settings!, TrackerService.trakt)),
+                  trailing: const AppIcon(Symbols.chevron_right_rounded, fill: 1),
+                  onTap: () async {
+                    await Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) => const TrackerLibraryFilterScreen(service: TrackerService.trakt),
+                      ),
+                    );
+                    if (mounted) setState(() {});
                   },
                 ),
                 const Divider(height: 32),
@@ -189,87 +159,6 @@ class _TraktSettingsScreenState extends State<TraktSettingsScreen> {
           ],
         );
       },
-    );
-  }
-}
-
-class _DeviceCodeDialog extends StatefulWidget {
-  final TraktDeviceCode code;
-  final TraktAccountProvider account;
-  const _DeviceCodeDialog({required this.code, required this.account});
-
-  @override
-  State<_DeviceCodeDialog> createState() => _DeviceCodeDialogState();
-}
-
-class _DeviceCodeDialogState extends State<_DeviceCodeDialog> {
-  Future<void> _open() async {
-    final url = widget.code.verificationUrlComplete ?? widget.code.verificationUrl;
-    await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
-  }
-
-  Future<void> _copy() async {
-    await Clipboard.setData(ClipboardData(text: widget.code.userCode));
-    if (!mounted) return;
-    showAppSnackBar(context, t.trakt.codeCopied);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return AlertDialog(
-      title: Text(t.trakt.deviceCodeTitle),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(t.trakt.deviceCodeBody(url: widget.code.verificationUrl), style: theme.textTheme.bodyMedium),
-          const SizedBox(height: 16),
-          Center(
-            child: InkWell(
-              onTap: _copy,
-              borderRadius: BorderRadius.circular(8),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                child: Text(
-                  widget.code.userCode,
-                  style: theme.textTheme.displaySmall?.copyWith(
-                    fontFeatures: const [FontFeature.tabularFigures()],
-                    letterSpacing: 4,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(height: 16),
-          SizedBox(
-            width: double.infinity,
-            child: FilledButton.icon(
-              icon: const Icon(Icons.open_in_new),
-              label: Text(t.trakt.openTraktActivate),
-              onPressed: _open,
-            ),
-          ),
-          const SizedBox(height: 16),
-          Row(
-            children: [
-              const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)),
-              const SizedBox(width: 12),
-              Expanded(child: Text(t.trakt.waitingForAuthorization, style: theme.textTheme.bodySmall)),
-            ],
-          ),
-        ],
-      ),
-      actions: [
-        TextButton(
-          onPressed: () {
-            widget.account.cancelConnect();
-            Navigator.of(context, rootNavigator: true).pop();
-          },
-          child: Text(t.common.cancel),
-        ),
-      ],
     );
   }
 }

@@ -7,6 +7,7 @@ import 'package:provider/provider.dart';
 import '../mpv/mpv.dart';
 import '../models/plex_metadata.dart';
 import '../models/plex_video_playback_data.dart';
+import '../models/transcode_quality_preset.dart';
 import '../providers/download_provider.dart';
 import '../providers/multi_server_provider.dart';
 import '../screens/video_player_screen.dart';
@@ -52,6 +53,7 @@ Future<bool?> navigateToVideoPlayer(
   SubtitleTrack? preferredSubtitleTrack,
   SubtitleTrack? preferredSecondarySubtitleTrack,
   int? selectedMediaIndex,
+  TranscodeQualityPreset? selectedQualityPreset,
   bool usePushReplacement = false,
   bool isOffline = false,
   PlexVideoPlaybackData? playbackData,
@@ -68,7 +70,7 @@ Future<bool?> navigateToVideoPlayer(
     try {
       final settingsService = await SettingsService.getInstance();
       final seriesKey = metadata.grandparentRatingKey ?? metadata.ratingKey;
-      final savedPreference = settingsService.getMediaVersionPreference(seriesKey);
+      final savedPreference = settingsService.read(SettingsService.mediaVersionPreferences)[seriesKey];
       if (savedPreference != null) {
         mediaIndex = savedPreference;
         // Pre-parsed playbackData was built with mediaIndex=0; invalidate if
@@ -85,7 +87,7 @@ Future<bool?> navigateToVideoPlayer(
   // Check if external player is enabled
   try {
     final settingsService = await SettingsService.getInstance();
-    if (settingsService.getUseExternalPlayer()) {
+    if (settingsService.read(SettingsService.useExternalPlayer)) {
       bool launched = false;
 
       if (isOffline) {
@@ -130,6 +132,7 @@ Future<bool?> navigateToVideoPlayer(
       preferredSubtitleTrack: preferredSubtitleTrack,
       preferredSecondarySubtitleTrack: preferredSecondarySubtitleTrack,
       selectedMediaIndex: mediaIndex,
+      selectedQualityPreset: selectedQualityPreset,
       isOffline: isOffline,
       playbackData: effectivePlaybackData,
     ),

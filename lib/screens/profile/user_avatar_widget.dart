@@ -3,6 +3,7 @@ import 'package:plezy/widgets/app_icon.dart';
 import 'package:material_symbols_icons/symbols.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../../models/plex_home_user.dart';
+import '../../services/image_cache_service.dart';
 import '../../theme/mono_tokens.dart';
 import '../../i18n/strings.g.dart';
 import '../../widgets/plex_optimized_image.dart' show blurArtwork;
@@ -12,7 +13,6 @@ class UserAvatarWidget extends StatelessWidget {
   final double size;
   final bool showIndicators;
   final bool useTextLabels;
-  final VoidCallback? onTap;
 
   const UserAvatarWidget({
     super.key,
@@ -20,7 +20,6 @@ class UserAvatarWidget extends StatelessWidget {
     this.size = 40,
     this.showIndicators = true,
     this.useTextLabels = false,
-    this.onTap,
   });
 
   Widget _buildPlaceholderAvatar(ThemeData theme) {
@@ -145,9 +144,11 @@ class UserAvatarWidget extends StatelessWidget {
             child: blurArtwork(
               CachedNetworkImage(
                 imageUrl: user.thumb,
+                cacheManager: PlexImageCacheManager.instance,
                 width: size,
                 height: size,
                 fit: BoxFit.cover,
+                memCacheHeight: (size * MediaQuery.devicePixelRatioOf(context)).round(),
                 placeholder: (ctx, url) => _buildPlaceholderAvatar(theme),
                 errorWidget: (ctx, url, error) => _buildPlaceholderAvatar(theme),
               ),
@@ -196,15 +197,13 @@ class UserAvatarWidget extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    return useTextLabels
-        ? GestureDetector(
-            onTap: onTap,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [_buildAvatar(context, theme), ..._buildTextLabels(context, theme)],
-            ),
-          )
-        : GestureDetector(onTap: onTap, child: _buildAvatar(context, theme));
+    if (useTextLabels) {
+      return Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [_buildAvatar(context, theme), ..._buildTextLabels(context, theme)],
+      );
+    }
+    return _buildAvatar(context, theme);
   }
 }
 

@@ -99,60 +99,7 @@ class PlexOptimizedImage extends StatelessWidget {
   }) = PlexOptimizedImage._;
 
   /// Named constructor for poster images with default fallback icon.
-  const factory PlexOptimizedImage.poster({
-    Key? key,
-    PlexClient? client,
-    required String? imagePath,
-    double? width,
-    double? height,
-    BoxFit fit,
-    FilterQuality filterQuality,
-    Widget Function(BuildContext, String)? placeholder,
-    Widget Function(BuildContext, String, dynamic)? errorWidget,
-    Duration fadeInDuration,
-    bool enableTranscoding,
-    String? cacheKey,
-    Alignment alignment,
-    String? localFilePath,
-  }) = PlexOptimizedImage._poster;
-
-  /// Named constructor for episode thumbnails.
-  const factory PlexOptimizedImage.thumb({
-    Key? key,
-    PlexClient? client,
-    required String? imagePath,
-    double? width,
-    double? height,
-    BoxFit fit,
-    FilterQuality filterQuality,
-    Widget Function(BuildContext, String)? placeholder,
-    Widget Function(BuildContext, String, dynamic)? errorWidget,
-    Duration fadeInDuration,
-    bool enableTranscoding,
-    String? cacheKey,
-    Alignment alignment,
-    String? localFilePath,
-  }) = PlexOptimizedImage._thumb;
-
-  /// Named constructor for playlist images.
-  const factory PlexOptimizedImage.playlist({
-    Key? key,
-    PlexClient? client,
-    required String? imagePath,
-    double? width,
-    double? height,
-    BoxFit fit,
-    FilterQuality filterQuality,
-    Widget Function(BuildContext, String)? placeholder,
-    Widget Function(BuildContext, String, dynamic)? errorWidget,
-    Duration fadeInDuration,
-    bool enableTranscoding,
-    String? cacheKey,
-    Alignment alignment,
-    String? localFilePath,
-  }) = PlexOptimizedImage._playlist;
-
-  const PlexOptimizedImage._poster({
+  const PlexOptimizedImage.poster({
     Key? key,
     PlexClient? client,
     required String? imagePath,
@@ -186,7 +133,8 @@ class PlexOptimizedImage extends StatelessWidget {
          localFilePath: localFilePath,
        );
 
-  const PlexOptimizedImage._thumb({
+  /// Named constructor for episode thumbnails.
+  const PlexOptimizedImage.thumb({
     Key? key,
     PlexClient? client,
     required String? imagePath,
@@ -220,7 +168,8 @@ class PlexOptimizedImage extends StatelessWidget {
          localFilePath: localFilePath,
        );
 
-  const PlexOptimizedImage._playlist({
+  /// Named constructor for playlist images.
+  const PlexOptimizedImage.playlist({
     Key? key,
     PlexClient? client,
     required String? imagePath,
@@ -355,14 +304,14 @@ class PlexOptimizedImage extends StatelessWidget {
     // Calculate memory cache dimensions
     final scaledWidth = effectiveWidth * devicePixelRatio;
     final scaledHeight = effectiveHeight * devicePixelRatio;
-    final (memWidth, memHeight) = PlexImageHelper.getMemCacheDimensions(
+    final (_, memHeight) = PlexImageHelper.getMemCacheDimensions(
       displayWidth: scaledWidth.isFinite && scaledWidth > 0 ? scaledWidth.round() : 0,
       displayHeight: scaledHeight.isFinite && scaledHeight > 0 ? scaledHeight.round() : 0,
       imageType: imageType,
     );
 
     // Generate cache key if not provided
-    final effectiveCacheKey = cacheKey ?? _generateCacheKey(imageUrl, memWidth, memHeight);
+    final effectiveCacheKey = cacheKey ?? _generateCacheKey(imageUrl);
 
     return Image(
       image: CachedNetworkImageProvider(
@@ -397,49 +346,32 @@ class PlexOptimizedImage extends StatelessWidget {
     );
   }
 
-  Widget _buildPlaceholder(BuildContext context) {
+  Widget _surfacePlaceholder(BuildContext context, {IconData? icon, Color? iconColor, bool fillParent = false}) {
+    final theme = Theme.of(context).colorScheme;
     return Container(
-      width: width,
-      height: height,
-      color: Theme.of(context).colorScheme.surfaceContainerHighest,
-      child: fallbackIcon != null
-          ? Center(child: AppIcon(fallbackIcon!, fill: 1, size: 40, color: Colors.white54))
-          : null,
+      width: fillParent ? null : width,
+      height: fillParent ? null : height,
+      color: theme.surfaceContainerHighest,
+      child: icon == null
+          ? null
+          : Center(child: AppIcon(icon, fill: 1, size: 40, color: iconColor ?? theme.onSurfaceVariant)),
     );
   }
 
-  Widget _buildErrorWidget(BuildContext context, dynamic _) {
-    return Container(
-      color: Theme.of(context).colorScheme.surfaceContainerHighest,
-      child: Center(
-        child: AppIcon(
-          fallbackIcon ?? Symbols.broken_image_rounded,
-          fill: 1,
-          size: 40,
-          color: Theme.of(context).colorScheme.onSurfaceVariant,
-        ),
-      ),
-    );
-  }
+  Widget _buildPlaceholder(BuildContext context) =>
+      _surfacePlaceholder(context, icon: fallbackIcon, iconColor: Colors.white54);
 
-  Widget _buildFallback(BuildContext context) {
-    return Container(
-      width: width,
-      height: height,
-      color: Theme.of(context).colorScheme.surfaceContainerHighest,
-      child: Center(
-        child: AppIcon(
-          fallbackIcon ?? Symbols.image_not_supported_rounded,
-          fill: 1,
-          size: 40,
-          color: Theme.of(context).colorScheme.onSurfaceVariant,
-        ),
-      ),
-    );
-  }
+  Widget _buildErrorWidget(BuildContext context, dynamic _) =>
+      _surfacePlaceholder(context, icon: fallbackIcon ?? Symbols.broken_image_rounded, fillParent: true);
 
-  String _generateCacheKey(String imageUrl, int memWidth, int memHeight) {
-    final urlHash = imageUrl.hashCode;
-    return 'plex_optimized_${memWidth}x${memHeight}_$urlHash';
+  Widget _buildFallback(BuildContext context) =>
+      _surfacePlaceholder(context, icon: fallbackIcon ?? Symbols.image_not_supported_rounded);
+
+  String _generateCacheKey(String imageUrl) {
+    // URL already encodes bucketed transcode dimensions via roundDimensions,
+    // so the URL hash alone uniquely identifies the bytes on disk. Including
+    // mem-cache dimensions here would re-introduce churn on every pixel of
+    // window resize and defeat getMemCacheDimensions' bucketing.
+    return 'plex_optimized_${imageUrl.hashCode}';
   }
 }

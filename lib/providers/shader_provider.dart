@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 
+import '../mixins/disposable_change_notifier_mixin.dart';
 import '../models/shader_preset.dart';
 import '../services/settings_service.dart';
 import '../services/shader_asset_loader.dart';
@@ -7,7 +8,7 @@ import '../services/shader_asset_loader.dart';
 /// Provider for managing shader preset state.
 ///
 /// Persists the selected shader preset so it is restored across sessions.
-class ShaderProvider extends ChangeNotifier {
+class ShaderProvider extends ChangeNotifier with DisposableChangeNotifierMixin {
   late SettingsService _settingsService;
 
   ShaderPreset _savedPreset = ShaderPreset.none;
@@ -23,15 +24,15 @@ class ShaderProvider extends ChangeNotifier {
     _settingsService = await SettingsService.getInstance();
 
     // Load custom presets from storage
-    final customData = _settingsService.getCustomShaderPresets();
+    final customData = _settingsService.read(SettingsService.customShaderPresets);
     _customPresets = customData.map((json) => ShaderPreset.fromJson(json)).toList();
 
-    final presetId = _settingsService.getGlobalShaderPreset();
+    final presetId = _settingsService.read(SettingsService.globalShaderPreset);
     _savedPreset = findPresetById(presetId) ?? ShaderPreset.none;
     _currentPreset = _savedPreset;
 
     _initialized = true;
-    notifyListeners();
+    safeNotifyListeners();
   }
 
   /// Whether the provider has finished initializing
@@ -62,8 +63,8 @@ class ShaderProvider extends ChangeNotifier {
   Future<void> setPreset(ShaderPreset preset) async {
     _savedPreset = preset;
     _currentPreset = preset;
-    await _settingsService.setGlobalShaderPreset(preset.id);
-    notifyListeners();
+    await _settingsService.write(SettingsService.globalShaderPreset, preset.id);
+    safeNotifyListeners();
   }
 
   /// Update the current preset without persisting (e.g. toggling off temporarily)
@@ -84,7 +85,7 @@ class ShaderProvider extends ChangeNotifier {
 
     _customPresets.add(preset);
     await _saveCustomPresets();
-    notifyListeners();
+    safeNotifyListeners();
     return preset;
   }
 
@@ -100,15 +101,15 @@ class ShaderProvider extends ChangeNotifier {
     if (_currentPreset.id == preset.id || _savedPreset.id == preset.id) {
       _savedPreset = ShaderPreset.none;
       _currentPreset = ShaderPreset.none;
-      await _settingsService.setGlobalShaderPreset(ShaderPreset.none.id);
+      await _settingsService.write(SettingsService.globalShaderPreset, ShaderPreset.none.id);
     }
 
-    notifyListeners();
+    safeNotifyListeners();
   }
 
   Future<void> _saveCustomPresets() async {
     final data = _customPresets.map((p) => p.toJson()).toList();
-    await _settingsService.setCustomShaderPresets(data);
+    await _settingsService.write(SettingsService.customShaderPresets, data);
   }
 
   /// Reset to default (no shaders)

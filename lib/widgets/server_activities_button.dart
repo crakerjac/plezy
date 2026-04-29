@@ -73,7 +73,7 @@ class _ServerActivitiesButtonState extends State<ServerActivitiesButton> {
     if (renderBox == null) return;
     final buttonOffset = renderBox.localToGlobal(Offset.zero);
     final buttonSize = renderBox.size;
-    final screenSize = MediaQuery.of(context).size;
+    final screenSize = MediaQuery.sizeOf(context);
 
     final right = screenSize.width - (buttonOffset.dx + buttonSize.width);
     final top = buttonOffset.dy + buttonSize.height + 4;
@@ -143,7 +143,7 @@ class _ServerActivitiesButtonState extends State<ServerActivitiesButton> {
     _pollTimer?.cancel();
     _pollTimer = null;
     _panelNotifier.value = _PanelData.loading;
-    _fetchActivities();
+    unawaited(_fetchActivities());
   }
 
   Widget _buildOverlay(BuildContext overlayContext, {required double right, required double top}) {

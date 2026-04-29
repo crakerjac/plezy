@@ -1,7 +1,6 @@
 import 'package:flutter/services.dart';
 
 import '../../models.dart';
-import '../../../utils/app_logger.dart';
 import '../player_base.dart';
 
 /// Android implementation of [Player] using ExoPlayer.
@@ -55,20 +54,31 @@ class PlayerAndroid extends PlayerBase {
   // Initialization
   // ============================================
 
+  // Memoizes the in-flight init Future so concurrent callers share one
+  // `invoke('initialize')`. ExoPlayer's native handleInitialize is
+  // synchronous and would mask a Dart-side race anyway, but we mirror the
+  // pattern from PlayerNative for consistency and to avoid a partial-init
+  // hole if any observeProperty call throws.
+  Future<void>? _initFuture;
+
   Future<void> _ensureInitialized() async {
     if (initialized) return;
+    return _initFuture ??= _doInitialize();
+  }
 
+  Future<void> _doInitialize() async {
     try {
       final result = await invoke<bool>('initialize', {
         'bufferSizeBytes': _bufferSizeBytes,
         'tunnelingEnabled': _tunnelingEnabled,
       });
-      initialized = result == true;
-      if (!initialized) {
+      if (result != true) {
         throw Exception('Failed to initialize ExoPlayer');
       }
 
-      // Register property observers so the plugin knows propId mappings
+      // Register property observers before flipping `initialized` so partial
+      // failures don't leave us in a half-initialized state that the memoized
+      // future would falsely treat as ready.
       await observeProperty('time-pos', 'double');
       await observeProperty('duration', 'double');
       await observeProperty('seekable', 'flag');
@@ -81,7 +91,10 @@ class PlayerAndroid extends PlayerBase {
       await observeProperty('aid', 'string');
       await observeProperty('sid', 'string');
       await observeProperty('demuxer-cache-time', 'double');
+
+      initialized = true;
     } catch (e) {
+      _initFuture = null;
       errorController.add(PlayerError('Initialization failed: $e'));
       rethrow;
     }
@@ -138,15 +151,7 @@ class PlayerAndroid extends PlayerBase {
 
   @override
   Future<void> seek(Duration position) async {
-    try {
-      await invoke('seek', {'positionMs': position.inMilliseconds});
-    } on PlatformException catch (e) {
-      if (e.code == 'COMMAND_FAILED' || e.code == 'NOT_INITIALIZED') {
-        appLogger.w('Seek failed (${e.code}), player not ready');
-        return;
-      }
-      rethrow;
-    }
+    await runSeek(() => invoke('seek', {'positionMs': position.inMilliseconds}));
   }
 
   // ============================================
@@ -381,13 +386,29 @@ class PlayerAndroid extends PlayerBase {
   }
 
   // ============================================
+  // Box-fit / video scaling mode
+  // ============================================
+
+  /// Apply the box-fit mode to the native ExoPlayer layer.
+  /// Maps to AspectRatioFrameLayout resize mode: 0=FIT, 1=ZOOM, 2=FILL.
+  Future<void> setBoxFitMode(int mode) async {
+    if (disposed || !initialized) return;
+    await invoke('setBoxFitMode', {'mode': mode});
+  }
+
+  // ============================================
   // Frame Rate Matching
   // ============================================
 
   @override
-  Future<void> setVideoFrameRate(double fps, int durationMs) async {
-    if (disposed || !initialized) return;
-    await invoke('setVideoFrameRate', {'fps': fps, 'duration': durationMs});
+  Future<bool> setVideoFrameRate(double fps, int durationMs, {int extraDelayMs = 0}) async {
+    if (disposed || !initialized) return false;
+    final result = await invoke<bool>('setVideoFrameRate', {
+      'fps': fps,
+      'duration': durationMs,
+      'extraDelayMs': extraDelayMs,
+    });
+    return result ?? false;
   }
 
   @override

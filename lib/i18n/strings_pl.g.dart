@@ -74,8 +74,10 @@ class TranslationsPl with BaseTranslations<AppLocale, Translations> implements T
 	@override late final _TranslationsVideoSettingsPl videoSettings = _TranslationsVideoSettingsPl._(_root);
 	@override late final _TranslationsExternalPlayerPl externalPlayer = _TranslationsExternalPlayerPl._(_root);
 	@override late final _TranslationsMetadataEditPl metadataEdit = _TranslationsMetadataEditPl._(_root);
+	@override late final _TranslationsMatchScreenPl matchScreen = _TranslationsMatchScreenPl._(_root);
 	@override late final _TranslationsServerTasksPl serverTasks = _TranslationsServerTasksPl._(_root);
 	@override late final _TranslationsTraktPl trakt = _TranslationsTraktPl._(_root);
+	@override late final _TranslationsTrackersPl trackers = _TranslationsTrackersPl._(_root);
 }
 
 // Path: app
@@ -153,6 +155,8 @@ class _TranslationsCommonPl implements TranslationsCommonEn {
 	@override String get connectingToServers => 'Łączenie z serwerami...';
 	@override String get startingOfflineMode => 'Uruchamianie trybu offline...';
 	@override String get loading => 'Ładowanie...';
+	@override String get fullscreen => 'Pełny ekran';
+	@override String get exitFullscreen => 'Wyjdź z pełnego ekranu';
 }
 
 // Path: screens
@@ -226,10 +230,16 @@ class _TranslationsSettingsPl implements TranslationsSettingsEn {
 	@override String get useGlobalHubsDescription => 'Pokaż huby strony głównej jak w oficjalnym kliencie Plex. Gdy wyłączone, pokazuje rekomendacje per biblioteka.';
 	@override String get showServerNameOnHubs => 'Pokaż nazwę serwera w hubach';
 	@override String get showServerNameOnHubsDescription => 'Zawsze wyświetlaj nazwę serwera w tytułach hubów. Gdy wyłączone, pokazuje tylko dla zduplikowanych nazw.';
+	@override String get groupLibrariesByServer => 'Grupuj biblioteki według serwera';
+	@override String get groupLibrariesByServerDescription => 'Pokazuj nagłówek dla każdego serwera Plex na pasku bocznym, gdy jesteś połączony z wieloma serwerami.';
 	@override String get alwaysKeepSidebarOpen => 'Zawsze utrzymuj panel boczny otwarty';
 	@override String get alwaysKeepSidebarOpenDescription => 'Panel boczny jest rozwinięty, a obszar treści dostosowuje się';
 	@override String get showUnwatchedCount => 'Pokaż liczbę nieobejrzanych';
 	@override String get showUnwatchedCountDescription => 'Wyświetl liczbę nieobejrzanych odcinków w serialach i sezonach';
+	@override String get showEpisodeNumberOnCards => 'Pokaż numer odcinka na kartach';
+	@override String get showEpisodeNumberOnCardsDescription => 'Wyświetla numer odcinka obok sezonu (np. S2 E3) na kartach odcinków';
+	@override String get showSeasonPostersOnTabs => 'Pokaż plakaty sezonów na zakładkach';
+	@override String get showSeasonPostersOnTabsDescription => 'Wyświetla plakat sezonu nad każdą zakładką sezonu na stronie szczegółów serialu';
 	@override String get hideSpoilers => 'Ukryj spoilery nieobejrzanych odcinków';
 	@override String get hideSpoilersDescription => 'Rozmyj miniatury i ukryj opisy odcinków, których jeszcze nie obejrzałeś';
 	@override String get playerBackend => 'Backend odtwarzacza';
@@ -241,6 +251,8 @@ class _TranslationsSettingsPl implements TranslationsSettingsEn {
 	@override String bufferSizeMB({required Object size}) => '${size}MB';
 	@override String get bufferSizeAuto => 'Automatyczny (Zalecany)';
 	@override String bufferSizeWarning({required Object heap, required Object size}) => 'Twoje urządzenie ma ${heap}MB pamięci. Bufor ${size}MB może powodować problemy z odtwarzaniem.';
+	@override String get defaultQualityTitle => 'Domyślna jakość';
+	@override String get defaultQualityDescription => 'Używane podczas rozpoczynania odtwarzania. Niższe wartości zmniejszają przepustowość.';
 	@override String get subtitleStyling => 'Styl napisów';
 	@override String get subtitleStylingDescription => 'Dostosuj wygląd napisów';
 	@override String get smallSkipDuration => 'Krótki skok';
@@ -273,12 +285,26 @@ class _TranslationsSettingsPl implements TranslationsSettingsEn {
 	@override String get resetSettings => 'Zresetuj ustawienia';
 	@override String get resetSettingsDescription => 'Wszystkie ustawienia zostaną przywrócone do wartości domyślnych. Tej operacji nie można cofnąć.';
 	@override String get resetSettingsSuccess => 'Ustawienia zresetowane pomyślnie';
+	@override String get backup => 'Kopia zapasowa';
+	@override String get exportSettings => 'Eksportuj ustawienia';
+	@override String get exportSettingsDescription => 'Zapisz swoje preferencje do pliku';
+	@override String get exportSettingsSuccess => 'Ustawienia wyeksportowane';
+	@override String get exportSettingsFailed => 'Nie można wyeksportować ustawień';
+	@override String get importSettings => 'Importuj ustawienia';
+	@override String get importSettingsDescription => 'Przywróć preferencje z pliku';
+	@override String get importSettingsConfirm => 'Bieżące ustawienia zostaną zastąpione. Kontynuować?';
+	@override String get importSettingsSuccess => 'Ustawienia zaimportowane';
+	@override String get importSettingsFailed => 'Nie można zaimportować ustawień';
+	@override String get importSettingsInvalidFile => 'Ten plik nie jest prawidłowym eksportem Plezy';
+	@override String get importSettingsNoUser => 'Zaloguj się przed importem ustawień';
 	@override String get shortcutsReset => 'Skróty przywrócone do domyślnych';
 	@override String get about => 'O aplikacji';
 	@override String get aboutDescription => 'Informacje o aplikacji i licencje';
 	@override String get updates => 'Aktualizacje';
 	@override String get updateAvailable => 'Dostępna aktualizacja';
 	@override String get checkForUpdates => 'Sprawdź aktualizacje';
+	@override String get autoCheckUpdatesOnStartup => 'Automatycznie sprawdzaj aktualizacje przy uruchomieniu';
+	@override String get autoCheckUpdatesOnStartupDescription => 'Pokaż powiadomienie, gdy przy uruchomieniu dostępna jest nowa wersja';
 	@override String get validationErrorEnterNumber => 'Wprowadź prawidłową liczbę';
 	@override String validationErrorDuration({required Object min, required Object max, required Object unit}) => 'Czas musi być między ${min} a ${max} ${unit}';
 	@override String shortcutAlreadyAssigned({required Object action}) => 'Skrót jest już przypisany do ${action}';
@@ -318,6 +344,8 @@ class _TranslationsSettingsPl implements TranslationsSettingsEn {
 	@override String get discordRichPresenceDescription => 'Pokaż, co oglądasz na Discordzie';
 	@override String get trakt => 'Trakt';
 	@override String get traktDescription => 'Synchronizuj historię oglądania z Trakt';
+	@override String get trackers => 'Trackery';
+	@override String get trackersDescription => 'Synchronizuj postęp z Trakt, MyAnimeList, AniList i Simkl';
 	@override String get companionRemoteServer => 'Serwer zdalnego sterowania';
 	@override String get companionRemoteServerDescription => 'Pozwól urządzeniom mobilnym w sieci sterować tą aplikacją';
 	@override String get autoPip => 'Automatyczny obraz w obrazie';
@@ -337,6 +365,8 @@ class _TranslationsSettingsPl implements TranslationsSettingsEn {
 	@override String get confirmExitOnBackDescription => 'Pokaż dialog potwierdzenia przy naciśnięciu wstecz, aby wyjść z aplikacji';
 	@override String get forceTvMode => 'Wymuś tryb TV';
 	@override String get forceTvModeDescription => 'Użyj układu TV niezależnie od automatycznego wykrywania. Przydatne na urządzeniach Android TV, które nie zgłaszają funkcji leanback. Po zmianie aplikacja zostanie zrestartowana.';
+	@override String get startInFullscreen => 'Uruchom na pełnym ekranie';
+	@override String get startInFullscreenDescription => 'Otwiera Plezy w trybie pełnoekranowym przy uruchomieniu';
 	@override String get autoHidePerformanceOverlay => 'Automatycznie ukrywaj nakładkę wydajności';
 	@override String get autoHidePerformanceOverlayDescription => 'Wygaszaj nakładkę wydajności wraz z kontrolkami odtwarzania';
 	@override String get showNavBarLabels => 'Pokaż etykiety paska nawigacji';
@@ -346,6 +376,7 @@ class _TranslationsSettingsPl implements TranslationsSettingsEn {
 	@override String get display => 'Display';
 	@override String get homeScreen => 'Home Screen';
 	@override String get navigation => 'Navigation';
+	@override String get window => 'Window';
 	@override String get content => 'Content';
 	@override String get player => 'Player';
 	@override String get subtitlesAndConfig => 'Subtitles & Configuration';
@@ -507,6 +538,13 @@ class _TranslationsVideoControlsPl implements TranslationsVideoControlsEn {
 	@override String get tracksButton => 'Audio i napisy';
 	@override String get chaptersButton => 'Rozdziały';
 	@override String get versionsButton => 'Wersje wideo';
+	@override String get versionQualityButton => 'Wersja i jakość';
+	@override String get versionColumnHeader => 'Wersja';
+	@override String get qualityColumnHeader => 'Jakość';
+	@override String get qualityOriginal => 'Oryginalna';
+	@override String qualityPresetLabel({required Object resolution, required Object bitrate}) => '${resolution}p ${bitrate} Mbps';
+	@override String qualityBandwidthEstimate({required Object bitrate}) => '~${bitrate} Mbps';
+	@override String get transcodeUnavailableFallback => 'Transkodowanie niedostępne — odtwarzanie w oryginalnej jakości';
 	@override String get pipButton => 'Tryb obraz w obrazie';
 	@override String get aspectRatioButton => 'Proporcje';
 	@override String get ambientLighting => 'Oświetlenie otoczenia';
@@ -567,6 +605,10 @@ class _TranslationsMessagesPl implements TranslationsMessagesEn {
 	@override String get errorLoadingSeries => 'Błąd ładowania serialu';
 	@override String get errorLoadingSeason => 'Błąd ładowania sezonu';
 	@override String get musicNotSupported => 'Odtwarzanie muzyki nie jest jeszcze obsługiwane';
+	@override String get noDescriptionAvailable => 'Brak dostępnego opisu';
+	@override String get noProfilesAvailable => 'Brak dostępnych profili';
+	@override String get contactAdminForProfiles => 'Skontaktuj się z administratorem Plex, aby dodać profile';
+	@override String get unableToDetermineLibrarySection => 'Nie można określić sekcji biblioteki dla tego elementu';
 	@override String get logsCleared => 'Logi wyczyszczone';
 	@override String get logsCopied => 'Logi skopiowane do schowka';
 	@override String get noLogsAvailable => 'Brak dostępnych logów';
@@ -712,6 +754,8 @@ class _TranslationsLibrariesPl implements TranslationsLibrariesEn {
 	@override String analysisStarted({required Object title}) => 'Analiza rozpoczęta dla "${title}"';
 	@override String failedToAnalyze({required Object error}) => 'Nie udało się przeanalizować biblioteki: ${error}';
 	@override String get noLibrariesFound => 'Nie znaleziono bibliotek';
+	@override String get allLibrariesHidden => 'Wszystkie biblioteki są ukryte';
+	@override String hiddenLibrariesCount({required Object count}) => 'Ukryte biblioteki (${count})';
 	@override String get thisLibraryIsEmpty => 'Ta biblioteka jest pusta';
 	@override String get all => 'Wszystkie';
 	@override String get clearAll => 'Wyczyść wszystko';
@@ -1001,6 +1045,11 @@ class _TranslationsDownloadsPl implements TranslationsDownloadsEn {
 	@override String get downloadDeleted => 'Pobranie usunięte';
 	@override String deleteConfirm({required Object title}) => 'Czy na pewno chcesz usunąć "${title}"? Spowoduje to usunięcie pobranego pliku z urządzenia.';
 	@override String deletingWithProgress({required Object title, required Object current, required Object total}) => 'Usuwanie ${title}... (${current} z ${total})';
+	@override String get deleting => 'Usuwanie...';
+	@override String get queuedTooltip => 'W kolejce';
+	@override String queuedFilesTooltip({required Object files}) => 'W kolejce: ${files}';
+	@override String get downloadingTooltip => 'Pobieranie...';
+	@override String downloadingFilesTooltip({required Object files}) => 'Pobieranie ${files}';
 	@override String get noDownloadsTree => 'Brak pobrań';
 	@override String get pauseAll => 'Wstrzymaj wszystko';
 	@override String get resumeAll => 'Wznów wszystko';
@@ -1042,6 +1091,9 @@ class _TranslationsShadersPl implements TranslationsShadersEn {
 	@override String get title => 'Shadery';
 	@override String get noShaderDescription => 'Bez ulepszenia wideo';
 	@override String get nvscalerDescription => 'Skalowanie obrazu NVIDIA dla ostrzejszego wideo';
+	@override String get artcnnVariantNeutral => 'Neutralny';
+	@override String get artcnnVariantDenoise => 'Odszumianie';
+	@override String get artcnnVariantDenoiseSharpen => 'Odszumianie + wyostrzanie';
 	@override String get qualityFast => 'Szybki';
 	@override String get qualityHQ => 'Wysoka jakość';
 	@override String get mode => 'Tryb';
@@ -1083,7 +1135,7 @@ class _TranslationsVideoSettingsPl implements TranslationsVideoSettingsEn {
 	@override String get audioOutput => 'Wyjście audio';
 	@override String get performanceOverlay => 'Nakładka wydajności';
 	@override String get audioPassthrough => 'Bezpośrednie audio';
-	@override String get audioNormalization => 'Normalizacja audio';
+	@override String get audioNormalization => 'Normalizacja głośności';
 }
 
 // Path: externalPlayer
@@ -1193,6 +1245,27 @@ class _TranslationsMetadataEditPl implements TranslationsMetadataEditEn {
 	@override String get mood => 'Nastrój';
 }
 
+// Path: matchScreen
+class _TranslationsMatchScreenPl implements TranslationsMatchScreenEn {
+	_TranslationsMatchScreenPl._(this._root);
+
+	final TranslationsPl _root; // ignore: unused_field
+
+	// Translations
+	@override String get match => 'Dopasuj...';
+	@override String get fixMatch => 'Popraw dopasowanie...';
+	@override String get unmatch => 'Usuń dopasowanie';
+	@override String get unmatchConfirm => 'Usunąć obecne dopasowanie tego elementu? Plex będzie traktował go jako niedopasowany, dopóki nie dopasujesz go ponownie.';
+	@override String get unmatchSuccess => 'Dopasowanie usunięte';
+	@override String get unmatchFailed => 'Nie udało się usunąć dopasowania';
+	@override String get matchApplied => 'Dopasowanie zastosowane';
+	@override String get matchFailed => 'Nie udało się zastosować dopasowania';
+	@override String get titleHint => 'Tytuł';
+	@override String get yearHint => 'Rok';
+	@override String get search => 'Szukaj';
+	@override String get noMatchesFound => 'Nie znaleziono dopasowań';
+}
+
 // Path: serverTasks
 class _TranslationsServerTasksPl implements TranslationsServerTasksEn {
 	_TranslationsServerTasksPl._(this._root);
@@ -1221,12 +1294,28 @@ class _TranslationsTraktPl implements TranslationsTraktEn {
 	@override String get scrobbleDescription => 'Wysyłaj zdarzenia odtwarzania, pauzy i zatrzymania do Trakt podczas odtwarzania.';
 	@override String get watchedSync => 'Synchronizuj status obejrzane';
 	@override String get watchedSyncDescription => 'Gdy oznaczysz pozycje jako obejrzane w Plezy, zostaną też oznaczone w Trakt.';
-	@override String get deviceCodeTitle => 'Aktywuj Plezy w Trakt';
-	@override String deviceCodeBody({required Object url}) => 'Otwórz ${url} i wpisz ten kod:';
-	@override String get openTraktActivate => 'Otwórz Trakt, aby aktywować';
-	@override String get waitingForAuthorization => 'Czekanie na autoryzację…';
-	@override String get codeCopied => 'Kod skopiowany';
-	@override String get connectFailed => 'Nie udało się połączyć z Trakt. Spróbuj ponownie.';
+}
+
+// Path: trackers
+class _TranslationsTrackersPl implements TranslationsTrackersEn {
+	_TranslationsTrackersPl._(this._root);
+
+	final TranslationsPl _root; // ignore: unused_field
+
+	// Translations
+	@override String get title => 'Trackery';
+	@override String get hubSubtitle => 'Synchronizuj postęp oglądania z Trakt i innymi usługami.';
+	@override String get notConnected => 'Nie połączono';
+	@override String connectedAs({required Object username}) => 'Połączono jako @${username}';
+	@override String get scrobble => 'Automatycznie śledź postęp';
+	@override String get scrobbleDescription => 'Aktualizuj swoją listę po ukończeniu odcinka lub filmu.';
+	@override String disconnectConfirm({required Object service}) => 'Odłączyć ${service}?';
+	@override String disconnectConfirmBody({required Object service}) => 'Plezy przestanie aktualizować Twoją listę ${service}. Możesz połączyć się ponownie w dowolnej chwili.';
+	@override String connectFailed({required Object service}) => 'Nie udało się połączyć z ${service}. Spróbuj ponownie.';
+	@override late final _TranslationsTrackersServicesPl services = _TranslationsTrackersServicesPl._(_root);
+	@override late final _TranslationsTrackersDeviceCodePl deviceCode = _TranslationsTrackersDeviceCodePl._(_root);
+	@override late final _TranslationsTrackersOauthProxyPl oauthProxy = _TranslationsTrackersOauthProxyPl._(_root);
+	@override late final _TranslationsTrackersLibraryFilterPl libraryFilter = _TranslationsTrackersLibraryFilterPl._(_root);
 }
 
 // Path: hotkeys.actions
@@ -1248,6 +1337,8 @@ class _TranslationsHotkeysActionsPl implements TranslationsHotkeysActionsEn {
 	@override String get subtitleTrackNext => 'Następna ścieżka napisów';
 	@override String get chapterNext => 'Następny rozdział';
 	@override String get chapterPrevious => 'Poprzedni rozdział';
+	@override String get episodeNext => 'Następny odcinek';
+	@override String get episodePrevious => 'Poprzedni odcinek';
 	@override String get speedIncrease => 'Zwiększ prędkość';
 	@override String get speedDecrease => 'Zmniejsz prędkość';
 	@override String get speedReset => 'Zresetuj prędkość';
@@ -1383,6 +1474,66 @@ class _TranslationsCompanionRemoteRemotePl implements TranslationsCompanionRemot
 	@override String get searchHint => 'Szukaj na komputerze...';
 }
 
+// Path: trackers.services
+class _TranslationsTrackersServicesPl implements TranslationsTrackersServicesEn {
+	_TranslationsTrackersServicesPl._(this._root);
+
+	final TranslationsPl _root; // ignore: unused_field
+
+	// Translations
+	@override String get mal => 'MyAnimeList';
+	@override String get anilist => 'AniList';
+	@override String get simkl => 'Simkl';
+}
+
+// Path: trackers.deviceCode
+class _TranslationsTrackersDeviceCodePl implements TranslationsTrackersDeviceCodeEn {
+	_TranslationsTrackersDeviceCodePl._(this._root);
+
+	final TranslationsPl _root; // ignore: unused_field
+
+	// Translations
+	@override String title({required Object service}) => 'Aktywuj Plezy w ${service}';
+	@override String body({required Object url}) => 'Odwiedź ${url} i wpisz ten kod:';
+	@override String openToActivate({required Object service}) => 'Otwórz ${service}, aby aktywować';
+	@override String get waitingForAuthorization => 'Oczekiwanie na autoryzację…';
+	@override String get codeCopied => 'Kod skopiowany';
+}
+
+// Path: trackers.oauthProxy
+class _TranslationsTrackersOauthProxyPl implements TranslationsTrackersOauthProxyEn {
+	_TranslationsTrackersOauthProxyPl._(this._root);
+
+	final TranslationsPl _root; // ignore: unused_field
+
+	// Translations
+	@override String title({required Object service}) => 'Zaloguj się do ${service}';
+	@override String get body => 'Zeskanuj ten kod QR telefonem lub otwórz poniższy adres URL na dowolnym urządzeniu z przeglądarką.';
+	@override String openToSignIn({required Object service}) => 'Otwórz ${service}, aby się zalogować';
+	@override String get urlCopied => 'URL skopiowany';
+}
+
+// Path: trackers.libraryFilter
+class _TranslationsTrackersLibraryFilterPl implements TranslationsTrackersLibraryFilterEn {
+	_TranslationsTrackersLibraryFilterPl._(this._root);
+
+	final TranslationsPl _root; // ignore: unused_field
+
+	// Translations
+	@override String get title => 'Filtr bibliotek';
+	@override String get subtitleAllSyncing => 'Synchronizowanie wszystkich bibliotek';
+	@override String get subtitleNoneSyncing => 'Nic nie synchronizuje';
+	@override String subtitleBlocked({required Object count}) => '${count} zablokowanych';
+	@override String subtitleAllowed({required Object count}) => '${count} dozwolonych';
+	@override String get mode => 'Tryb filtra';
+	@override String get modeBlacklist => 'Czarna lista';
+	@override String get modeWhitelist => 'Biała lista';
+	@override String get modeHintBlacklist => 'Synchronizuj wszystkie biblioteki oprócz zaznaczonych poniżej.';
+	@override String get modeHintWhitelist => 'Synchronizuj tylko biblioteki zaznaczone poniżej.';
+	@override String get libraries => 'Biblioteki';
+	@override String get noLibraries => 'Brak dostępnych bibliotek';
+}
+
 /// The flat map containing all translations for locale <pl>.
 /// Only for edge cases! For simple maps, use the map function of this library.
 ///
@@ -1441,6 +1592,8 @@ extension on TranslationsPl {
 			'common.connectingToServers' => 'Łączenie z serwerami...',
 			'common.startingOfflineMode' => 'Uruchamianie trybu offline...',
 			'common.loading' => 'Ładowanie...',
+			'common.fullscreen' => 'Pełny ekran',
+			'common.exitFullscreen' => 'Wyjdź z pełnego ekranu',
 			'screens.licenses' => 'Licencje',
 			'screens.switchProfile' => 'Zmień profil',
 			'screens.subtitleStyling' => 'Styl napisów',
@@ -1487,10 +1640,16 @@ extension on TranslationsPl {
 			'settings.useGlobalHubsDescription' => 'Pokaż huby strony głównej jak w oficjalnym kliencie Plex. Gdy wyłączone, pokazuje rekomendacje per biblioteka.',
 			'settings.showServerNameOnHubs' => 'Pokaż nazwę serwera w hubach',
 			'settings.showServerNameOnHubsDescription' => 'Zawsze wyświetlaj nazwę serwera w tytułach hubów. Gdy wyłączone, pokazuje tylko dla zduplikowanych nazw.',
+			'settings.groupLibrariesByServer' => 'Grupuj biblioteki według serwera',
+			'settings.groupLibrariesByServerDescription' => 'Pokazuj nagłówek dla każdego serwera Plex na pasku bocznym, gdy jesteś połączony z wieloma serwerami.',
 			'settings.alwaysKeepSidebarOpen' => 'Zawsze utrzymuj panel boczny otwarty',
 			'settings.alwaysKeepSidebarOpenDescription' => 'Panel boczny jest rozwinięty, a obszar treści dostosowuje się',
 			'settings.showUnwatchedCount' => 'Pokaż liczbę nieobejrzanych',
 			'settings.showUnwatchedCountDescription' => 'Wyświetl liczbę nieobejrzanych odcinków w serialach i sezonach',
+			'settings.showEpisodeNumberOnCards' => 'Pokaż numer odcinka na kartach',
+			'settings.showEpisodeNumberOnCardsDescription' => 'Wyświetla numer odcinka obok sezonu (np. S2 E3) na kartach odcinków',
+			'settings.showSeasonPostersOnTabs' => 'Pokaż plakaty sezonów na zakładkach',
+			'settings.showSeasonPostersOnTabsDescription' => 'Wyświetla plakat sezonu nad każdą zakładką sezonu na stronie szczegółów serialu',
 			'settings.hideSpoilers' => 'Ukryj spoilery nieobejrzanych odcinków',
 			'settings.hideSpoilersDescription' => 'Rozmyj miniatury i ukryj opisy odcinków, których jeszcze nie obejrzałeś',
 			'settings.playerBackend' => 'Backend odtwarzacza',
@@ -1502,6 +1661,8 @@ extension on TranslationsPl {
 			'settings.bufferSizeMB' => ({required Object size}) => '${size}MB',
 			'settings.bufferSizeAuto' => 'Automatyczny (Zalecany)',
 			'settings.bufferSizeWarning' => ({required Object heap, required Object size}) => 'Twoje urządzenie ma ${heap}MB pamięci. Bufor ${size}MB może powodować problemy z odtwarzaniem.',
+			'settings.defaultQualityTitle' => 'Domyślna jakość',
+			'settings.defaultQualityDescription' => 'Używane podczas rozpoczynania odtwarzania. Niższe wartości zmniejszają przepustowość.',
 			'settings.subtitleStyling' => 'Styl napisów',
 			'settings.subtitleStylingDescription' => 'Dostosuj wygląd napisów',
 			'settings.smallSkipDuration' => 'Krótki skok',
@@ -1534,12 +1695,26 @@ extension on TranslationsPl {
 			'settings.resetSettings' => 'Zresetuj ustawienia',
 			'settings.resetSettingsDescription' => 'Wszystkie ustawienia zostaną przywrócone do wartości domyślnych. Tej operacji nie można cofnąć.',
 			'settings.resetSettingsSuccess' => 'Ustawienia zresetowane pomyślnie',
+			'settings.backup' => 'Kopia zapasowa',
+			'settings.exportSettings' => 'Eksportuj ustawienia',
+			'settings.exportSettingsDescription' => 'Zapisz swoje preferencje do pliku',
+			'settings.exportSettingsSuccess' => 'Ustawienia wyeksportowane',
+			'settings.exportSettingsFailed' => 'Nie można wyeksportować ustawień',
+			'settings.importSettings' => 'Importuj ustawienia',
+			'settings.importSettingsDescription' => 'Przywróć preferencje z pliku',
+			'settings.importSettingsConfirm' => 'Bieżące ustawienia zostaną zastąpione. Kontynuować?',
+			'settings.importSettingsSuccess' => 'Ustawienia zaimportowane',
+			'settings.importSettingsFailed' => 'Nie można zaimportować ustawień',
+			'settings.importSettingsInvalidFile' => 'Ten plik nie jest prawidłowym eksportem Plezy',
+			'settings.importSettingsNoUser' => 'Zaloguj się przed importem ustawień',
 			'settings.shortcutsReset' => 'Skróty przywrócone do domyślnych',
 			'settings.about' => 'O aplikacji',
 			'settings.aboutDescription' => 'Informacje o aplikacji i licencje',
 			'settings.updates' => 'Aktualizacje',
 			'settings.updateAvailable' => 'Dostępna aktualizacja',
 			'settings.checkForUpdates' => 'Sprawdź aktualizacje',
+			'settings.autoCheckUpdatesOnStartup' => 'Automatycznie sprawdzaj aktualizacje przy uruchomieniu',
+			'settings.autoCheckUpdatesOnStartupDescription' => 'Pokaż powiadomienie, gdy przy uruchomieniu dostępna jest nowa wersja',
 			'settings.validationErrorEnterNumber' => 'Wprowadź prawidłową liczbę',
 			'settings.validationErrorDuration' => ({required Object min, required Object max, required Object unit}) => 'Czas musi być między ${min} a ${max} ${unit}',
 			'settings.shortcutAlreadyAssigned' => ({required Object action}) => 'Skrót jest już przypisany do ${action}',
@@ -1579,6 +1754,8 @@ extension on TranslationsPl {
 			'settings.discordRichPresenceDescription' => 'Pokaż, co oglądasz na Discordzie',
 			'settings.trakt' => 'Trakt',
 			'settings.traktDescription' => 'Synchronizuj historię oglądania z Trakt',
+			'settings.trackers' => 'Trackery',
+			'settings.trackersDescription' => 'Synchronizuj postęp z Trakt, MyAnimeList, AniList i Simkl',
 			'settings.companionRemoteServer' => 'Serwer zdalnego sterowania',
 			'settings.companionRemoteServerDescription' => 'Pozwól urządzeniom mobilnym w sieci sterować tą aplikacją',
 			'settings.autoPip' => 'Automatyczny obraz w obrazie',
@@ -1598,6 +1775,8 @@ extension on TranslationsPl {
 			'settings.confirmExitOnBackDescription' => 'Pokaż dialog potwierdzenia przy naciśnięciu wstecz, aby wyjść z aplikacji',
 			'settings.forceTvMode' => 'Wymuś tryb TV',
 			'settings.forceTvModeDescription' => 'Użyj układu TV niezależnie od automatycznego wykrywania. Przydatne na urządzeniach Android TV, które nie zgłaszają funkcji leanback. Po zmianie aplikacja zostanie zrestartowana.',
+			'settings.startInFullscreen' => 'Uruchom na pełnym ekranie',
+			'settings.startInFullscreenDescription' => 'Otwiera Plezy w trybie pełnoekranowym przy uruchomieniu',
 			'settings.autoHidePerformanceOverlay' => 'Automatycznie ukrywaj nakładkę wydajności',
 			'settings.autoHidePerformanceOverlayDescription' => 'Wygaszaj nakładkę wydajności wraz z kontrolkami odtwarzania',
 			'settings.showNavBarLabels' => 'Pokaż etykiety paska nawigacji',
@@ -1607,6 +1786,7 @@ extension on TranslationsPl {
 			'settings.display' => 'Display',
 			'settings.homeScreen' => 'Home Screen',
 			'settings.navigation' => 'Navigation',
+			'settings.window' => 'Window',
 			'settings.content' => 'Content',
 			'settings.player' => 'Player',
 			'settings.subtitlesAndConfig' => 'Subtitles & Configuration',
@@ -1630,6 +1810,8 @@ extension on TranslationsPl {
 			'hotkeys.actions.subtitleTrackNext' => 'Następna ścieżka napisów',
 			'hotkeys.actions.chapterNext' => 'Następny rozdział',
 			'hotkeys.actions.chapterPrevious' => 'Poprzedni rozdział',
+			'hotkeys.actions.episodeNext' => 'Następny odcinek',
+			'hotkeys.actions.episodePrevious' => 'Poprzedni odcinek',
 			'hotkeys.actions.speedIncrease' => 'Zwiększ prędkość',
 			'hotkeys.actions.speedDecrease' => 'Zmniejsz prędkość',
 			'hotkeys.actions.speedReset' => 'Zresetuj prędkość',
@@ -1723,6 +1905,13 @@ extension on TranslationsPl {
 			'videoControls.tracksButton' => 'Audio i napisy',
 			'videoControls.chaptersButton' => 'Rozdziały',
 			'videoControls.versionsButton' => 'Wersje wideo',
+			'videoControls.versionQualityButton' => 'Wersja i jakość',
+			'videoControls.versionColumnHeader' => 'Wersja',
+			'videoControls.qualityColumnHeader' => 'Jakość',
+			'videoControls.qualityOriginal' => 'Oryginalna',
+			'videoControls.qualityPresetLabel' => ({required Object resolution, required Object bitrate}) => '${resolution}p ${bitrate} Mbps',
+			'videoControls.qualityBandwidthEstimate' => ({required Object bitrate}) => '~${bitrate} Mbps',
+			'videoControls.transcodeUnavailableFallback' => 'Transkodowanie niedostępne — odtwarzanie w oryginalnej jakości',
 			'videoControls.pipButton' => 'Tryb obraz w obrazie',
 			'videoControls.aspectRatioButton' => 'Proporcje',
 			'videoControls.ambientLighting' => 'Oświetlenie otoczenia',
@@ -1771,6 +1960,10 @@ extension on TranslationsPl {
 			'messages.errorLoadingSeries' => 'Błąd ładowania serialu',
 			'messages.errorLoadingSeason' => 'Błąd ładowania sezonu',
 			'messages.musicNotSupported' => 'Odtwarzanie muzyki nie jest jeszcze obsługiwane',
+			'messages.noDescriptionAvailable' => 'Brak dostępnego opisu',
+			'messages.noProfilesAvailable' => 'Brak dostępnych profili',
+			'messages.contactAdminForProfiles' => 'Skontaktuj się z administratorem Plex, aby dodać profile',
+			'messages.unableToDetermineLibrarySection' => 'Nie można określić sekcji biblioteki dla tego elementu',
 			'messages.logsCleared' => 'Logi wyczyszczone',
 			'messages.logsCopied' => 'Logi skopiowane do schowka',
 			'messages.noLogsAvailable' => 'Brak dostępnych logów',
@@ -1861,7 +2054,11 @@ extension on TranslationsPl {
 			'libraries.analyzing' => ({required Object title}) => 'Analizowanie "${title}"...',
 			'libraries.analysisStarted' => ({required Object title}) => 'Analiza rozpoczęta dla "${title}"',
 			'libraries.failedToAnalyze' => ({required Object error}) => 'Nie udało się przeanalizować biblioteki: ${error}',
+			_ => null,
+		} ?? switch (path) {
 			'libraries.noLibrariesFound' => 'Nie znaleziono bibliotek',
+			'libraries.allLibrariesHidden' => 'Wszystkie biblioteki są ukryte',
+			'libraries.hiddenLibrariesCount' => ({required Object count}) => 'Ukryte biblioteki (${count})',
 			'libraries.thisLibraryIsEmpty' => 'Ta biblioteka jest pusta',
 			'libraries.all' => 'Wszystkie',
 			'libraries.clearAll' => 'Wyczyść wszystko',
@@ -1903,8 +2100,6 @@ extension on TranslationsPl {
 			'serverSelection.allServerConnectionsFailed' => 'Nie udało się połączyć z żadnym serwerem. Sprawdź sieć i spróbuj ponownie.',
 			'serverSelection.noServersFoundForAccount' => ({required Object username, required Object email}) => 'Nie znaleziono serwerów dla ${username} (${email})',
 			'serverSelection.failedToLoadServers' => ({required Object error}) => 'Nie udało się załadować serwerów: ${error}',
-			_ => null,
-		} ?? switch (path) {
 			'hubDetail.title' => 'Tytuł',
 			'hubDetail.releaseYear' => 'Rok premiery',
 			'hubDetail.dateAdded' => 'Data dodania',
@@ -2063,6 +2258,11 @@ extension on TranslationsPl {
 			'downloads.downloadDeleted' => 'Pobranie usunięte',
 			'downloads.deleteConfirm' => ({required Object title}) => 'Czy na pewno chcesz usunąć "${title}"? Spowoduje to usunięcie pobranego pliku z urządzenia.',
 			'downloads.deletingWithProgress' => ({required Object title, required Object current, required Object total}) => 'Usuwanie ${title}... (${current} z ${total})',
+			'downloads.deleting' => 'Usuwanie...',
+			'downloads.queuedTooltip' => 'W kolejce',
+			'downloads.queuedFilesTooltip' => ({required Object files}) => 'W kolejce: ${files}',
+			'downloads.downloadingTooltip' => 'Pobieranie...',
+			'downloads.downloadingFilesTooltip' => ({required Object files}) => 'Pobieranie ${files}',
 			'downloads.noDownloadsTree' => 'Brak pobrań',
 			'downloads.pauseAll' => 'Wstrzymaj wszystko',
 			'downloads.resumeAll' => 'Wznów wszystko',
@@ -2095,6 +2295,9 @@ extension on TranslationsPl {
 			'shaders.title' => 'Shadery',
 			'shaders.noShaderDescription' => 'Bez ulepszenia wideo',
 			'shaders.nvscalerDescription' => 'Skalowanie obrazu NVIDIA dla ostrzejszego wideo',
+			'shaders.artcnnVariantNeutral' => 'Neutralny',
+			'shaders.artcnnVariantDenoise' => 'Odszumianie',
+			'shaders.artcnnVariantDenoiseSharpen' => 'Odszumianie + wyostrzanie',
 			'shaders.qualityFast' => 'Szybki',
 			'shaders.qualityHQ' => 'Wysoka jakość',
 			'shaders.mode' => 'Tryb',
@@ -2169,7 +2372,7 @@ extension on TranslationsPl {
 			'videoSettings.audioOutput' => 'Wyjście audio',
 			'videoSettings.performanceOverlay' => 'Nakładka wydajności',
 			'videoSettings.audioPassthrough' => 'Bezpośrednie audio',
-			'videoSettings.audioNormalization' => 'Normalizacja audio',
+			'videoSettings.audioNormalization' => 'Normalizacja głośności',
 			'externalPlayer.title' => 'Zewnętrzny odtwarzacz',
 			'externalPlayer.useExternalPlayer' => 'Użyj zewnętrznego odtwarzacza',
 			'externalPlayer.useExternalPlayerDescription' => 'Otwieraj wideo w zewnętrznej aplikacji zamiast wbudowanego odtwarzacza',
@@ -2259,6 +2462,18 @@ extension on TranslationsPl {
 			'metadataEdit.label' => 'Etykieta',
 			'metadataEdit.style' => 'Styl',
 			'metadataEdit.mood' => 'Nastrój',
+			'matchScreen.match' => 'Dopasuj...',
+			'matchScreen.fixMatch' => 'Popraw dopasowanie...',
+			'matchScreen.unmatch' => 'Usuń dopasowanie',
+			'matchScreen.unmatchConfirm' => 'Usunąć obecne dopasowanie tego elementu? Plex będzie traktował go jako niedopasowany, dopóki nie dopasujesz go ponownie.',
+			'matchScreen.unmatchSuccess' => 'Dopasowanie usunięte',
+			'matchScreen.unmatchFailed' => 'Nie udało się usunąć dopasowania',
+			'matchScreen.matchApplied' => 'Dopasowanie zastosowane',
+			'matchScreen.matchFailed' => 'Nie udało się zastosować dopasowania',
+			'matchScreen.titleHint' => 'Tytuł',
+			'matchScreen.yearHint' => 'Rok',
+			'matchScreen.search' => 'Szukaj',
+			'matchScreen.noMatchesFound' => 'Nie znaleziono dopasowań',
 			'serverTasks.title' => 'Zadania serwera',
 			'serverTasks.failedToLoad' => 'Nie udało się załadować zadań',
 			'serverTasks.noTasks' => 'Brak uruchomionych zadań',
@@ -2271,12 +2486,39 @@ extension on TranslationsPl {
 			'trakt.scrobbleDescription' => 'Wysyłaj zdarzenia odtwarzania, pauzy i zatrzymania do Trakt podczas odtwarzania.',
 			'trakt.watchedSync' => 'Synchronizuj status obejrzane',
 			'trakt.watchedSyncDescription' => 'Gdy oznaczysz pozycje jako obejrzane w Plezy, zostaną też oznaczone w Trakt.',
-			'trakt.deviceCodeTitle' => 'Aktywuj Plezy w Trakt',
-			'trakt.deviceCodeBody' => ({required Object url}) => 'Otwórz ${url} i wpisz ten kod:',
-			'trakt.openTraktActivate' => 'Otwórz Trakt, aby aktywować',
-			'trakt.waitingForAuthorization' => 'Czekanie na autoryzację…',
-			'trakt.codeCopied' => 'Kod skopiowany',
-			'trakt.connectFailed' => 'Nie udało się połączyć z Trakt. Spróbuj ponownie.',
+			'trackers.title' => 'Trackery',
+			'trackers.hubSubtitle' => 'Synchronizuj postęp oglądania z Trakt i innymi usługami.',
+			'trackers.notConnected' => 'Nie połączono',
+			'trackers.connectedAs' => ({required Object username}) => 'Połączono jako @${username}',
+			'trackers.scrobble' => 'Automatycznie śledź postęp',
+			'trackers.scrobbleDescription' => 'Aktualizuj swoją listę po ukończeniu odcinka lub filmu.',
+			'trackers.disconnectConfirm' => ({required Object service}) => 'Odłączyć ${service}?',
+			'trackers.disconnectConfirmBody' => ({required Object service}) => 'Plezy przestanie aktualizować Twoją listę ${service}. Możesz połączyć się ponownie w dowolnej chwili.',
+			'trackers.connectFailed' => ({required Object service}) => 'Nie udało się połączyć z ${service}. Spróbuj ponownie.',
+			'trackers.services.mal' => 'MyAnimeList',
+			'trackers.services.anilist' => 'AniList',
+			'trackers.services.simkl' => 'Simkl',
+			'trackers.deviceCode.title' => ({required Object service}) => 'Aktywuj Plezy w ${service}',
+			'trackers.deviceCode.body' => ({required Object url}) => 'Odwiedź ${url} i wpisz ten kod:',
+			'trackers.deviceCode.openToActivate' => ({required Object service}) => 'Otwórz ${service}, aby aktywować',
+			'trackers.deviceCode.waitingForAuthorization' => 'Oczekiwanie na autoryzację…',
+			'trackers.deviceCode.codeCopied' => 'Kod skopiowany',
+			'trackers.oauthProxy.title' => ({required Object service}) => 'Zaloguj się do ${service}',
+			'trackers.oauthProxy.body' => 'Zeskanuj ten kod QR telefonem lub otwórz poniższy adres URL na dowolnym urządzeniu z przeglądarką.',
+			'trackers.oauthProxy.openToSignIn' => ({required Object service}) => 'Otwórz ${service}, aby się zalogować',
+			'trackers.oauthProxy.urlCopied' => 'URL skopiowany',
+			'trackers.libraryFilter.title' => 'Filtr bibliotek',
+			'trackers.libraryFilter.subtitleAllSyncing' => 'Synchronizowanie wszystkich bibliotek',
+			'trackers.libraryFilter.subtitleNoneSyncing' => 'Nic nie synchronizuje',
+			'trackers.libraryFilter.subtitleBlocked' => ({required Object count}) => '${count} zablokowanych',
+			'trackers.libraryFilter.subtitleAllowed' => ({required Object count}) => '${count} dozwolonych',
+			'trackers.libraryFilter.mode' => 'Tryb filtra',
+			'trackers.libraryFilter.modeBlacklist' => 'Czarna lista',
+			'trackers.libraryFilter.modeWhitelist' => 'Biała lista',
+			'trackers.libraryFilter.modeHintBlacklist' => 'Synchronizuj wszystkie biblioteki oprócz zaznaczonych poniżej.',
+			'trackers.libraryFilter.modeHintWhitelist' => 'Synchronizuj tylko biblioteki zaznaczone poniżej.',
+			'trackers.libraryFilter.libraries' => 'Biblioteki',
+			'trackers.libraryFilter.noLibraries' => 'Brak dostępnych bibliotek',
 			_ => null,
 		};
 	}

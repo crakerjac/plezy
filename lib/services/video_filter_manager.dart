@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:rate_limiter/rate_limiter.dart';
 
 import '../mpv/mpv.dart';
+import '../mpv/player/platform/player_android.dart';
 
 import '../models/plex_media_version.dart';
 import '../utils/app_logger.dart';
@@ -133,6 +134,13 @@ class VideoFilterManager {
   /// When ambient lighting is active, video-aspect-override is managed by ambient lighting.
   void updateVideoFilter() async {
     try {
+      // ExoPlayer handles scaling via AspectRatioFrameLayout. The MPV properties
+      // below still run — on PlayerAndroid they forward to setMpvProperty, which
+      // queues them for any future fallback to MPV.
+      if (player is PlayerAndroid) {
+        await (player as PlayerAndroid).setBoxFitMode(_boxFitMode);
+      }
+
       if (ambientLightingService?.isEnabled != true) {
         await player.setProperty('video-aspect-override', 'no');
       }

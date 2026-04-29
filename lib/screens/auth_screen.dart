@@ -18,6 +18,7 @@ import '../utils/app_logger.dart';
 import '../utils/platform_detector.dart';
 import '../focus/focusable_button.dart';
 import '../utils/navigation_transitions.dart';
+import '../widgets/dialog_action_button.dart';
 import 'main_screen.dart';
 
 class AuthScreen extends StatefulWidget {
@@ -50,7 +51,7 @@ class _AuthScreenState extends State<AuthScreen> {
       setState(() {
         _useQrFlow = true;
       });
-      _startAuthentication();
+      unawaited(_startAuthentication());
     }
   }
 
@@ -114,9 +115,10 @@ class _AuthScreenState extends State<AuthScreen> {
       await profileFuture;
 
       if (!mounted) return;
-      Navigator.pushReplacement(context, fadeRoute(MainScreen(client: result.firstClient!)));
+      unawaited(Navigator.pushReplacement(context, fadeRoute(MainScreen(client: result.firstClient!))));
     } catch (e) {
       appLogger.e('Failed to connect to servers', error: e);
+      if (!mounted) return;
       setState(() {
         _isAuthenticating = false;
         _errorMessage = t.serverSelection.failedToLoadServers(error: e);
@@ -261,8 +263,8 @@ class _AuthScreenState extends State<AuthScreen> {
                 ],
               ),
               actions: [
-                TextButton(onPressed: () => Navigator.of(context).pop(), child: Text(t.common.cancel)),
-                ElevatedButton(
+                DialogActionButton(onPressed: () => Navigator.of(context).pop(), label: t.common.cancel),
+                DialogActionButton(
                   onPressed: () async {
                     final token = tokenController.text.trim();
                     if (token.isEmpty) {
@@ -298,7 +300,8 @@ class _AuthScreenState extends State<AuthScreen> {
                       });
                     }
                   },
-                  child: Text(t.auth.authenticate),
+                  label: t.auth.authenticate,
+                  isPrimary: true,
                 ),
               ],
             );
@@ -311,7 +314,7 @@ class _AuthScreenState extends State<AuthScreen> {
   @override
   Widget build(BuildContext context) {
     // Use two-column layout on desktop, single column on mobile
-    final isDesktop = MediaQuery.of(context).size.width > 700;
+    final isDesktop = MediaQuery.sizeOf(context).width > 700;
 
     return Scaffold(
       body: Center(

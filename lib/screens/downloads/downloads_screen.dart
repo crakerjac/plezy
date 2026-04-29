@@ -19,6 +19,9 @@ import '../main_screen.dart';
 import '../libraries/state_messages.dart';
 import '../../i18n/strings.g.dart';
 import 'sync_rules_screen.dart';
+// PlexSyncer
+import '../../services/manifest_import_service.dart';
+import '../../utils/app_logger.dart';
 
 class DownloadsScreen extends StatefulWidget {
   const DownloadsScreen({super.key});
@@ -42,30 +45,48 @@ class DownloadsScreenState extends State<DownloadsScreen> with TickerProviderSta
     super.initState();
     suppressAutoFocus = true; // Start suppressed
     initTabNavigation();
+    // PlexSyncer: check if manifest updated since last scan
+    WidgetsBinding.instance.addPostFrameCallback((_) => _autoCheckManifest());
+  }
+
+  // PlexSyncer: silently scan if manifest has been updated since last import.
+  Future<void> _autoCheckManifest() async {
+    if (!mounted) return;
+    try {
+      final hasUpdate = await ManifestImportService.instance.checkForUpdates();
+      if (!mounted || !hasUpdate) return;
+      appLogger.i('PlexSyncer: manifest updated — running auto-scan');
+      await _importFromManifest(silent: true);
+    } catch (e) {
+      appLogger.d('PlexSyncer: auto-check failed: $e');
+    }
   }
 
   // PlexSyncer: import synced files from the PlexSyncer manifest.json
-  Future<void> _importFromManifest() async {
+  // silent=true skips the loading dialog (used by auto-scan on nav).
+  Future<void> _importFromManifest({bool silent = false}) async {
     if (!mounted) return;
 
-    showDialog<void>(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) => const AlertDialog(
-        content: Row(children: [
-          CircularProgressIndicator(),
-          SizedBox(width: 16),
-          Expanded(child: Text('Scanning sync folder…')),
-        ]),
-      ),
-    );
+    if (!silent) {
+      showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => const AlertDialog(
+          content: Row(children: [
+            CircularProgressIndicator(),
+            SizedBox(width: 16),
+            Expanded(child: Text('Scanning sync folder…')),
+          ]),
+        ),
+      );
+    }
 
     final serverProvider = context.read<MultiServerProvider>();
     final summary = await context.read<DownloadProvider>().importFromManifest(
       clientResolver: (id) => serverProvider.serverManager.getClient(id),
     );
 
-    if (mounted) Navigator.of(context, rootNavigator: true).pop();
+    if (!silent && mounted) Navigator.of(context, rootNavigator: true).pop();
     if (!mounted) return;
 
     if (summary.hasError) {
@@ -85,12 +106,20 @@ class DownloadsScreenState extends State<DownloadsScreen> with TickerProviderSta
       return;
     }
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
+    if (silent) {
+      // Auto-scan: only notify if something actually changed
+      if (summary.imported > 0 || summary.pruned > 0) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('PlexSyncer: ${summary.toUserMessage()}'),
+          duration: const Duration(seconds: 4),
+        ));
+      }
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
         content: Text(summary.toUserMessage()),
         duration: const Duration(seconds: 5),
-      ),
-    );
+      ));
+    }
   }
 
   @override

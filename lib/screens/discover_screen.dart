@@ -11,6 +11,8 @@ import '../focus/input_mode_tracker.dart';
 import '../focus/key_event_utils.dart';
 import '../utils/global_key_utils.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+
+import '../services/image_cache_service.dart';
 import '../../services/plex_client.dart';
 import '../utils/plex_image_helper.dart';
 import '../widgets/plex_optimized_image.dart' show blurArtwork;
@@ -414,8 +416,8 @@ class _DiscoverScreenState extends State<DiscoverScreen>
 
     // Center the active dot when possible
     final center = _currentHeroIndex;
-    int start = (center - 2).clamp(0, totalDots - 5);
-    int end = start + 4; // 5 dots total (0-4 inclusive)
+    final int start = (center - 2).clamp(0, totalDots - 5);
+    final int end = start + 4; // 5 dots total (0-4 inclusive)
 
     return (start: start, end: end);
   }
@@ -459,6 +461,7 @@ class _DiscoverScreenState extends State<DiscoverScreen>
       // Get hidden libraries for filtering
       final hiddenLibrariesProvider = Provider.of<HiddenLibrariesProvider>(context, listen: false);
       await hiddenLibrariesProvider.ensureInitialized();
+      if (!mounted) return;
       _lastSeenHiddenKeys = Set.of(hiddenLibrariesProvider.hiddenLibraryKeys);
 
       // Get settings for hub mode preference (ensure initialized before accessing)
@@ -507,7 +510,7 @@ class _DiscoverScreenState extends State<DiscoverScreen>
 
       // Sync to Android TV Watch Next row
       if (Platform.isAndroid) {
-        _syncWatchNext(onDeck);
+        unawaited(_syncWatchNext(onDeck));
       }
 
       // Sync PageController to first page after OnDeck loads
@@ -570,6 +573,7 @@ class _DiscoverScreenState extends State<DiscoverScreen>
       appLogger.d('Discover content loaded successfully');
     } catch (e) {
       appLogger.e('Failed to load discover content', error: e);
+      if (!mounted) return;
       setState(() {
         _errorMessage = 'Failed to load content: $e';
         _isLoading = false;
@@ -619,7 +623,7 @@ class _DiscoverScreenState extends State<DiscoverScreen>
 
         // Sync to Android TV Watch Next row
         if (Platform.isAndroid) {
-          _syncWatchNext(onDeck);
+          unawaited(_syncWatchNext(onDeck));
         }
 
         appLogger.d('Continue Watching refreshed successfully');
@@ -803,9 +807,11 @@ class _DiscoverScreenState extends State<DiscoverScreen>
       playbackStateProvider.clearShuffle();
 
       if (mounted) {
-        Navigator.of(
-          context,
-        ).pushAndRemoveUntil(MaterialPageRoute(builder: (context) => const AuthScreen()), (route) => false);
+        unawaited(
+          Navigator.of(
+            context,
+          ).pushAndRemoveUntil(MaterialPageRoute(builder: (context) => const AuthScreen()), (route) => false),
+        );
       }
     }
   }
@@ -864,8 +870,8 @@ class _DiscoverScreenState extends State<DiscoverScreen>
   }
 
   Widget _buildOverlaidAppBar() {
-    final statusBarHeight = MediaQuery.of(context).padding.top;
-    return Container(
+    final statusBarHeight = MediaQuery.paddingOf(context).top;
+    return DecoratedBox(
       decoration: BoxDecoration(
         gradient: LinearGradient(
           begin: Alignment.topCenter,
@@ -896,6 +902,7 @@ class _DiscoverScreenState extends State<DiscoverScreen>
                 builder: (context, watchTogether, companionRemote, _) {
                   final isDesktop = PlatformDetector.shouldActAsRemoteHost(context);
                   final userProvider = context.watch<UserProfileProvider>();
+                  final colorScheme = Theme.of(context).colorScheme;
 
                   return FocusableActionBar(
                     key: _actionBarKey,
@@ -913,7 +920,7 @@ class _DiscoverScreenState extends State<DiscoverScreen>
                               icon: AppIcon(
                                 Symbols.group_rounded,
                                 fill: watchTogether.isInSession ? 1 : 0,
-                                color: watchTogether.isInSession ? Theme.of(context).colorScheme.primary : Colors.white,
+                                color: watchTogether.isInSession ? colorScheme.primary : Colors.white,
                               ),
                               onPressed: () => Navigator.push(
                                 context,
@@ -928,13 +935,13 @@ class _DiscoverScreenState extends State<DiscoverScreen>
                                 child: Container(
                                   padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
                                   decoration: BoxDecoration(
-                                    color: Theme.of(context).colorScheme.primary,
+                                    color: colorScheme.primary,
                                     borderRadius: const BorderRadius.all(Radius.circular(8)),
                                   ),
                                   child: Text(
                                     '${watchTogether.participantCount}',
                                     style: TextStyle(
-                                      color: Theme.of(context).colorScheme.onPrimary,
+                                      color: colorScheme.onPrimary,
                                       fontSize: 10,
                                       fontWeight: FontWeight.bold,
                                     ),
@@ -962,9 +969,7 @@ class _DiscoverScreenState extends State<DiscoverScreen>
                               icon: AppIcon(
                                 Symbols.phone_android_rounded,
                                 fill: companionRemote.isConnected ? 1 : 0,
-                                color: companionRemote.isConnected
-                                    ? Theme.of(context).colorScheme.primary
-                                    : Colors.white,
+                                color: companionRemote.isConnected ? colorScheme.primary : Colors.white,
                               ),
                               onPressed: () {
                                 if (isDesktop) {
@@ -1053,9 +1058,10 @@ class _DiscoverScreenState extends State<DiscoverScreen>
     final showServerNameOnHubs = context.watch<SettingsProvider>().showServerNameOnHubs;
     final duplicateHubTitles = _getDuplicateHubTitles();
 
-    final bottomPadding = MediaQuery.of(context).padding.bottom;
+    final bottomPadding = MediaQuery.paddingOf(context).bottom;
+    final theme = Theme.of(context);
     return Material(
-      color: Theme.of(context).scaffoldBackgroundColor,
+      color: theme.scaffoldBackgroundColor,
       child: Stack(
         children: [
           CustomScrollView(
@@ -1069,7 +1075,7 @@ class _DiscoverScreenState extends State<DiscoverScreen>
                   }
                   // Add top padding when hero is not shown
                   return SliverToBoxAdapter(
-                    child: SizedBox(height: kToolbarHeight + MediaQuery.of(context).padding.top + 16),
+                    child: SizedBox(height: kToolbarHeight + MediaQuery.paddingOf(context).top + 16),
                   );
                 },
               ),
@@ -1137,7 +1143,7 @@ class _DiscoverScreenState extends State<DiscoverScreen>
                               width: 200,
                               height: 24,
                               decoration: BoxDecoration(
-                                color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                                color: theme.colorScheme.surfaceContainerHighest,
                                 borderRadius: const BorderRadius.all(Radius.circular(4)),
                               ),
                             ),
@@ -1195,9 +1201,9 @@ class _DiscoverScreenState extends State<DiscoverScreen>
   }
 
   Widget _buildHeroSection() {
-    final statusBarHeight = MediaQuery.of(context).padding.top;
+    final statusBarHeight = MediaQuery.paddingOf(context).top;
     final useSideNav = PlatformDetector.shouldUseSideNavigation(context);
-    final heroHeight = useSideNav ? MediaQuery.of(context).size.height * 0.75 : 500 + statusBarHeight;
+    final heroHeight = useSideNav ? MediaQuery.sizeOf(context).height * 0.75 : 500 + statusBarHeight;
     return SliverToBoxAdapter(
       child: Focus(
         focusNode: _heroFocusNode,
@@ -1317,8 +1323,10 @@ class _DiscoverScreenState extends State<DiscoverScreen>
     final heroClient = _getClientForItem(heroItem);
     final isEpisode = heroItem.isEpisode;
     final showName = heroItem.grandparentTitle ?? heroItem.displayTitle;
-    final screenWidth = MediaQuery.of(context).size.width;
+    final screenWidth = MediaQuery.sizeOf(context).width;
     final isLargeScreen = ScreenBreakpoints.isWideTabletOrLarger(screenWidth);
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
 
     // Determine content type label for chip
     final contentTypeLabel = heroItem.isMovie ? t.discover.movie : t.discover.tvShow;
@@ -1365,28 +1373,36 @@ class _DiscoverScreenState extends State<DiscoverScreen>
                     child: Builder(
                       builder: (context) {
                         if (heroClient == null) {
-                          return Container(color: Theme.of(context).colorScheme.surfaceContainerHighest);
+                          return ColoredBox(color: Theme.of(context).colorScheme.surfaceContainerHighest);
                         }
-                        final mediaQuery = MediaQuery.of(context);
+                        final size = MediaQuery.sizeOf(context);
                         final dpr = PlexImageHelper.effectiveDevicePixelRatio(context);
                         final containerAspect = screenWidth / heroHeight;
                         final imageUrl = PlexImageHelper.getOptimizedImageUrl(
                           client: heroClient,
                           thumbPath: heroItem.heroArt(containerAspectRatio: containerAspect) ?? heroItem.grandparentArt,
-                          maxWidth: mediaQuery.size.width,
-                          maxHeight: mediaQuery.size.height * 0.7,
+                          maxWidth: size.width,
+                          maxHeight: size.height * 0.7,
                           devicePixelRatio: dpr,
+                          imageType: ImageType.art,
+                        );
+
+                        final (_, memHeight) = PlexImageHelper.getMemCacheDimensions(
+                          displayWidth: (screenWidth * dpr).round(),
+                          displayHeight: (heroHeight * dpr).round(),
                           imageType: ImageType.art,
                         );
 
                         return blurArtwork(
                           CachedNetworkImage(
                             imageUrl: imageUrl,
+                            cacheManager: PlexImageCacheManager.instance,
                             fit: BoxFit.cover,
+                            memCacheHeight: memHeight,
                             placeholder: (context, url) =>
-                                Container(color: Theme.of(context).colorScheme.surfaceContainerHighest),
+                                ColoredBox(color: Theme.of(context).colorScheme.surfaceContainerHighest),
                             errorWidget: (context, url, error) =>
-                                Container(color: Theme.of(context).colorScheme.surfaceContainerHighest),
+                                ColoredBox(color: Theme.of(context).colorScheme.surfaceContainerHighest),
                           ),
                         );
                       },
@@ -1395,7 +1411,7 @@ class _DiscoverScreenState extends State<DiscoverScreen>
                 ),
               )
             else
-              Container(color: Theme.of(context).colorScheme.surfaceContainerHighest),
+              ColoredBox(color: colorScheme.surfaceContainerHighest),
 
             // Gradient Overlay - blends into scaffold background
             Positioned(
@@ -1454,43 +1470,44 @@ class _DiscoverScreenState extends State<DiscoverScreen>
                             return blurArtwork(
                               CachedNetworkImage(
                                 imageUrl: logoUrl,
+                                cacheManager: PlexImageCacheManager.instance,
                                 filterQuality: FilterQuality.medium,
                                 fit: BoxFit.contain,
                                 memCacheWidth: (400 * dpr).clamp(200, 800).round(),
                                 alignment: isLargeScreen ? Alignment.bottomLeft : Alignment.bottomCenter,
-                                placeholder: (context, url) => Align(
-                                  alignment: isLargeScreen ? Alignment.centerLeft : Alignment.center,
-                                  child: Text(
-                                    showName,
-                                    style: Theme.of(context).textTheme.displaySmall?.copyWith(
-                                      color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.3),
-                                      fontWeight: FontWeight.bold,
-                                      shadows: [
-                                        Shadow(
-                                          color: Theme.of(context).colorScheme.surface.withValues(alpha: 0.8),
-                                          blurRadius: 8,
-                                        ),
-                                      ],
-                                    ),
-                                    maxLines: 2,
-                                    overflow: TextOverflow.ellipsis,
-                                    textAlign: isLargeScreen ? TextAlign.left : TextAlign.center,
-                                  ),
-                                ),
-                                errorWidget: (context, url, error) {
-                                  // Fallback to text if logo fails to load
+                                placeholder: (context, url) {
+                                  final theme = Theme.of(context);
+                                  final colorScheme = theme.colorScheme;
                                   return Align(
                                     alignment: isLargeScreen ? Alignment.centerLeft : Alignment.center,
                                     child: Text(
                                       showName,
-                                      style: Theme.of(context).textTheme.displaySmall?.copyWith(
-                                        color: Theme.of(context).colorScheme.onSurface,
+                                      style: theme.textTheme.displaySmall?.copyWith(
+                                        color: colorScheme.onSurface.withValues(alpha: 0.3),
                                         fontWeight: FontWeight.bold,
                                         shadows: [
-                                          Shadow(
-                                            color: Theme.of(context).colorScheme.surface.withValues(alpha: 0.8),
-                                            blurRadius: 8,
-                                          ),
+                                          Shadow(color: colorScheme.surface.withValues(alpha: 0.8), blurRadius: 8),
+                                        ],
+                                      ),
+                                      maxLines: 2,
+                                      overflow: TextOverflow.ellipsis,
+                                      textAlign: isLargeScreen ? TextAlign.left : TextAlign.center,
+                                    ),
+                                  );
+                                },
+                                errorWidget: (context, url, error) {
+                                  // Fallback to text if logo fails to load
+                                  final theme = Theme.of(context);
+                                  final colorScheme = theme.colorScheme;
+                                  return Align(
+                                    alignment: isLargeScreen ? Alignment.centerLeft : Alignment.center,
+                                    child: Text(
+                                      showName,
+                                      style: theme.textTheme.displaySmall?.copyWith(
+                                        color: colorScheme.onSurface,
+                                        fontWeight: FontWeight.bold,
+                                        shadows: [
+                                          Shadow(color: colorScheme.surface.withValues(alpha: 0.8), blurRadius: 8),
                                         ],
                                       ),
                                       maxLines: 2,
@@ -1509,12 +1526,10 @@ class _DiscoverScreenState extends State<DiscoverScreen>
                     else
                       Text(
                         showName,
-                        style: Theme.of(context).textTheme.displaySmall?.copyWith(
-                          color: Theme.of(context).colorScheme.onSurface,
+                        style: theme.textTheme.displaySmall?.copyWith(
+                          color: colorScheme.onSurface,
                           fontWeight: FontWeight.bold,
-                          shadows: [
-                            Shadow(color: Theme.of(context).colorScheme.surface.withValues(alpha: 0.8), blurRadius: 8),
-                          ],
+                          shadows: [Shadow(color: colorScheme.surface.withValues(alpha: 0.8), blurRadius: 8)],
                         ),
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
@@ -1550,7 +1565,7 @@ class _DiscoverScreenState extends State<DiscoverScreen>
                           style: TextStyle(
                             color: isLargeScreen
                                 ? Colors.white.withValues(alpha: 0.7)
-                                : Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.7),
+                                : colorScheme.onSurface.withValues(alpha: 0.7),
                             fontSize: 14,
                             height: 1.4,
                           ),
@@ -1560,13 +1575,13 @@ class _DiscoverScreenState extends State<DiscoverScreen>
                                 text: 'S${heroItem.parentIndex}, E${heroItem.index}: ',
                                 style: TextStyle(
                                   fontWeight: FontWeight.bold,
-                                  color: isLargeScreen ? Colors.white : Theme.of(context).colorScheme.onSurface,
+                                  color: isLargeScreen ? Colors.white : colorScheme.onSurface,
                                 ),
                               ),
                             TextSpan(
                               text: heroItem.summary?.isNotEmpty == true
                                   ? heroItem.summary!
-                                  : 'No description available',
+                                  : t.messages.noDescriptionAvailable,
                             ),
                           ],
                         ),
@@ -1584,7 +1599,7 @@ class _DiscoverScreenState extends State<DiscoverScreen>
                         style: TextStyle(
                           color: isLargeScreen
                               ? Colors.white.withValues(alpha: 0.7)
-                              : Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.7),
+                              : colorScheme.onSurface.withValues(alpha: 0.7),
                           fontSize: 14,
                           height: 1.4,
                         ),

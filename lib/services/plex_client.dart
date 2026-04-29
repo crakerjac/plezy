@@ -22,11 +22,13 @@ import '../models/plex_library.dart';
 import '../models/plex_media_info.dart';
 import '../models/plex_subtitle_search_result.dart';
 import '../models/plex_media_version.dart';
+import '../models/plex_match_result.dart';
 import '../models/plex_metadata.dart';
 import '../utils/content_utils.dart';
 import '../models/plex_playlist.dart';
 import '../models/plex_sort.dart';
 import '../models/plex_video_playback_data.dart';
+import '../models/transcode_quality_preset.dart';
 import '../utils/endpoint_failover_interceptor.dart';
 import '../utils/app_logger.dart';
 import '../utils/connection_constants.dart';
@@ -58,13 +60,10 @@ List<PlexHub> _processHubResponse(
   final hubs = <PlexHub>[];
   for (final hubJson in container['Hub'] as List) {
     try {
-      final hub = PlexHub.fromJson(hubJson as Map<String, dynamic>);
+      final hub = PlexHub.fromJson(hubJson as Map<String, dynamic>, serverId: serverId, serverName: serverName);
       if (hub.items.isEmpty) continue;
 
-      final filteredItems = hub.items
-          .where(itemFilter)
-          .map((item) => item.copyWith(serverId: serverId, serverName: serverName))
-          .toList();
+      final filteredItems = hub.items.where(itemFilter).toList();
 
       if (filteredItems.isNotEmpty) {
         hubs.add(
@@ -101,7 +100,12 @@ class ConnectionTestResult {
   final int latencyMs;
   final String? error;
 
-  ConnectionTestResult({required this.success, required this.latencyMs, this.error});
+  /// `transcoderVideo` from the `/` MediaContainer, captured on successful
+  /// probes so the connection race doubles as a capability probe. `null`
+  /// when the probe didn't succeed or the field was absent.
+  final bool? transcoderVideo;
+
+  ConnectionTestResult({required this.success, required this.latencyMs, this.error, this.transcoderVideo});
 }
 
 class PlexClient {
@@ -122,6 +126,14 @@ class PlexClient {
 
   /// Whether to operate in offline mode (use cache only)
   bool _offlineMode = false;
+
+  /// Cached result of [serverSupportsVideoTranscoding]. `null` = not yet fetched.
+  bool? _serverTranscoderCached;
+
+  /// In-flight probe for [serverSupportsVideoTranscoding], used to dedupe
+  /// concurrent callers (e.g. the post-connect warm-up racing the first
+  /// playback).
+  Future<bool>? _serverTranscoderPending;
 
   /// Libraries parsed from /media/providers (includes individually shared items)
   late final List<PlexLibrary> _providerLibraries;
@@ -160,6 +172,7 @@ class PlexClient {
     List<String>? prioritizedEndpoints,
     Future<void> Function(String newBaseUrl)? onEndpointChanged,
     VoidCallback? onAllEndpointsExhausted,
+    bool? seedTranscoderVideoSupport,
   }) async {
     final client = PlexClient._(
       config,
@@ -169,7 +182,16 @@ class PlexClient {
       onEndpointChanged: onEndpointChanged,
       onAllEndpointsExhausted: onAllEndpointsExhausted,
     );
+    if (seedTranscoderVideoSupport != null) {
+      client._serverTranscoderCached = seedTranscoderVideoSupport;
+    }
     await client._initMediaProviders();
+    // If the connection race didn't seed the capability, warm the cache in
+    // the background so the first playback doesn't pay the probe cost on its
+    // hot path.
+    if (seedTranscoderVideoSupport == null) {
+      unawaited(client.serverSupportsVideoTranscoding());
+    }
     return client;
   }
 
@@ -213,7 +235,15 @@ class PlexClient {
   }) async {
     final gen = _endpointManager?.generation;
     try {
-      return await _http.get(path, queryParameters: queryParameters, headers: headers, timeout: timeout, abort: abort);
+      final response = await _http.get(
+        path,
+        queryParameters: queryParameters,
+        headers: headers,
+        timeout: timeout,
+        abort: abort,
+      );
+      throwIfHttpError(response);
+      return response;
     } on PlexHttpException catch (e) {
       if (!_shouldAttemptFailover(e) ||
           _failoverSwitching ||
@@ -246,6 +276,7 @@ class PlexClient {
           timeout: timeout,
           abort: abort,
         );
+        throwIfHttpError(response);
         appLogger.i('Endpoint failover retry succeeded', error: {'newEndpoint': nextBaseUrl});
         await _onEndpointChanged?.call(nextBaseUrl);
         return response;
@@ -256,9 +287,21 @@ class PlexClient {
   }
 
   bool _shouldAttemptFailover(PlexHttpException e) {
-    return e.type == PlexHttpErrorType.connectionTimeout ||
-        e.type == PlexHttpErrorType.receiveTimeout ||
-        e.type == PlexHttpErrorType.connectionError;
+    if (e.isTransient) return true;
+    final sc = e.statusCode;
+    return sc != null && sc >= 500 && sc <= 599;
+  }
+
+  /// POST the tune endpoint with one retry on transient HTTP failure.
+  Future<PlexResponse> _postTuneWithRetry(String path, String sessionIdentifier) async {
+    final query = {'X-Plex-Session-Identifier': sessionIdentifier};
+    try {
+      return await _http.post(path, queryParameters: query, timeout: ConnectionTimeouts.tune);
+    } on PlexHttpException catch (e) {
+      if (!e.isTransient) rethrow;
+      appLogger.w('Tune channel: transient failure, retrying once', error: e);
+      return await _http.post(path, queryParameters: query, timeout: ConnectionTimeouts.tune);
+    }
   }
 
   /// Fetch /media/providers and parse libraries + EPG providers from the response.
@@ -380,9 +423,10 @@ class PlexClient {
     String? clientIdentifier,
   }) async {
     final stopwatch = Stopwatch()..start();
+    PlexHttpClient? client;
 
     try {
-      final client = PlexHttpClient(baseUrl: baseUrl, connectTimeout: timeout, receiveTimeout: timeout);
+      client = PlexHttpClient(baseUrl: baseUrl, connectTimeout: timeout, receiveTimeout: timeout);
 
       final headers = <String, String>{'X-Plex-Token': token};
       if (clientIdentifier != null) {
@@ -396,10 +440,16 @@ class PlexClient {
       stopwatch.stop();
       final success = response.statusCode == 200;
 
+      bool? transcoderVideo;
+      if (success && response.data is Map && response.data['MediaContainer'] is Map) {
+        transcoderVideo = flexibleBool((response.data['MediaContainer'] as Map)['transcoderVideo']);
+      }
+
       return ConnectionTestResult(
         success: success,
         latencyMs: stopwatch.elapsedMilliseconds,
         error: success ? null : 'HTTP ${response.statusCode}',
+        transcoderVideo: transcoderVideo,
       );
     } on PlexHttpException catch (e) {
       stopwatch.stop();
@@ -418,6 +468,8 @@ class PlexClient {
     } catch (e) {
       stopwatch.stop();
       return ConnectionTestResult(success: false, latencyMs: stopwatch.elapsedMilliseconds, error: e.toString());
+    } finally {
+      client?.close();
     }
   }
 
@@ -588,24 +640,30 @@ class PlexClient {
     Map<String, String>? filters,
     AbortController? abort,
   }) async {
-    final queryParams = <String, dynamic>{};
-    if (start != null) queryParams['X-Plex-Container-Start'] = start;
-    if (size != null) queryParams['X-Plex-Container-Size'] = size;
-
-    // Add filter parameters
-    if (filters != null) {
-      queryParams.addAll(filters);
-    }
-
+    final queryParams = _buildPaginationParams(start, size);
+    if (filters != null) queryParams.addAll(filters);
     final endpoint = sectionId == 'shared' ? '/library/shared/all' : '/library/sections/$sectionId/all';
-
     final response = await _getWithFailover(endpoint, queryParameters: queryParams, abort: abort);
+    return _extractLibraryContentResult(response);
+  }
 
+  Map<String, dynamic> _buildPaginationParams(int? start, int? size) {
+    final params = <String, dynamic>{};
+    if (start != null) params['X-Plex-Container-Start'] = start;
+    if (size != null) params['X-Plex-Container-Size'] = size;
+    return params;
+  }
+
+  LibraryContentResult _extractLibraryContentResult(PlexResponse response) {
     final items = _extractMetadataList(response);
     final container = _getMediaContainer(response);
     final totalSize = container?['totalSize'] as int? ?? container?['size'] as int? ?? items.length;
-
     return LibraryContentResult(items: items, totalSize: totalSize);
+  }
+
+  Future<LibraryContentResult> _fetchPaginatedList(String path, {int? start, int? size, AbortController? abort}) async {
+    final response = await _getWithFailover(path, queryParameters: _buildPaginationParams(start, size), abort: abort);
+    return _extractLibraryContentResult(response);
   }
 
   /// Parse list of PlexMetadata from a cached response
@@ -826,17 +884,50 @@ class PlexClient {
     }
   }
 
-  /// Parse audio and subtitle tracks from a stream list
-  ({List<PlexAudioTrack> audio, List<PlexSubtitleTrack> subtitles}) _parseStreams(List<dynamic>? streams) {
+  /// Page size for iterating all items via [_fetchAllPages]. Also the cap
+  /// for endpoints that send `X-Plex-Container-Size` but aren't truly paginated
+  /// (collections listing, playlists listing, search).
+  static const int _defaultListContainerSize = 1000;
+
+  /// Page size used when walking all pages of a paginated endpoint.
+  static const int _fetchAllPageSize = 200;
+
+  /// Iterate every page of a paginated endpoint and concatenate the results.
+  /// Stops as soon as [LibraryContentResult.totalSize] is reached or a page
+  /// returns no items. Errors propagate.
+  Future<List<PlexMetadata>> _fetchAllPages(
+    Future<LibraryContentResult> Function(int start, int size, AbortController? abort) fetchPage, {
+    AbortController? abort,
+  }) async {
+    final all = <PlexMetadata>[];
+    var start = 0;
+    while (true) {
+      final page = await fetchPage(start, _fetchAllPageSize, abort);
+      all.addAll(page.items);
+      start += page.items.length;
+      if (page.items.isEmpty) break;
+      if (start >= page.totalSize) break;
+    }
+    return all;
+  }
+
+  /// Parse audio/subtitle tracks and the video stream's frame rate from a
+  /// raw Part.Stream list in a single pass.
+  ({List<PlexAudioTrack> audio, List<PlexSubtitleTrack> subtitles, double? frameRate}) _parseStreams(
+    List<dynamic>? streams,
+  ) {
     final audioTracks = <PlexAudioTrack>[];
     final subtitleTracks = <PlexSubtitleTrack>[];
+    double? frameRate;
 
-    if (streams == null) return (audio: audioTracks, subtitles: subtitleTracks);
+    if (streams == null) return (audio: audioTracks, subtitles: subtitleTracks, frameRate: frameRate);
 
-    for (var stream in streams) {
+    for (final stream in streams) {
       final streamType = stream['streamType'] as int?;
 
-      if (streamType == PlexStreamType.audio) {
+      if (streamType == PlexStreamType.video) {
+        frameRate ??= (stream['frameRate'] as num?)?.toDouble();
+      } else if (streamType == PlexStreamType.audio) {
         audioTracks.add(
           PlexAudioTrack(
             id: stream['id'] as int,
@@ -868,7 +959,7 @@ class PlexClient {
       }
     }
 
-    return (audio: audioTracks, subtitles: subtitleTracks);
+    return (audio: audioTracks, subtitles: subtitleTracks, frameRate: frameRate);
   }
 
   /// Parse chapters from metadata JSON
@@ -1025,6 +1116,7 @@ class PlexClient {
         'searchTypes': 'movies,tv',
         'includeCollections': 1,
         'includeExternalMedia': 1,
+        'X-Plex-Container-Size': limit,
       },
     );
 
@@ -1130,11 +1222,7 @@ class PlexClient {
   /// Get thumbnail URL
   String getThumbnailUrl(String? thumbPath) {
     if (thumbPath == null || thumbPath.isEmpty) return '';
-
-    // Remove leading slash if present
-    final path = thumbPath.startsWith('/') ? thumbPath.substring(1) : thumbPath;
-
-    return '${config.baseUrl}/$path'.withPlexToken(config.token);
+    return _http.buildUri(thumbPath).toString().withPlexToken(config.token);
   }
 
   /// Download the full BIF (Base Index Frames) file for a given part.
@@ -1216,6 +1304,14 @@ class PlexClient {
           mediaIndex = 0;
         }
 
+        if (!availableVersions[mediaIndex].isPlayable) {
+          final fallback = availableVersions.indexWhere((v) => v.isPlayable);
+          if (fallback >= 0) {
+            appLogger.w('Version $mediaIndex inaccessible/missing — falling back to version $fallback');
+            mediaIndex = fallback;
+          }
+        }
+
         final media = mediaList[mediaIndex];
         if (media['Part'] != null && (media['Part'] as List).isNotEmpty) {
           final part = media['Part'][0];
@@ -1237,6 +1333,7 @@ class PlexClient {
               subtitleTracks: streams.subtitles,
               chapters: chapters,
               partId: part['id'] as int?,
+              frameRate: streams.frameRate,
             );
           }
         }
@@ -1259,8 +1356,12 @@ class PlexClient {
     try {
       data = await _fetchWithCacheFallback<Map<String, dynamic>>(
         cacheKey: '/library/metadata/$ratingKey',
-        networkCall: () =>
-            _http.get('/library/metadata/$ratingKey', queryParameters: {'includeMarkers': 1, 'includeChapters': 1}),
+        // checkFiles=1 populates Part.accessible/exists so we can skip
+        // deleted-but-still-indexed versions before play.
+        networkCall: () => _http.get(
+          '/library/metadata/$ratingKey',
+          queryParameters: {'includeMarkers': 1, 'includeChapters': 1, 'checkFiles': 1},
+        ),
         parseCache: (cached) => cached as Map<String, dynamic>?,
         parseResponse: (response) => response.data as Map<String, dynamic>?,
       );
@@ -1293,7 +1394,7 @@ class PlexClient {
         Map<String, dynamic>? videoStream;
         Map<String, dynamic>? audioStream;
 
-        for (var stream in streams) {
+        for (final stream in streams) {
           final streamType = stream['streamType'] as int?;
           if (streamType == PlexStreamType.video && videoStream == null) {
             videoStream = stream;
@@ -1698,21 +1799,23 @@ class PlexClient {
     }, 'Failed to get hub content');
   }
 
-  /// Get playlist content by playlist ID
-  /// Returns the list of metadata items in the playlist
-  Future<List<PlexMetadata>> getPlaylist(String playlistId) {
-    return _wrapListApiCall<PlexMetadata>(
-      () => _http.get('/playlists/$playlistId/items'),
-      _extractMetadataList,
-      'Failed to get playlist',
-    );
-  }
+  /// Get playlist content by playlist ID, paginated.
+  Future<LibraryContentResult> getPlaylist(String playlistId, {int? start, int? size, AbortController? abort}) =>
+      _fetchPaginatedList('/playlists/$playlistId/items', start: start, size: size, abort: abort);
+
+  /// Fetch every page of a playlist's items. For callers that need the full list
+  /// (downloads, sync rules, context-menu shuffle).
+  Future<List<PlexMetadata>> fetchAllPlaylistItems(String playlistId) =>
+      _fetchAllPages((start, size, abort) => getPlaylist(playlistId, start: start, size: size, abort: abort));
 
   /// Get all playlists
   /// Filters by playlistType=video by default
   /// Set smart to true/false to filter smart playlists, or null for all
   Future<List<PlexPlaylist>> getPlaylists({String playlistType = 'video', bool? smart}) {
-    final queryParams = <String, dynamic>{'playlistType': playlistType};
+    final queryParams = <String, dynamic>{
+      'playlistType': playlistType,
+      'X-Plex-Container-Size': _defaultListContainerSize,
+    };
     if (smart != null) {
       queryParams['smart'] = smart ? '1' : '0';
     }
@@ -1898,6 +2001,60 @@ class PlexClient {
     );
   }
 
+  /// Search for match candidates for a media item.
+  Future<List<PlexMatchResult>> findMatches(
+    String ratingKey, {
+    String? title,
+    String? year,
+    String? agent,
+    String? language,
+  }) async {
+    final queryParams = <String, dynamic>{'manual': 1};
+    if (title != null && title.isNotEmpty) queryParams['title'] = title;
+    if (year != null && year.isNotEmpty) queryParams['year'] = year;
+    if (agent != null && agent.isNotEmpty) queryParams['agent'] = agent;
+    if (language != null && language.isNotEmpty) queryParams['language'] = language;
+
+    return _wrapListApiCall<PlexMatchResult>(
+      () => _getWithFailover('/library/metadata/$ratingKey/matches', queryParameters: queryParams),
+      (response) {
+        final container = _getMediaContainer(response);
+        if (container == null || container['SearchResult'] == null) return [];
+        return (container['SearchResult'] as List)
+            .map((json) => PlexMatchResult.fromJson(json as Map<String, dynamic>))
+            .toList();
+      },
+      'Failed to search for matches',
+    );
+  }
+
+  /// Apply a chosen match to a media item.
+  Future<bool> applyMatch(String ratingKey, {required String guid, String? name, String? year}) async {
+    final queryParams = <String, dynamic>{'guid': guid};
+    if (name != null && name.isNotEmpty) queryParams['name'] = name;
+    if (year != null && year.isNotEmpty) queryParams['year'] = year;
+
+    final result = await _wrapBoolApiCall(
+      () => _http.put('/library/metadata/$ratingKey/match', queryParameters: queryParams),
+      'Failed to apply match',
+    );
+    if (result) {
+      await _cache.deleteForItem(serverId, ratingKey);
+    }
+    return result;
+  }
+
+  Future<bool> unmatchItem(String ratingKey) async {
+    final result = await _wrapBoolApiCall(
+      () => _http.put('/library/metadata/$ratingKey/unmatch'),
+      'Failed to unmatch item',
+    );
+    if (result) {
+      await _cache.deleteForItem(serverId, ratingKey);
+    }
+    return result;
+  }
+
   /// Get available artwork (posters or backgrounds) for a media item
   Future<List<Map<String, dynamic>>> getAvailableArtwork(String ratingKey, String element) async {
     try {
@@ -1951,7 +2108,10 @@ class PlexClient {
   /// Returns collections as PlexMetadata objects with type="collection"
   Future<List<PlexMetadata>> getLibraryCollections(String sectionId) async {
     return _wrapListApiCall<PlexMetadata>(
-      () => _http.get('/library/sections/$sectionId/collections', queryParameters: {'includeGuids': 1}),
+      () => _http.get(
+        '/library/sections/$sectionId/collections',
+        queryParameters: {'includeGuids': 1, 'X-Plex-Container-Size': _defaultListContainerSize},
+      ),
       (response) {
         final allItems = _extractMetadataList(response);
         // Collections should have type="collection"
@@ -1963,24 +2123,25 @@ class PlexClient {
     );
   }
 
-  /// Get items in a collection
-  /// Returns the list of metadata items in the collection
-  Future<List<PlexMetadata>> getCollectionItems(String collectionId) {
-    return _wrapListApiCall<PlexMetadata>(
-      () => _http.get('/library/collections/$collectionId/children'),
-      _extractMetadataList,
-      'Failed to get collection items',
-    );
-  }
+  /// Get items in a collection, paginated.
+  Future<LibraryContentResult> getCollectionItems(
+    String collectionId, {
+    int? start,
+    int? size,
+    AbortController? abort,
+  }) => _fetchPaginatedList('/library/collections/$collectionId/children', start: start, size: size, abort: abort);
 
-  /// Get media featuring a specific person (actor/director)
-  Future<List<PlexMetadata>> getPersonMedia(String personId) {
-    return _wrapListApiCall<PlexMetadata>(
-      () => _http.get('/library/people/$personId/media'),
-      _extractMetadataList,
-      'Failed to get person media',
-    );
-  }
+  /// Fetch every item in a collection (downloads, sync rules, context-menu shuffle).
+  Future<List<PlexMetadata>> fetchAllCollectionItems(String collectionId) =>
+      _fetchAllPages((start, size, abort) => getCollectionItems(collectionId, start: start, size: size, abort: abort));
+
+  /// Get media featuring a specific person (actor/director), paginated.
+  Future<LibraryContentResult> getPersonMedia(String personId, {int? start, int? size, AbortController? abort}) =>
+      _fetchPaginatedList('/library/people/$personId/media', start: start, size: size, abort: abort);
+
+  /// Fetch every media item featuring a given person.
+  Future<List<PlexMetadata>> fetchAllPersonMedia(String personId) =>
+      _fetchAllPages((start, size, abort) => getPersonMedia(personId, start: start, size: size, abort: abort));
 
   /// Delete a collection
   /// Deletes a library collection from the server
@@ -2352,20 +2513,29 @@ class PlexClient {
     final allChannels = <LiveTvChannel>[];
     for (final provider in _providerEpg) {
       final isCloudGuide = provider.identifier.startsWith('tv.plex.providers.epg');
-      final primaryEndpoint = isCloudGuide ? '/lineups/plex/channels' : '/${provider.identifier}/lineups/dvr/channels';
-      try {
-        final response = await _getWithFailover(primaryEndpoint);
-        final parsed = parseChannels(response);
-        if (parsed.isEmpty && isCloudGuide) {
-          // Fallback: the prefix matched but this server doesn't expose the
-          // cloud endpoint. Retry with the legacy DVR endpoint.
-          final fallback = await _getWithFailover('/${provider.identifier}/lineups/dvr/channels');
-          allChannels.addAll(parseChannels(fallback));
-        } else {
-          allChannels.addAll(parsed);
+      final legacyEndpoint = '/${provider.identifier}/lineups/dvr/channels';
+
+      if (isCloudGuide) {
+        try {
+          final response = await _getWithFailover('/lineups/plex/channels');
+          final parsed = parseChannels(response);
+          if (parsed.isNotEmpty) {
+            allChannels.addAll(parsed);
+            continue;
+          }
+        } catch (e) {
+          appLogger.d(
+            'Cloud channel endpoint /lineups/plex/channels unavailable, falling back to $legacyEndpoint',
+            error: e,
+          );
         }
+      }
+
+      try {
+        final response = await _getWithFailover(legacyEndpoint);
+        allChannels.addAll(parseChannels(response));
       } catch (e) {
-        appLogger.e('Failed to get EPG channels from ${provider.identifier} via $primaryEndpoint', error: e);
+        appLogger.e('Failed to get EPG channels from ${provider.identifier} via $legacyEndpoint', error: e);
       }
     }
     return allChannels;
@@ -2392,7 +2562,9 @@ class PlexClient {
         } else {
           programs.add(LiveTvProgram.fromJson(map));
         }
-      } catch (_) {}
+      } catch (e, st) {
+        appLogger.w('LiveTvProgram parse failed', error: e, stackTrace: st);
+      }
     }
     return programs;
   }
@@ -2604,9 +2776,9 @@ class PlexClient {
     try {
       final sessionIdentifier = generateSessionIdentifier();
 
-      final response = await _http.post(
+      final response = await _postTuneWithRetry(
         '/livetv/dvrs/$dvrKey/channels/$channelIdentifier/tune',
-        queryParameters: {'X-Plex-Session-Identifier': sessionIdentifier},
+        sessionIdentifier,
       );
 
       if (response.statusCode >= 400) {
@@ -2650,13 +2822,13 @@ class PlexClient {
             : (timeline is Map ? timeline : null);
 
         if (op is Map) {
-          if (op['Metadata'] case [Map firstMetadata, ...]) {
-            if (firstMetadata['Media'] case [Map firstMedia, ...]) {
+          if (op['Metadata'] case [final Map firstMetadata, ...]) {
+            if (firstMetadata['Media'] case [final Map firstMedia, ...]) {
               final rawBeginsAt = firstMedia['beginsAt'];
 
               beginsAt = switch (rawBeginsAt) {
-                num n => n.toInt(),
-                String s => int.tryParse(s),
+                final num n => n.toInt(),
+                final String s => int.tryParse(s),
                 _ => null,
               };
 
@@ -2727,8 +2899,8 @@ class PlexClient {
           if (firstMedia is Map<String, dynamic>) {
             final rawBeginsAt = firstMedia['beginsAt'];
             beginsAt = switch (rawBeginsAt) {
-              num n => n.toInt(),
-              String s => int.tryParse(s),
+              final num n => n.toInt(),
+              final String s => int.tryParse(s),
               _ => null,
             };
           }
@@ -2835,6 +3007,244 @@ class PlexClient {
     } catch (e, st) {
       appLogger.e('Failed to build live stream path', error: e, stackTrace: st);
       return null;
+    }
+  }
+
+  /// Checks whether the server has video transcoding enabled.
+  ///
+  /// Reads `transcoderVideo` from the root MediaContainer. Result is cached
+  /// for the lifetime of this [PlexClient]. Returns `true` on error (fail-open)
+  /// — the transcode decision call itself will fail gracefully if transcoding
+  /// really is unavailable.
+  Future<bool> serverSupportsVideoTranscoding() {
+    final cached = _serverTranscoderCached;
+    if (cached != null) return Future.value(cached);
+    return _serverTranscoderPending ??= _fetchTranscoderCapability();
+  }
+
+  /// Synchronous view of the probe — returns the cached value, or `true`
+  /// (assume supported) if the post-connect warm-up hasn't landed yet. The
+  /// transcode decision call has its own fallback path, so guessing wrong
+  /// here just routes through that fallback instead of blocking playback.
+  bool get serverSupportsVideoTranscodingCached => _serverTranscoderCached ?? true;
+
+  Future<bool> _fetchTranscoderCapability() async {
+    try {
+      // Tight timeout: `/` returns a tiny MediaContainer — any responsive
+      // server answers in well under a second. Inheriting the default 120 s
+      // receive timeout would keep a hung server from ever resolving.
+      final response = await _http.get('/', timeout: const Duration(seconds: 5));
+      final container = _getMediaContainer(response);
+      final value = container?['transcoderVideo'];
+      final supported = flexibleBool(value);
+      _serverTranscoderCached = supported;
+      return supported;
+    } catch (e) {
+      appLogger.w('Failed to query server transcoder capability', error: e);
+      _serverTranscoderCached = true;
+      return true;
+    }
+  }
+
+  /// Build a VOD transcode stream URL (decision + start path).
+  ///
+  /// Mirrors [buildLiveStreamPath] but for on-demand video with a quality
+  /// preset, selected audio stream, and HLS protocol. Plex returns a single
+  /// audio track and no subtitle tracks in the transcoded stream — callers
+  /// are expected to sidecar additional subtitles separately.
+  ///
+  /// [transcodeSessionId] and [sessionIdentifier] should be reused across
+  /// seeks + quality/version/audio switches within one playback so the
+  /// server-side transcode session is preserved.
+  Future<({String? startPath, TranscodeDecisionOutcome outcome})> buildTranscodeStartPath({
+    required String ratingKey,
+    required int mediaIndex,
+    required TranscodeQualityPreset preset,
+    required String sessionIdentifier,
+    required String transcodeSessionId,
+    int? audioStreamId,
+    int? offsetMs,
+  }) async {
+    try {
+      final isOriginal = preset.isOriginal;
+      final metadataPath = '/library/metadata/$ratingKey';
+
+      // Build the client profile from scratch via X-Plex-Client-Profile-Extra.
+      // We use the `Generic` base platform (see [_transcodePlatformName]) which
+      // has no pre-installed transcode targets, so we must `add-transcode-target`
+      // rather than `append-transcode-target-codec` (which only edits existing
+      // targets — empty on Generic, hence Plex returned decision code 2000
+      // "neither direct play nor conversion is available").
+      //
+      // For non-original presets we also add a bitrate limitation that caps
+      // the video codec; with `replace=true` it overrides any default limit.
+      //
+      // See openapi.md §"Profile Augmentations" for the DSL reference.
+      final profileExtraClauses = <String>[];
+      if (!isOriginal && preset.videoBitrateKbps != null) {
+        profileExtraClauses.add(
+          'add-limitation(scope=videoCodec&scopeName=*&type=upperBound'
+          '&name=video.bitrate&value=${preset.videoBitrateKbps}&replace=true)',
+        );
+      }
+      // Declare both h264 and hevc as allowed transcode targets. In practice
+      // Plex's decision engine strongly prefers h264 for HLS output, so hevc
+      // only gets chosen in edge cases (e.g. HDR content where the server
+      // wants to preserve dynamic range). The codec-list comma is pre-encoded
+      // as `%2C` — see the profile-extra encoding note above.
+      profileExtraClauses.add(
+        'add-transcode-target(type=videoProfile&context=streaming'
+        '&protocol=hls&container=mpegts&videoCodec=h264%2Chevc&audioCodec=aac)',
+      );
+      final clientProfileExtra = profileExtraClauses.join('+');
+
+      // HLS protocol: seekable via manifest segments. We started with `dash`
+      // (what Plex Web on Chrome uses) but Plex's server only has DASH
+      // transcode profiles for Chrome/Firefox/Safari/Opera — mobile/desktop
+      // platforms fall through with "No conversion profile found for
+      // protocol dash". HLS profiles exist for every Plex-accepted platform.
+      final allParams = <String, String>{
+        'hasMDE': '1',
+        'path': metadataPath,
+        'mediaIndex': mediaIndex.toString(),
+        'partIndex': '0',
+        'protocol': 'hls',
+        'fastSeek': '1',
+        'directPlay': isOriginal ? '1' : '0',
+        'directStream': isOriginal ? '1' : '0',
+        'subtitleSize': '100',
+        'audioBoost': '100',
+        'location': 'lan',
+        if (!isOriginal && preset.videoBitrateKbps != null) 'maxVideoBitrate': preset.videoBitrateKbps.toString(),
+        'addDebugOverlay': '0',
+        'autoAdjustQuality': '0',
+        'directStreamAudio': '0',
+        'mediaBufferSize': '102400',
+        'session': transcodeSessionId,
+        // Subtitles are delivered as client-side sidecars (see
+        // [PlaybackInitializationService._buildTranscodeSidecarSubtitles]).
+        // `subtitles=none` makes the server set the subtitle decision to
+        // `ignore`, so nothing is embedded or burned into the video stream.
+        'subtitles': 'none',
+        // Preserve source timestamps in the transcoded segments. Without it,
+        // Plex resets segment PTS to 0 — so mpv shows 0:00 and sidecar
+        // subtitles desync even though the server is transcoding from the
+        // `offset` position. With copyts=1 the first segment's PTS equals
+        // the source offset and the player's clock lines up with source time.
+        'copyts': '1',
+        if (audioStreamId != null) 'audioStreamID': audioStreamId.toString(),
+        'Accept-Language': 'en',
+        'X-Plex-Session-Identifier': sessionIdentifier,
+        'X-Plex-Client-Profile-Extra': clientProfileExtra,
+        'X-Plex-Incomplete-Segments': '1',
+        'X-Plex-Features': 'external-media,indirect-media',
+        'X-Plex-Model': 'standalone',
+        'X-Plex-Language': 'en',
+        'X-Plex-Product': config.product,
+        'X-Plex-Version': config.version,
+        'X-Plex-Client-Identifier': config.clientIdentifier,
+        // Plex's server rejects unknown platform names with HTTP 400 and maps
+        // known names to codec/bitrate base profiles. Our usual "Flutter"
+        // platform, plus "MacOSX" / "Linux", are all rejected; swap to a
+        // Plex-recognized name just for transcode requests. See
+        // [_transcodePlatformName] for the mapping.
+        'X-Plex-Platform': _transcodePlatformName(),
+        if (config.device != null) 'X-Plex-Device': config.device!,
+        if (offsetMs != null) 'offset': (offsetMs ~/ 1000).toString(),
+        if (config.token != null) 'X-Plex-Token': config.token!,
+      };
+
+      final queryString = allParams.entries.map((e) => '${_plexEncode(e.key)}=${_plexEncode(e.value)}').join('&');
+
+      final decisionClient = PlexHttpClient(
+        connectTimeout: ConnectionTimeouts.connect,
+        receiveTimeout: ConnectionTimeouts.receive,
+        defaultHeaders: const {'Accept-Language': 'en', 'Accept': 'application/json'},
+      );
+      final decisionUrl = '${config.baseUrl}/video/:/transcode/universal/decision?$queryString';
+      final decisionResponse = await decisionClient.get(decisionUrl);
+
+      final decisionBody = decisionResponse.data?.toString() ?? '<empty>';
+      appLogger.i(
+        'Transcode decision [${decisionResponse.statusCode}] body: '
+        '${decisionBody.length > 2000 ? '${decisionBody.substring(0, 2000)}…' : decisionBody}',
+      );
+
+      if (decisionResponse.statusCode != 200) {
+        appLogger.w('Transcode decision returned ${decisionResponse.statusCode}');
+        return (startPath: null, outcome: TranscodeDecisionOutcome.failed);
+      }
+
+      final outcome = _parseTranscodeDecisionOutcome(decisionResponse.data, isOriginal: isOriginal);
+      if (outcome == TranscodeDecisionOutcome.failed) {
+        return (startPath: null, outcome: outcome);
+      }
+
+      final startParams = Map<String, String>.from(allParams)..remove('X-Plex-Token');
+      final startQuery = startParams.entries.map((e) => '${_plexEncode(e.key)}=${_plexEncode(e.value)}').join('&');
+
+      // `.m3u8` tells the server to return an HLS manifest.
+      return (startPath: '/video/:/transcode/universal/start.m3u8?$startQuery', outcome: outcome);
+    } catch (e, st) {
+      appLogger.e('Failed to build transcode start path', error: e, stackTrace: st);
+      return (startPath: null, outcome: TranscodeDecisionOutcome.failed);
+    }
+  }
+
+  /// Platform name Plex Media Server accepts on the transcode decision
+  /// endpoint for arbitrary clients. Our default "Flutter" returns HTTP 400,
+  /// and the known-OS names (`MacOSX`, `Mac`, `Linux`) are also rejected.
+  /// `Generic` is accepted and comes with no preset transcode targets — we
+  /// build the profile ourselves via `X-Plex-Client-Profile-Extra` with
+  /// `add-transcode-target`.
+  static String _transcodePlatformName() => 'Generic';
+
+  /// Strict percent-encoder matching Plex Web's URL encoder — escapes the
+  /// extra characters `(`, `)`, `*`, `'`, `!` that Dart's [Uri.encodeComponent]
+  /// leaves literal. Required for `X-Plex-Client-Profile-Extra` whose parens
+  /// and asterisks must appear as `%28`, `%29`, `%2A` on the wire.
+  static String _plexEncode(String value) {
+    return Uri.encodeComponent(value)
+        .replaceAll('(', '%28')
+        .replaceAll(')', '%29')
+        .replaceAll('*', '%2A')
+        .replaceAll("'", '%27')
+        .replaceAll('!', '%21');
+  }
+
+  /// Parse decision response for outcome. Any decision code >= 2000 = error
+  /// (matching Plex Web's error detector).
+  TranscodeDecisionOutcome _parseTranscodeDecisionOutcome(dynamic data, {required bool isOriginal}) {
+    try {
+      Map<String, dynamic>? container;
+      if (data is Map && data['MediaContainer'] is Map) {
+        container = Map<String, dynamic>.from(data['MediaContainer'] as Map);
+      } else if (data is Map<String, dynamic>) {
+        container = data;
+      }
+      if (container == null) return TranscodeDecisionOutcome.failed;
+
+      final general = flexibleInt(container['generalDecisionCode']);
+      final transcode = flexibleInt(container['transcodeDecisionCode']);
+      final mde = flexibleInt(container['mdeDecisionCode']);
+
+      bool isError(int? code) => code != null && code >= 2000;
+      if (isError(general) || isError(transcode) || isError(mde)) {
+        appLogger.w('Transcode decision error codes: general=$general transcode=$transcode mde=$mde');
+        return TranscodeDecisionOutcome.failed;
+      }
+
+      if (isOriginal) return TranscodeDecisionOutcome.transcodeOk;
+
+      if (transcode == 1000) return TranscodeDecisionOutcome.directPlayOnly;
+      if (transcode == 1001) return TranscodeDecisionOutcome.transcodeOk;
+      if (general == 1001) return TranscodeDecisionOutcome.transcodeOk;
+      if (general == 1000) return TranscodeDecisionOutcome.directPlayOnly;
+
+      return TranscodeDecisionOutcome.transcodeOk;
+    } catch (e) {
+      appLogger.w('Failed to parse transcode decision', error: e);
+      return TranscodeDecisionOutcome.failed;
     }
   }
 

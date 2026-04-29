@@ -1,5 +1,7 @@
 import 'dart:convert';
 
+import 'package:uuid/uuid.dart';
+
 import '../utils/log_redaction_manager.dart';
 import 'base_shared_preferences_service.dart';
 
@@ -121,6 +123,16 @@ class StorageService extends BaseSharedPreferencesService {
 
   String? getClientIdentifier() {
     return prefs.getString(_keyClientId);
+  }
+
+  /// Return the persisted client identifier, generating and saving a UUID on
+  /// first call. Ensures Plex sees the same device across reconnects.
+  Future<String> getOrCreateClientIdentifier() async {
+    final existing = getClientIdentifier();
+    if (existing != null && existing.isNotEmpty) return existing;
+    final generated = const Uuid().v4();
+    await saveClientIdentifier(generated);
+    return generated;
   }
 
   // Clear all credentials
@@ -356,7 +368,7 @@ class StorageService extends BaseSharedPreferencesService {
   /// Load all persisted episode counts
   Map<String, int> loadAllEpisodeCounts() {
     final counts = <String, int>{};
-    final keys = prefs.getKeys().where((k) => k.startsWith(_prefixEpisodeCount));
+    final keys = prefs.keys.where((k) => k.startsWith(_prefixEpisodeCount));
 
     for (final key in keys) {
       final globalKey = key.replaceFirst(_prefixEpisodeCount, '');
@@ -403,7 +415,7 @@ class StorageService extends BaseSharedPreferencesService {
 
   /// Remove all keys matching a prefix
   Future<void> _clearKeysWithPrefix(String prefix) async {
-    final keys = prefs.getKeys().where((k) => k.startsWith(prefix));
+    final keys = prefs.keys.where((k) => k.startsWith(prefix));
     await Future.wait(keys.map((k) => prefs.remove(k)));
   }
 

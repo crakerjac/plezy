@@ -67,7 +67,7 @@ class _VolumeControlState extends State<VolumeControl> {
     final settings = await SettingsService.getInstance();
     if (mounted) {
       setState(() {
-        _maxVolume = settings.getMaxVolume();
+        _maxVolume = settings.read(SettingsService.maxVolume);
       });
     }
   }
@@ -87,9 +87,9 @@ class _VolumeControlState extends State<VolumeControl> {
   Future<void> _adjustVolume(double delta) async {
     final currentVolume = widget.player.state.volume;
     final newVolume = (currentVolume + delta).clamp(0.0, _maxVolume.toDouble());
-    widget.player.setVolume(newVolume);
+    await widget.player.setVolume(newVolume);
     final settings = await SettingsService.getInstance();
-    await settings.setVolume(newVolume);
+    await settings.write(SettingsService.volume, newVolume);
   }
 
   KeyEventResult _handleKeyEvent(FocusNode node, KeyEvent event) {
@@ -168,9 +168,9 @@ class _VolumeControlState extends State<VolumeControl> {
             ),
             onPressed: () async {
               final newVolume = isMuted ? 100.0 : 0.0;
-              widget.player.setVolume(newVolume);
+              await widget.player.setVolume(newVolume);
               final settings = await SettingsService.getInstance();
-              await settings.setVolume(newVolume);
+              await settings.write(SettingsService.volume, newVolume);
             },
           ),
         );
@@ -261,7 +261,7 @@ class _VolumeControlState extends State<VolumeControl> {
                   },
                   onChangeEnd: (value) async {
                     final settings = await SettingsService.getInstance();
-                    await settings.setVolume(value);
+                    await settings.write(SettingsService.volume, value);
                   },
                   activeColor: Colors.white,
                   inactiveColor: Colors.white.withValues(alpha: 0.3),

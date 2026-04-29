@@ -74,8 +74,10 @@ class TranslationsKo with BaseTranslations<AppLocale, Translations> implements T
 	@override late final _TranslationsVideoSettingsKo videoSettings = _TranslationsVideoSettingsKo._(_root);
 	@override late final _TranslationsExternalPlayerKo externalPlayer = _TranslationsExternalPlayerKo._(_root);
 	@override late final _TranslationsMetadataEditKo metadataEdit = _TranslationsMetadataEditKo._(_root);
+	@override late final _TranslationsMatchScreenKo matchScreen = _TranslationsMatchScreenKo._(_root);
 	@override late final _TranslationsServerTasksKo serverTasks = _TranslationsServerTasksKo._(_root);
 	@override late final _TranslationsTraktKo trakt = _TranslationsTraktKo._(_root);
+	@override late final _TranslationsTrackersKo trackers = _TranslationsTrackersKo._(_root);
 }
 
 // Path: app
@@ -153,6 +155,8 @@ class _TranslationsCommonKo implements TranslationsCommonEn {
 	@override String get connectingToServers => '서버 연결 중...';
 	@override String get startingOfflineMode => '오프라인 모드 시작 중...';
 	@override String get loading => '로딩 중...';
+	@override String get fullscreen => '전체화면';
+	@override String get exitFullscreen => '전체화면 종료';
 }
 
 // Path: screens
@@ -226,10 +230,16 @@ class _TranslationsSettingsKo implements TranslationsSettingsEn {
 	@override String get useGlobalHubsDescription => '공식 Plex 클라이언트처럼 홈 페이지 허브를 표시합니다. 끄면 라이브러리별 추천이 대신 표시됩니다.';
 	@override String get showServerNameOnHubs => '허브에 서버 이름 표시';
 	@override String get showServerNameOnHubsDescription => '허브 제목에 항상 서버 이름을 표시합니다. 끄면 중복된 허브 이름에만 표시됩니다.';
+	@override String get groupLibrariesByServer => '서버별로 라이브러리 그룹화';
+	@override String get groupLibrariesByServerDescription => '여러 서버에 연결되어 있을 때 사이드바에 각 Plex 서버의 헤더를 표시합니다.';
 	@override String get alwaysKeepSidebarOpen => '사이드바 항상 열어두기';
 	@override String get alwaysKeepSidebarOpenDescription => '사이드바가 확장된 상태로 유지되고 콘텐츠 영역이 맞춰집니다';
 	@override String get showUnwatchedCount => '미시청 수 표시';
 	@override String get showUnwatchedCountDescription => '시리즈 및 시즌에 미시청 에피소드 수 표시';
+	@override String get showEpisodeNumberOnCards => '카드에 에피소드 번호 표시';
+	@override String get showEpisodeNumberOnCardsDescription => '에피소드 카드에 시즌과 함께 에피소드 번호(예: S2 E3)를 표시합니다';
+	@override String get showSeasonPostersOnTabs => '탭에 시즌 포스터 표시';
+	@override String get showSeasonPostersOnTabsDescription => '프로그램 상세 페이지의 각 시즌 탭 위에 해당 시즌의 포스터를 표시합니다';
 	@override String get hideSpoilers => '미시청 에피소드 스포일러 숨기기';
 	@override String get hideSpoilersDescription => '아직 시청하지 않은 에피소드의 썸네일을 흐리게 하고 설명을 숨깁니다';
 	@override String get playerBackend => '플레이어 백엔드';
@@ -241,6 +251,8 @@ class _TranslationsSettingsKo implements TranslationsSettingsEn {
 	@override String bufferSizeMB({required Object size}) => '${size}MB';
 	@override String get bufferSizeAuto => '자동 (권장)';
 	@override String bufferSizeWarning({required Object heap, required Object size}) => '기기 메모리가 ${heap}MB입니다. ${size}MB 버퍼는 재생 문제를 일으킬 수 있습니다.';
+	@override String get defaultQualityTitle => '기본 화질';
+	@override String get defaultQualityDescription => '재생 시작 시 사용됩니다. 낮은 값은 대역폭을 줄입니다.';
 	@override String get subtitleStyling => '자막 스타일';
 	@override String get subtitleStylingDescription => '자막의 외형을 사용자 설정';
 	@override String get smallSkipDuration => '짧은 건너뛰기 시간';
@@ -273,12 +285,26 @@ class _TranslationsSettingsKo implements TranslationsSettingsEn {
 	@override String get resetSettings => '설정 재설정';
 	@override String get resetSettingsDescription => '모든 설정을 기본값으로 재설정합니다. 이 작업은 되돌릴 수 없습니다.';
 	@override String get resetSettingsSuccess => '설정 재설정 성공';
+	@override String get backup => '백업';
+	@override String get exportSettings => '설정 내보내기';
+	@override String get exportSettingsDescription => '기본 설정을 파일로 저장';
+	@override String get exportSettingsSuccess => '설정 내보내기 완료';
+	@override String get exportSettingsFailed => '설정을 내보낼 수 없습니다';
+	@override String get importSettings => '설정 가져오기';
+	@override String get importSettingsDescription => '파일에서 기본 설정 복원';
+	@override String get importSettingsConfirm => '현재 설정을 대체합니다. 계속하시겠습니까?';
+	@override String get importSettingsSuccess => '설정 가져오기 완료';
+	@override String get importSettingsFailed => '설정을 가져올 수 없습니다';
+	@override String get importSettingsInvalidFile => '유효한 Plezy 설정 내보내기 파일이 아닙니다';
+	@override String get importSettingsNoUser => '설정을 가져오기 전에 로그인하세요';
 	@override String get shortcutsReset => '단축키가 기본값으로 재설정되었습니다';
 	@override String get about => '정보';
 	@override String get aboutDescription => '응용 프로그램 정보 및 라이선스';
 	@override String get updates => '업데이트';
 	@override String get updateAvailable => '사용 가능한 업데이트 있음';
 	@override String get checkForUpdates => '업데이트 확인';
+	@override String get autoCheckUpdatesOnStartup => '시작 시 자동으로 업데이트 확인';
+	@override String get autoCheckUpdatesOnStartupDescription => '시작 시 새 버전이 있으면 알림 표시';
 	@override String get validationErrorEnterNumber => '유효한 숫자를 입력하세요';
 	@override String validationErrorDuration({required Object min, required Object max, required Object unit}) => '기간은 ${min}과 ${max} ${unit} 사이여야 합니다';
 	@override String shortcutAlreadyAssigned({required Object action}) => '단축키가 이미 ${action}에 할당 되었습니다';
@@ -318,6 +344,8 @@ class _TranslationsSettingsKo implements TranslationsSettingsEn {
 	@override String get discordRichPresenceDescription => 'Discord에서 시청 중인 콘텐츠 표시';
 	@override String get trakt => 'Trakt';
 	@override String get traktDescription => 'Trakt와 시청 기록 동기화';
+	@override String get trackers => '트래커';
+	@override String get trackersDescription => 'Trakt, MyAnimeList, AniList 및 Simkl에 진행률 동기화';
 	@override String get companionRemoteServer => '컴패니언 리모트 서버';
 	@override String get companionRemoteServerDescription => '네트워크의 모바일 기기가 이 앱을 제어할 수 있도록 허용';
 	@override String get autoPip => '자동 PIP 모드';
@@ -337,6 +365,8 @@ class _TranslationsSettingsKo implements TranslationsSettingsEn {
 	@override String get confirmExitOnBackDescription => '뒤로 버튼을 눌러 앱을 종료할 때 확인 대화상자를 표시합니다';
 	@override String get forceTvMode => 'TV 모드 강제 사용';
 	@override String get forceTvModeDescription => '자동 감지와 관계없이 TV 레이아웃을 사용합니다. leanback 기능을 보고하지 않는 Android TV 기기에 유용합니다. 변경 시 앱이 다시 시작됩니다.';
+	@override String get startInFullscreen => '전체화면으로 시작';
+	@override String get startInFullscreenDescription => '실행 시 Plezy를 전체화면 모드로 엽니다';
 	@override String get autoHidePerformanceOverlay => '성능 오버레이 자동 숨기기';
 	@override String get autoHidePerformanceOverlayDescription => '재생 컨트롤과 함께 성능 오버레이를 페이드 처리';
 	@override String get showNavBarLabels => '내비게이션 바 라벨 표시';
@@ -346,6 +376,7 @@ class _TranslationsSettingsKo implements TranslationsSettingsEn {
 	@override String get display => 'Display';
 	@override String get homeScreen => 'Home Screen';
 	@override String get navigation => 'Navigation';
+	@override String get window => 'Window';
 	@override String get content => 'Content';
 	@override String get player => 'Player';
 	@override String get subtitlesAndConfig => 'Subtitles & Configuration';
@@ -507,6 +538,13 @@ class _TranslationsVideoControlsKo implements TranslationsVideoControlsEn {
 	@override String get tracksButton => '오디오 및 자막';
 	@override String get chaptersButton => '챕터';
 	@override String get versionsButton => '동영상 버전';
+	@override String get versionQualityButton => '버전 및 화질';
+	@override String get versionColumnHeader => '버전';
+	@override String get qualityColumnHeader => '화질';
+	@override String get qualityOriginal => '원본';
+	@override String qualityPresetLabel({required Object resolution, required Object bitrate}) => '${resolution}p ${bitrate} Mbps';
+	@override String qualityBandwidthEstimate({required Object bitrate}) => '~${bitrate} Mbps';
+	@override String get transcodeUnavailableFallback => '트랜스코딩을 사용할 수 없음 — 원본 화질로 재생';
 	@override String get pipButton => '픽처 인 픽처 모드';
 	@override String get aspectRatioButton => '화면비율';
 	@override String get ambientLighting => '주변 조명';
@@ -567,6 +605,10 @@ class _TranslationsMessagesKo implements TranslationsMessagesEn {
 	@override String get errorLoadingSeries => '시리즈 로딩 중 오류';
 	@override String get errorLoadingSeason => '시즌 로딩 중 오류';
 	@override String get musicNotSupported => '음악 재생 미지원';
+	@override String get noDescriptionAvailable => '설명이 없습니다';
+	@override String get noProfilesAvailable => '사용 가능한 프로필이 없습니다';
+	@override String get contactAdminForProfiles => '프로필을 추가하려면 Plex 관리자에게 문의하세요';
+	@override String get unableToDetermineLibrarySection => '이 항목의 라이브러리 섹션을 확인할 수 없습니다';
 	@override String get logsCleared => '로그가 삭제 되었습니다';
 	@override String get logsCopied => '로그가 클립보드에 복사 되었습니다';
 	@override String get noLogsAvailable => '사용 가능한 로그가 없습니다';
@@ -712,6 +754,8 @@ class _TranslationsLibrariesKo implements TranslationsLibrariesEn {
 	@override String analysisStarted({required Object title}) => '"${title}" 분석 시작됨';
 	@override String failedToAnalyze({required Object error}) => '미디어 라이브러리 분석 실패: ${error}';
 	@override String get noLibrariesFound => '미디어 라이브러리 없음';
+	@override String get allLibrariesHidden => '모든 라이브러리가 숨겨졌습니다';
+	@override String hiddenLibrariesCount({required Object count}) => '숨겨진 라이브러리 (${count})';
 	@override String get thisLibraryIsEmpty => '이 미디어 라이브러리는 비어 있습니다';
 	@override String get all => '전체';
 	@override String get clearAll => '모두 삭제';
@@ -1001,6 +1045,11 @@ class _TranslationsDownloadsKo implements TranslationsDownloadsEn {
 	@override String get downloadDeleted => '다운로드 삭제됨';
 	@override String deleteConfirm({required Object title}) => '"${title}"를 삭제 하시겠습니까? 다운로드한 파일이 기기에서 삭제됩니다.';
 	@override String deletingWithProgress({required Object title, required Object current, required Object total}) => '${title} 삭제 중... (${current}/${total})';
+	@override String get deleting => '삭제 중...';
+	@override String get queuedTooltip => '대기 중';
+	@override String queuedFilesTooltip({required Object files}) => '대기 중: ${files}';
+	@override String get downloadingTooltip => '다운로드 중...';
+	@override String downloadingFilesTooltip({required Object files}) => '${files} 다운로드 중';
 	@override String get noDownloadsTree => '다운로드 없음';
 	@override String get pauseAll => '모두 일시정지';
 	@override String get resumeAll => '모두 재개';
@@ -1042,6 +1091,9 @@ class _TranslationsShadersKo implements TranslationsShadersEn {
 	@override String get title => '셰이더';
 	@override String get noShaderDescription => '비디오 향상 없음';
 	@override String get nvscalerDescription => '더 선명한 비디오를 위한 NVIDIA 이미지 스케일링';
+	@override String get artcnnVariantNeutral => '중립';
+	@override String get artcnnVariantDenoise => '노이즈 제거';
+	@override String get artcnnVariantDenoiseSharpen => '노이즈 제거 + 선명화';
 	@override String get qualityFast => '빠름';
 	@override String get qualityHQ => '고품질';
 	@override String get mode => '모드';
@@ -1083,7 +1135,7 @@ class _TranslationsVideoSettingsKo implements TranslationsVideoSettingsEn {
 	@override String get audioOutput => '오디오 출력';
 	@override String get performanceOverlay => '성능 오버레이';
 	@override String get audioPassthrough => '오디오 패스스루';
-	@override String get audioNormalization => '오디오 정규화';
+	@override String get audioNormalization => '음량 정규화';
 }
 
 // Path: externalPlayer
@@ -1193,6 +1245,27 @@ class _TranslationsMetadataEditKo implements TranslationsMetadataEditEn {
 	@override String get mood => '분위기';
 }
 
+// Path: matchScreen
+class _TranslationsMatchScreenKo implements TranslationsMatchScreenEn {
+	_TranslationsMatchScreenKo._(this._root);
+
+	final TranslationsKo _root; // ignore: unused_field
+
+	// Translations
+	@override String get match => '일치...';
+	@override String get fixMatch => '일치 수정...';
+	@override String get unmatch => '일치 해제';
+	@override String get unmatchConfirm => '이 항목의 현재 일치를 해제하시겠습니까? 다시 일치시킬 때까지 Plex는 일치되지 않은 것으로 처리합니다.';
+	@override String get unmatchSuccess => '일치 해제됨';
+	@override String get unmatchFailed => '일치 해제에 실패했습니다';
+	@override String get matchApplied => '일치 적용됨';
+	@override String get matchFailed => '일치 적용에 실패했습니다';
+	@override String get titleHint => '제목';
+	@override String get yearHint => '연도';
+	@override String get search => '검색';
+	@override String get noMatchesFound => '일치하는 항목이 없습니다';
+}
+
 // Path: serverTasks
 class _TranslationsServerTasksKo implements TranslationsServerTasksEn {
 	_TranslationsServerTasksKo._(this._root);
@@ -1221,12 +1294,28 @@ class _TranslationsTraktKo implements TranslationsTraktEn {
 	@override String get scrobbleDescription => '재생 중 재생, 일시정지, 정지 이벤트를 Trakt로 전송합니다.';
 	@override String get watchedSync => '시청 상태 동기화';
 	@override String get watchedSyncDescription => 'Plezy에서 시청 완료로 표시한 항목이 Trakt에도 시청 완료로 표시됩니다.';
-	@override String get deviceCodeTitle => 'Trakt에서 Plezy 활성화';
-	@override String deviceCodeBody({required Object url}) => '${url}을(를) 방문하여 이 코드를 입력하세요:';
-	@override String get openTraktActivate => '활성화하려면 Trakt 열기';
-	@override String get waitingForAuthorization => '인증 대기 중…';
-	@override String get codeCopied => '코드가 복사됨';
-	@override String get connectFailed => 'Trakt에 연결할 수 없습니다. 다시 시도하세요.';
+}
+
+// Path: trackers
+class _TranslationsTrackersKo implements TranslationsTrackersEn {
+	_TranslationsTrackersKo._(this._root);
+
+	final TranslationsKo _root; // ignore: unused_field
+
+	// Translations
+	@override String get title => '트래커';
+	@override String get hubSubtitle => '시청 진행률을 Trakt 및 기타 서비스와 동기화하세요.';
+	@override String get notConnected => '연결되지 않음';
+	@override String connectedAs({required Object username}) => '@${username} 로 연결됨';
+	@override String get scrobble => '진행률 자동 추적';
+	@override String get scrobbleDescription => '에피소드나 영화를 시청하면 목록을 업데이트합니다.';
+	@override String disconnectConfirm({required Object service}) => '${service} 연결을 해제하시겠습니까?';
+	@override String disconnectConfirmBody({required Object service}) => 'Plezy가 ${service} 목록 업데이트를 중지합니다. 언제든지 다시 연결할 수 있습니다.';
+	@override String connectFailed({required Object service}) => '${service}에 연결할 수 없습니다. 다시 시도하세요.';
+	@override late final _TranslationsTrackersServicesKo services = _TranslationsTrackersServicesKo._(_root);
+	@override late final _TranslationsTrackersDeviceCodeKo deviceCode = _TranslationsTrackersDeviceCodeKo._(_root);
+	@override late final _TranslationsTrackersOauthProxyKo oauthProxy = _TranslationsTrackersOauthProxyKo._(_root);
+	@override late final _TranslationsTrackersLibraryFilterKo libraryFilter = _TranslationsTrackersLibraryFilterKo._(_root);
 }
 
 // Path: hotkeys.actions
@@ -1248,6 +1337,8 @@ class _TranslationsHotkeysActionsKo implements TranslationsHotkeysActionsEn {
 	@override String get subtitleTrackNext => '다음 자막 트랙';
 	@override String get chapterNext => '다음 챕터';
 	@override String get chapterPrevious => '이전 챕터';
+	@override String get episodeNext => '다음 에피소드';
+	@override String get episodePrevious => '이전 에피소드';
 	@override String get speedIncrease => '속도 높이기';
 	@override String get speedDecrease => '속도 낮추기';
 	@override String get speedReset => '속도 초기화';
@@ -1383,6 +1474,66 @@ class _TranslationsCompanionRemoteRemoteKo implements TranslationsCompanionRemot
 	@override String get searchHint => '데스크톱에서 검색...';
 }
 
+// Path: trackers.services
+class _TranslationsTrackersServicesKo implements TranslationsTrackersServicesEn {
+	_TranslationsTrackersServicesKo._(this._root);
+
+	final TranslationsKo _root; // ignore: unused_field
+
+	// Translations
+	@override String get mal => 'MyAnimeList';
+	@override String get anilist => 'AniList';
+	@override String get simkl => 'Simkl';
+}
+
+// Path: trackers.deviceCode
+class _TranslationsTrackersDeviceCodeKo implements TranslationsTrackersDeviceCodeEn {
+	_TranslationsTrackersDeviceCodeKo._(this._root);
+
+	final TranslationsKo _root; // ignore: unused_field
+
+	// Translations
+	@override String title({required Object service}) => '${service}에서 Plezy 활성화';
+	@override String body({required Object url}) => '${url}을 방문하여 이 코드를 입력하세요:';
+	@override String openToActivate({required Object service}) => '활성화하려면 ${service} 열기';
+	@override String get waitingForAuthorization => '인증을 기다리는 중…';
+	@override String get codeCopied => '코드가 복사되었습니다';
+}
+
+// Path: trackers.oauthProxy
+class _TranslationsTrackersOauthProxyKo implements TranslationsTrackersOauthProxyEn {
+	_TranslationsTrackersOauthProxyKo._(this._root);
+
+	final TranslationsKo _root; // ignore: unused_field
+
+	// Translations
+	@override String title({required Object service}) => '${service}에 로그인';
+	@override String get body => '휴대전화로 이 QR 코드를 스캔하거나 아래 URL을 브라우저가 있는 기기에서 여세요.';
+	@override String openToSignIn({required Object service}) => '로그인하려면 ${service} 열기';
+	@override String get urlCopied => 'URL이 복사되었습니다';
+}
+
+// Path: trackers.libraryFilter
+class _TranslationsTrackersLibraryFilterKo implements TranslationsTrackersLibraryFilterEn {
+	_TranslationsTrackersLibraryFilterKo._(this._root);
+
+	final TranslationsKo _root; // ignore: unused_field
+
+	// Translations
+	@override String get title => '라이브러리 필터';
+	@override String get subtitleAllSyncing => '모든 라이브러리 동기화 중';
+	@override String get subtitleNoneSyncing => '동기화 안 함';
+	@override String subtitleBlocked({required Object count}) => '${count}개 차단됨';
+	@override String subtitleAllowed({required Object count}) => '${count}개 허용됨';
+	@override String get mode => '필터 모드';
+	@override String get modeBlacklist => '차단 목록';
+	@override String get modeWhitelist => '허용 목록';
+	@override String get modeHintBlacklist => '아래에 선택한 라이브러리를 제외한 모든 라이브러리를 동기화합니다.';
+	@override String get modeHintWhitelist => '아래에 선택한 라이브러리만 동기화합니다.';
+	@override String get libraries => '라이브러리';
+	@override String get noLibraries => '사용 가능한 라이브러리가 없습니다';
+}
+
 /// The flat map containing all translations for locale <ko>.
 /// Only for edge cases! For simple maps, use the map function of this library.
 ///
@@ -1441,6 +1592,8 @@ extension on TranslationsKo {
 			'common.connectingToServers' => '서버 연결 중...',
 			'common.startingOfflineMode' => '오프라인 모드 시작 중...',
 			'common.loading' => '로딩 중...',
+			'common.fullscreen' => '전체화면',
+			'common.exitFullscreen' => '전체화면 종료',
 			'screens.licenses' => '라이선스',
 			'screens.switchProfile' => '프로필 전환',
 			'screens.subtitleStyling' => '자막 스타일 설정',
@@ -1487,10 +1640,16 @@ extension on TranslationsKo {
 			'settings.useGlobalHubsDescription' => '공식 Plex 클라이언트처럼 홈 페이지 허브를 표시합니다. 끄면 라이브러리별 추천이 대신 표시됩니다.',
 			'settings.showServerNameOnHubs' => '허브에 서버 이름 표시',
 			'settings.showServerNameOnHubsDescription' => '허브 제목에 항상 서버 이름을 표시합니다. 끄면 중복된 허브 이름에만 표시됩니다.',
+			'settings.groupLibrariesByServer' => '서버별로 라이브러리 그룹화',
+			'settings.groupLibrariesByServerDescription' => '여러 서버에 연결되어 있을 때 사이드바에 각 Plex 서버의 헤더를 표시합니다.',
 			'settings.alwaysKeepSidebarOpen' => '사이드바 항상 열어두기',
 			'settings.alwaysKeepSidebarOpenDescription' => '사이드바가 확장된 상태로 유지되고 콘텐츠 영역이 맞춰집니다',
 			'settings.showUnwatchedCount' => '미시청 수 표시',
 			'settings.showUnwatchedCountDescription' => '시리즈 및 시즌에 미시청 에피소드 수 표시',
+			'settings.showEpisodeNumberOnCards' => '카드에 에피소드 번호 표시',
+			'settings.showEpisodeNumberOnCardsDescription' => '에피소드 카드에 시즌과 함께 에피소드 번호(예: S2 E3)를 표시합니다',
+			'settings.showSeasonPostersOnTabs' => '탭에 시즌 포스터 표시',
+			'settings.showSeasonPostersOnTabsDescription' => '프로그램 상세 페이지의 각 시즌 탭 위에 해당 시즌의 포스터를 표시합니다',
 			'settings.hideSpoilers' => '미시청 에피소드 스포일러 숨기기',
 			'settings.hideSpoilersDescription' => '아직 시청하지 않은 에피소드의 썸네일을 흐리게 하고 설명을 숨깁니다',
 			'settings.playerBackend' => '플레이어 백엔드',
@@ -1502,6 +1661,8 @@ extension on TranslationsKo {
 			'settings.bufferSizeMB' => ({required Object size}) => '${size}MB',
 			'settings.bufferSizeAuto' => '자동 (권장)',
 			'settings.bufferSizeWarning' => ({required Object heap, required Object size}) => '기기 메모리가 ${heap}MB입니다. ${size}MB 버퍼는 재생 문제를 일으킬 수 있습니다.',
+			'settings.defaultQualityTitle' => '기본 화질',
+			'settings.defaultQualityDescription' => '재생 시작 시 사용됩니다. 낮은 값은 대역폭을 줄입니다.',
 			'settings.subtitleStyling' => '자막 스타일',
 			'settings.subtitleStylingDescription' => '자막의 외형을 사용자 설정',
 			'settings.smallSkipDuration' => '짧은 건너뛰기 시간',
@@ -1534,12 +1695,26 @@ extension on TranslationsKo {
 			'settings.resetSettings' => '설정 재설정',
 			'settings.resetSettingsDescription' => '모든 설정을 기본값으로 재설정합니다. 이 작업은 되돌릴 수 없습니다.',
 			'settings.resetSettingsSuccess' => '설정 재설정 성공',
+			'settings.backup' => '백업',
+			'settings.exportSettings' => '설정 내보내기',
+			'settings.exportSettingsDescription' => '기본 설정을 파일로 저장',
+			'settings.exportSettingsSuccess' => '설정 내보내기 완료',
+			'settings.exportSettingsFailed' => '설정을 내보낼 수 없습니다',
+			'settings.importSettings' => '설정 가져오기',
+			'settings.importSettingsDescription' => '파일에서 기본 설정 복원',
+			'settings.importSettingsConfirm' => '현재 설정을 대체합니다. 계속하시겠습니까?',
+			'settings.importSettingsSuccess' => '설정 가져오기 완료',
+			'settings.importSettingsFailed' => '설정을 가져올 수 없습니다',
+			'settings.importSettingsInvalidFile' => '유효한 Plezy 설정 내보내기 파일이 아닙니다',
+			'settings.importSettingsNoUser' => '설정을 가져오기 전에 로그인하세요',
 			'settings.shortcutsReset' => '단축키가 기본값으로 재설정되었습니다',
 			'settings.about' => '정보',
 			'settings.aboutDescription' => '응용 프로그램 정보 및 라이선스',
 			'settings.updates' => '업데이트',
 			'settings.updateAvailable' => '사용 가능한 업데이트 있음',
 			'settings.checkForUpdates' => '업데이트 확인',
+			'settings.autoCheckUpdatesOnStartup' => '시작 시 자동으로 업데이트 확인',
+			'settings.autoCheckUpdatesOnStartupDescription' => '시작 시 새 버전이 있으면 알림 표시',
 			'settings.validationErrorEnterNumber' => '유효한 숫자를 입력하세요',
 			'settings.validationErrorDuration' => ({required Object min, required Object max, required Object unit}) => '기간은 ${min}과 ${max} ${unit} 사이여야 합니다',
 			'settings.shortcutAlreadyAssigned' => ({required Object action}) => '단축키가 이미 ${action}에 할당 되었습니다',
@@ -1579,6 +1754,8 @@ extension on TranslationsKo {
 			'settings.discordRichPresenceDescription' => 'Discord에서 시청 중인 콘텐츠 표시',
 			'settings.trakt' => 'Trakt',
 			'settings.traktDescription' => 'Trakt와 시청 기록 동기화',
+			'settings.trackers' => '트래커',
+			'settings.trackersDescription' => 'Trakt, MyAnimeList, AniList 및 Simkl에 진행률 동기화',
 			'settings.companionRemoteServer' => '컴패니언 리모트 서버',
 			'settings.companionRemoteServerDescription' => '네트워크의 모바일 기기가 이 앱을 제어할 수 있도록 허용',
 			'settings.autoPip' => '자동 PIP 모드',
@@ -1598,6 +1775,8 @@ extension on TranslationsKo {
 			'settings.confirmExitOnBackDescription' => '뒤로 버튼을 눌러 앱을 종료할 때 확인 대화상자를 표시합니다',
 			'settings.forceTvMode' => 'TV 모드 강제 사용',
 			'settings.forceTvModeDescription' => '자동 감지와 관계없이 TV 레이아웃을 사용합니다. leanback 기능을 보고하지 않는 Android TV 기기에 유용합니다. 변경 시 앱이 다시 시작됩니다.',
+			'settings.startInFullscreen' => '전체화면으로 시작',
+			'settings.startInFullscreenDescription' => '실행 시 Plezy를 전체화면 모드로 엽니다',
 			'settings.autoHidePerformanceOverlay' => '성능 오버레이 자동 숨기기',
 			'settings.autoHidePerformanceOverlayDescription' => '재생 컨트롤과 함께 성능 오버레이를 페이드 처리',
 			'settings.showNavBarLabels' => '내비게이션 바 라벨 표시',
@@ -1607,6 +1786,7 @@ extension on TranslationsKo {
 			'settings.display' => 'Display',
 			'settings.homeScreen' => 'Home Screen',
 			'settings.navigation' => 'Navigation',
+			'settings.window' => 'Window',
 			'settings.content' => 'Content',
 			'settings.player' => 'Player',
 			'settings.subtitlesAndConfig' => 'Subtitles & Configuration',
@@ -1630,6 +1810,8 @@ extension on TranslationsKo {
 			'hotkeys.actions.subtitleTrackNext' => '다음 자막 트랙',
 			'hotkeys.actions.chapterNext' => '다음 챕터',
 			'hotkeys.actions.chapterPrevious' => '이전 챕터',
+			'hotkeys.actions.episodeNext' => '다음 에피소드',
+			'hotkeys.actions.episodePrevious' => '이전 에피소드',
 			'hotkeys.actions.speedIncrease' => '속도 높이기',
 			'hotkeys.actions.speedDecrease' => '속도 낮추기',
 			'hotkeys.actions.speedReset' => '속도 초기화',
@@ -1723,6 +1905,13 @@ extension on TranslationsKo {
 			'videoControls.tracksButton' => '오디오 및 자막',
 			'videoControls.chaptersButton' => '챕터',
 			'videoControls.versionsButton' => '동영상 버전',
+			'videoControls.versionQualityButton' => '버전 및 화질',
+			'videoControls.versionColumnHeader' => '버전',
+			'videoControls.qualityColumnHeader' => '화질',
+			'videoControls.qualityOriginal' => '원본',
+			'videoControls.qualityPresetLabel' => ({required Object resolution, required Object bitrate}) => '${resolution}p ${bitrate} Mbps',
+			'videoControls.qualityBandwidthEstimate' => ({required Object bitrate}) => '~${bitrate} Mbps',
+			'videoControls.transcodeUnavailableFallback' => '트랜스코딩을 사용할 수 없음 — 원본 화질로 재생',
 			'videoControls.pipButton' => '픽처 인 픽처 모드',
 			'videoControls.aspectRatioButton' => '화면비율',
 			'videoControls.ambientLighting' => '주변 조명',
@@ -1771,6 +1960,10 @@ extension on TranslationsKo {
 			'messages.errorLoadingSeries' => '시리즈 로딩 중 오류',
 			'messages.errorLoadingSeason' => '시즌 로딩 중 오류',
 			'messages.musicNotSupported' => '음악 재생 미지원',
+			'messages.noDescriptionAvailable' => '설명이 없습니다',
+			'messages.noProfilesAvailable' => '사용 가능한 프로필이 없습니다',
+			'messages.contactAdminForProfiles' => '프로필을 추가하려면 Plex 관리자에게 문의하세요',
+			'messages.unableToDetermineLibrarySection' => '이 항목의 라이브러리 섹션을 확인할 수 없습니다',
 			'messages.logsCleared' => '로그가 삭제 되었습니다',
 			'messages.logsCopied' => '로그가 클립보드에 복사 되었습니다',
 			'messages.noLogsAvailable' => '사용 가능한 로그가 없습니다',
@@ -1861,7 +2054,11 @@ extension on TranslationsKo {
 			'libraries.analyzing' => ({required Object title}) => '"${title}" 분석 중...',
 			'libraries.analysisStarted' => ({required Object title}) => '"${title}" 분석 시작됨',
 			'libraries.failedToAnalyze' => ({required Object error}) => '미디어 라이브러리 분석 실패: ${error}',
+			_ => null,
+		} ?? switch (path) {
 			'libraries.noLibrariesFound' => '미디어 라이브러리 없음',
+			'libraries.allLibrariesHidden' => '모든 라이브러리가 숨겨졌습니다',
+			'libraries.hiddenLibrariesCount' => ({required Object count}) => '숨겨진 라이브러리 (${count})',
 			'libraries.thisLibraryIsEmpty' => '이 미디어 라이브러리는 비어 있습니다',
 			'libraries.all' => '전체',
 			'libraries.clearAll' => '모두 삭제',
@@ -1903,8 +2100,6 @@ extension on TranslationsKo {
 			'serverSelection.allServerConnectionsFailed' => '어떤 서버에도 연결할 수 없습니다. 네트워크를 확인하고 다시 시도하세요.',
 			'serverSelection.noServersFoundForAccount' => ({required Object username, required Object email}) => '${username} (${email})의 서버를 찾을 수 없습니다.',
 			'serverSelection.failedToLoadServers' => ({required Object error}) => '서버를 로드할 수 없습니다: ${error}',
-			_ => null,
-		} ?? switch (path) {
 			'hubDetail.title' => '제목',
 			'hubDetail.releaseYear' => '출시 연도',
 			'hubDetail.dateAdded' => '추가 날짜',
@@ -2063,6 +2258,11 @@ extension on TranslationsKo {
 			'downloads.downloadDeleted' => '다운로드 삭제됨',
 			'downloads.deleteConfirm' => ({required Object title}) => '"${title}"를 삭제 하시겠습니까? 다운로드한 파일이 기기에서 삭제됩니다.',
 			'downloads.deletingWithProgress' => ({required Object title, required Object current, required Object total}) => '${title} 삭제 중... (${current}/${total})',
+			'downloads.deleting' => '삭제 중...',
+			'downloads.queuedTooltip' => '대기 중',
+			'downloads.queuedFilesTooltip' => ({required Object files}) => '대기 중: ${files}',
+			'downloads.downloadingTooltip' => '다운로드 중...',
+			'downloads.downloadingFilesTooltip' => ({required Object files}) => '${files} 다운로드 중',
 			'downloads.noDownloadsTree' => '다운로드 없음',
 			'downloads.pauseAll' => '모두 일시정지',
 			'downloads.resumeAll' => '모두 재개',
@@ -2095,6 +2295,9 @@ extension on TranslationsKo {
 			'shaders.title' => '셰이더',
 			'shaders.noShaderDescription' => '비디오 향상 없음',
 			'shaders.nvscalerDescription' => '더 선명한 비디오를 위한 NVIDIA 이미지 스케일링',
+			'shaders.artcnnVariantNeutral' => '중립',
+			'shaders.artcnnVariantDenoise' => '노이즈 제거',
+			'shaders.artcnnVariantDenoiseSharpen' => '노이즈 제거 + 선명화',
 			'shaders.qualityFast' => '빠름',
 			'shaders.qualityHQ' => '고품질',
 			'shaders.mode' => '모드',
@@ -2169,7 +2372,7 @@ extension on TranslationsKo {
 			'videoSettings.audioOutput' => '오디오 출력',
 			'videoSettings.performanceOverlay' => '성능 오버레이',
 			'videoSettings.audioPassthrough' => '오디오 패스스루',
-			'videoSettings.audioNormalization' => '오디오 정규화',
+			'videoSettings.audioNormalization' => '음량 정규화',
 			'externalPlayer.title' => '외부 플레이어',
 			'externalPlayer.useExternalPlayer' => '외부 플레이어 사용',
 			'externalPlayer.useExternalPlayerDescription' => '내장 플레이어 대신 외부 앱에서 동영상 열기',
@@ -2259,6 +2462,18 @@ extension on TranslationsKo {
 			'metadataEdit.label' => '라벨',
 			'metadataEdit.style' => '스타일',
 			'metadataEdit.mood' => '분위기',
+			'matchScreen.match' => '일치...',
+			'matchScreen.fixMatch' => '일치 수정...',
+			'matchScreen.unmatch' => '일치 해제',
+			'matchScreen.unmatchConfirm' => '이 항목의 현재 일치를 해제하시겠습니까? 다시 일치시킬 때까지 Plex는 일치되지 않은 것으로 처리합니다.',
+			'matchScreen.unmatchSuccess' => '일치 해제됨',
+			'matchScreen.unmatchFailed' => '일치 해제에 실패했습니다',
+			'matchScreen.matchApplied' => '일치 적용됨',
+			'matchScreen.matchFailed' => '일치 적용에 실패했습니다',
+			'matchScreen.titleHint' => '제목',
+			'matchScreen.yearHint' => '연도',
+			'matchScreen.search' => '검색',
+			'matchScreen.noMatchesFound' => '일치하는 항목이 없습니다',
 			'serverTasks.title' => '서버 작업',
 			'serverTasks.failedToLoad' => '작업을 불러올 수 없습니다',
 			'serverTasks.noTasks' => '실행 중인 작업 없음',
@@ -2271,12 +2486,39 @@ extension on TranslationsKo {
 			'trakt.scrobbleDescription' => '재생 중 재생, 일시정지, 정지 이벤트를 Trakt로 전송합니다.',
 			'trakt.watchedSync' => '시청 상태 동기화',
 			'trakt.watchedSyncDescription' => 'Plezy에서 시청 완료로 표시한 항목이 Trakt에도 시청 완료로 표시됩니다.',
-			'trakt.deviceCodeTitle' => 'Trakt에서 Plezy 활성화',
-			'trakt.deviceCodeBody' => ({required Object url}) => '${url}을(를) 방문하여 이 코드를 입력하세요:',
-			'trakt.openTraktActivate' => '활성화하려면 Trakt 열기',
-			'trakt.waitingForAuthorization' => '인증 대기 중…',
-			'trakt.codeCopied' => '코드가 복사됨',
-			'trakt.connectFailed' => 'Trakt에 연결할 수 없습니다. 다시 시도하세요.',
+			'trackers.title' => '트래커',
+			'trackers.hubSubtitle' => '시청 진행률을 Trakt 및 기타 서비스와 동기화하세요.',
+			'trackers.notConnected' => '연결되지 않음',
+			'trackers.connectedAs' => ({required Object username}) => '@${username} 로 연결됨',
+			'trackers.scrobble' => '진행률 자동 추적',
+			'trackers.scrobbleDescription' => '에피소드나 영화를 시청하면 목록을 업데이트합니다.',
+			'trackers.disconnectConfirm' => ({required Object service}) => '${service} 연결을 해제하시겠습니까?',
+			'trackers.disconnectConfirmBody' => ({required Object service}) => 'Plezy가 ${service} 목록 업데이트를 중지합니다. 언제든지 다시 연결할 수 있습니다.',
+			'trackers.connectFailed' => ({required Object service}) => '${service}에 연결할 수 없습니다. 다시 시도하세요.',
+			'trackers.services.mal' => 'MyAnimeList',
+			'trackers.services.anilist' => 'AniList',
+			'trackers.services.simkl' => 'Simkl',
+			'trackers.deviceCode.title' => ({required Object service}) => '${service}에서 Plezy 활성화',
+			'trackers.deviceCode.body' => ({required Object url}) => '${url}을 방문하여 이 코드를 입력하세요:',
+			'trackers.deviceCode.openToActivate' => ({required Object service}) => '활성화하려면 ${service} 열기',
+			'trackers.deviceCode.waitingForAuthorization' => '인증을 기다리는 중…',
+			'trackers.deviceCode.codeCopied' => '코드가 복사되었습니다',
+			'trackers.oauthProxy.title' => ({required Object service}) => '${service}에 로그인',
+			'trackers.oauthProxy.body' => '휴대전화로 이 QR 코드를 스캔하거나 아래 URL을 브라우저가 있는 기기에서 여세요.',
+			'trackers.oauthProxy.openToSignIn' => ({required Object service}) => '로그인하려면 ${service} 열기',
+			'trackers.oauthProxy.urlCopied' => 'URL이 복사되었습니다',
+			'trackers.libraryFilter.title' => '라이브러리 필터',
+			'trackers.libraryFilter.subtitleAllSyncing' => '모든 라이브러리 동기화 중',
+			'trackers.libraryFilter.subtitleNoneSyncing' => '동기화 안 함',
+			'trackers.libraryFilter.subtitleBlocked' => ({required Object count}) => '${count}개 차단됨',
+			'trackers.libraryFilter.subtitleAllowed' => ({required Object count}) => '${count}개 허용됨',
+			'trackers.libraryFilter.mode' => '필터 모드',
+			'trackers.libraryFilter.modeBlacklist' => '차단 목록',
+			'trackers.libraryFilter.modeWhitelist' => '허용 목록',
+			'trackers.libraryFilter.modeHintBlacklist' => '아래에 선택한 라이브러리를 제외한 모든 라이브러리를 동기화합니다.',
+			'trackers.libraryFilter.modeHintWhitelist' => '아래에 선택한 라이브러리만 동기화합니다.',
+			'trackers.libraryFilter.libraries' => '라이브러리',
+			'trackers.libraryFilter.noLibraries' => '사용 가능한 라이브러리가 없습니다',
 			_ => null,
 		};
 	}

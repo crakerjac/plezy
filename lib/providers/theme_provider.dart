@@ -2,10 +2,11 @@ import 'dart:io' show Platform;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:material_symbols_icons/symbols.dart';
+import '../mixins/disposable_change_notifier_mixin.dart';
 import '../services/settings_service.dart' as settings;
 import '../theme/mono_theme.dart';
 
-class ThemeProvider extends ChangeNotifier {
+class ThemeProvider extends ChangeNotifier with DisposableChangeNotifierMixin {
   late settings.SettingsService _settingsService;
   settings.ThemeMode _themeMode = settings.ThemeMode.system;
   late Brightness _systemBrightness;
@@ -13,21 +14,29 @@ class ThemeProvider extends ChangeNotifier {
   ThemeProvider() {
     _systemBrightness = WidgetsBinding.instance.platformDispatcher.platformBrightness;
     _initializeSettings();
+    WidgetsBinding.instance.platformDispatcher.onPlatformBrightnessChanged = _onBrightnessChanged;
+  }
 
-    // Listen to system theme changes
-    WidgetsBinding.instance.platformDispatcher.onPlatformBrightnessChanged = () {
-      _systemBrightness = WidgetsBinding.instance.platformDispatcher.platformBrightness;
-      if (_themeMode == settings.ThemeMode.system) {
-        notifyListeners();
-      }
-    };
+  void _onBrightnessChanged() {
+    _systemBrightness = WidgetsBinding.instance.platformDispatcher.platformBrightness;
+    if (_themeMode == settings.ThemeMode.system) {
+      safeNotifyListeners();
+    }
+  }
+
+  @override
+  void dispose() {
+    if (WidgetsBinding.instance.platformDispatcher.onPlatformBrightnessChanged == _onBrightnessChanged) {
+      WidgetsBinding.instance.platformDispatcher.onPlatformBrightnessChanged = null;
+    }
+    super.dispose();
   }
 
   Future<void> _initializeSettings() async {
     _settingsService = await settings.SettingsService.getInstance();
-    _themeMode = _settingsService.getThemeMode();
+    _themeMode = _settingsService.read(settings.SettingsService.themeMode);
     _updateSplashTheme(_themeMode);
-    notifyListeners();
+    safeNotifyListeners();
   }
 
   settings.ThemeMode get themeMode => _themeMode;
@@ -71,10 +80,20 @@ class ThemeProvider extends ChangeNotifier {
   Future<void> setThemeMode(settings.ThemeMode mode) async {
     if (_themeMode != mode) {
       _themeMode = mode;
-      await _settingsService.setThemeMode(mode);
+      await _settingsService.write(settings.SettingsService.themeMode, mode);
       _updateSplashTheme(mode);
-      notifyListeners();
+      safeNotifyListeners();
     }
+  }
+
+  /// Re-read the theme mode from SharedPreferences. Used after imports or
+  /// resets that change persisted settings outside this provider.
+  Future<void> reload() async {
+    _settingsService = await settings.SettingsService.getInstance();
+    final mode = _settingsService.read(settings.SettingsService.themeMode);
+    _themeMode = mode;
+    _updateSplashTheme(mode);
+    safeNotifyListeners();
   }
 
   void _updateSplashTheme(settings.ThemeMode mode) {

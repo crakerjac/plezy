@@ -220,8 +220,8 @@ abstract class PlayerBase with PlayerStreamControllersMixin implements Player {
           try {
             final parsed = jsonDecode(value);
             if (parsed is List) trackList = parsed;
-          } catch (_) {
-            // Ignore parse errors
+          } catch (e) {
+            appLogger.d('Player: track-list parse failed', error: e);
           }
         }
         if (trackList != null) {
@@ -260,7 +260,9 @@ abstract class PlayerBase with PlayerStreamControllersMixin implements Player {
           try {
             final parsed = jsonDecode(value);
             if (parsed is List) deviceList = parsed;
-          } catch (_) {}
+          } catch (e) {
+            appLogger.d('Player: device-list parse failed', error: e);
+          }
         }
         if (deviceList != null) {
           final devices = deviceList
@@ -349,7 +351,7 @@ abstract class PlayerBase with PlayerStreamControllersMixin implements Player {
           3 => 'quit',
           4 => 'error',
           5 => 'redirect',
-          String s => s,
+          final String s => s,
           _ => null,
         };
         if (reason == 'eof') {
@@ -487,11 +489,6 @@ abstract class PlayerBase with PlayerStreamControllersMixin implements Player {
     trackController.add(_state.track);
   }
 
-  /// Update the internal state.
-  void updateState(PlayerState Function(PlayerState) update) {
-    _state = update(_state);
-  }
-
   @protected
   void clearTracks() {
     const empty = Tracks();
@@ -544,8 +541,7 @@ abstract class PlayerBase with PlayerStreamControllersMixin implements Player {
   Future<void> updateFrame() async {}
 
   @override
-  // ignore: no-empty-block - base no-op, overridden by platform subclasses
-  Future<void> setVideoFrameRate(double fps, int durationMs) async {}
+  Future<bool> setVideoFrameRate(double fps, int durationMs, {int extraDelayMs = 0}) async => false;
 
   @override
   // ignore: no-empty-block - base no-op, overridden by platform subclasses
@@ -597,6 +593,25 @@ abstract class PlayerBase with PlayerStreamControllersMixin implements Player {
       logController.add(
         PlayerLog(prefix: 'fonts', level: PlayerLogLevel.warn, text: 'Failed to configure subtitle fonts: $e'),
       );
+    }
+  }
+
+  // ============================================
+  // Seek helpers
+  // ============================================
+
+  /// Run a backend-specific seek call, swallowing the common "not ready" errors
+  /// the native channel throws when the engine was torn down mid-seek.
+  @protected
+  Future<void> runSeek(Future<void> Function() seekFn) async {
+    try {
+      await seekFn();
+    } on PlatformException catch (e) {
+      if (e.code == 'COMMAND_FAILED' || e.code == 'NOT_INITIALIZED') {
+        appLogger.w('Seek failed (${e.code}), player not ready');
+        return;
+      }
+      rethrow;
     }
   }
 

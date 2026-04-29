@@ -7,6 +7,7 @@ import '../models/hotkey_model.dart';
 import '../i18n/strings.g.dart';
 import '../mpv/mpv.dart';
 import 'settings_service.dart';
+import '../utils/platform_detector.dart';
 import '../utils/player_utils.dart';
 
 class KeyboardShortcutsService {
@@ -30,18 +31,18 @@ class KeyboardShortcutsService {
 
   /// Keyboard shortcut customization is only supported on desktop platforms.
   static bool isPlatformSupported() {
-    return Platform.isWindows || Platform.isLinux || Platform.isMacOS;
+    return PlatformDetector.isDesktopOS();
   }
 
   Future<void> _init() async {
     _settingsService = await SettingsService.getInstance();
     // Ensure settings service is fully initialized before loading data
     await Future.delayed(Duration.zero); // Allow event loop to complete
-    _shortcuts = _settingsService.getKeyboardShortcuts(); // Keep for legacy compatibility
-    _hotkeys = await _settingsService.getKeyboardHotkeys(); // Primary method
-    _seekTimeSmall = _settingsService.getSeekTimeSmall();
-    _seekTimeLarge = _settingsService.getSeekTimeLarge();
-    _maxVolume = _settingsService.getMaxVolume();
+    _shortcuts = _settingsService.read(SettingsService.keyboardShortcuts); // Keep for legacy compatibility
+    _hotkeys = _settingsService.read(SettingsService.keyboardHotkeys); // Primary method
+    _seekTimeSmall = _settingsService.read(SettingsService.seekTimeSmall);
+    _seekTimeLarge = _settingsService.read(SettingsService.seekTimeLarge);
+    _maxVolume = _settingsService.read(SettingsService.maxVolume);
   }
 
   Map<String, String> get shortcuts => Map.from(_shortcuts);
@@ -58,7 +59,7 @@ class KeyboardShortcutsService {
 
   Future<void> setShortcut(String action, String key) async {
     _shortcuts[action] = key;
-    await _settingsService.setKeyboardShortcuts(_shortcuts);
+    await _settingsService.write(SettingsService.keyboardShortcuts, _shortcuts);
   }
 
   Future<void> setHotkey(String action, HotKey hotkey) async {
@@ -66,7 +67,10 @@ class KeyboardShortcutsService {
     _hotkeys[action] = hotkey;
 
     // Save to persistent storage
-    await _settingsService.setKeyboardHotkey(action, hotkey);
+    await _settingsService.write(SettingsService.keyboardHotkeys, {
+      ..._settingsService.read(SettingsService.keyboardHotkeys),
+      action: hotkey,
+    });
 
     // Verify local cache is still correct
     if (_hotkeys[action] != hotkey) {
@@ -75,16 +79,16 @@ class KeyboardShortcutsService {
   }
 
   Future<void> refreshFromStorage() async {
-    _hotkeys = await _settingsService.getKeyboardHotkeys();
-    _seekTimeSmall = _settingsService.getSeekTimeSmall();
-    _seekTimeLarge = _settingsService.getSeekTimeLarge();
+    _hotkeys = _settingsService.read(SettingsService.keyboardHotkeys);
+    _seekTimeSmall = _settingsService.read(SettingsService.seekTimeSmall);
+    _seekTimeLarge = _settingsService.read(SettingsService.seekTimeLarge);
   }
 
   Future<void> resetToDefaults() async {
-    _shortcuts = _settingsService.getDefaultKeyboardShortcuts();
-    _hotkeys = _settingsService.getDefaultKeyboardHotkeys();
-    await _settingsService.setKeyboardShortcuts(_shortcuts);
-    await _settingsService.setKeyboardHotkeys(_hotkeys);
+    _shortcuts = SettingsService.defaultKeyboardShortcuts();
+    _hotkeys = SettingsService.defaultKeyboardHotkeys();
+    await _settingsService.write(SettingsService.keyboardShortcuts, _shortcuts);
+    await _settingsService.write(SettingsService.keyboardHotkeys, _hotkeys);
     // Refresh cache to ensure consistency
     await refreshFromStorage();
   }
@@ -139,6 +143,8 @@ class KeyboardShortcutsService {
     VoidCallback? onBack,
     VoidCallback? onToggleShader,
     VoidCallback? onSkipMarker,
+    VoidCallback? onNextEpisode,
+    VoidCallback? onPreviousEpisode,
     int? currentPositionEpoch,
     ValueChanged<int>? onLiveSeek,
   }) {
@@ -218,6 +224,8 @@ class KeyboardShortcutsService {
           onPreviousChapter,
           onToggleShader: onToggleShader,
           onSkipMarker: onSkipMarker,
+          onNextEpisode: onNextEpisode,
+          onPreviousEpisode: onPreviousEpisode,
           currentPositionEpoch: currentPositionEpoch,
           onLiveSeek: onLiveSeek,
         );
@@ -239,6 +247,8 @@ class KeyboardShortcutsService {
     VoidCallback? onPreviousChapter, {
     VoidCallback? onToggleShader,
     VoidCallback? onSkipMarker,
+    VoidCallback? onNextEpisode,
+    VoidCallback? onPreviousEpisode,
     int? currentPositionEpoch,
     ValueChanged<int>? onLiveSeek,
   }) {
@@ -258,12 +268,12 @@ class KeyboardShortcutsService {
       case 'volume_up':
         final newVolume = (player.state.volume + 10).clamp(0.0, _maxVolume.toDouble());
         player.setVolume(newVolume);
-        _settingsService.setVolume(newVolume);
+        _settingsService.write(SettingsService.volume, newVolume);
         break;
       case 'volume_down':
         final newVolume = (player.state.volume - 10).clamp(0.0, _maxVolume.toDouble());
         player.setVolume(newVolume);
-        _settingsService.setVolume(newVolume);
+        _settingsService.write(SettingsService.volume, newVolume);
         break;
       case 'seek_forward':
         performSeek(_seekTimeSmall);
@@ -283,7 +293,7 @@ class KeyboardShortcutsService {
       case 'mute_toggle':
         final newVolume = player.state.volume > 0 ? 0.0 : 100.0;
         player.setVolume(newVolume);
-        _settingsService.setVolume(newVolume);
+        _settingsService.write(SettingsService.volume, newVolume);
         break;
       case 'subtitle_toggle':
         onToggleSubtitles?.call();
@@ -300,19 +310,25 @@ class KeyboardShortcutsService {
       case 'chapter_previous':
         onPreviousChapter?.call();
         break;
+      case 'episode_next':
+        onNextEpisode?.call();
+        break;
+      case 'episode_previous':
+        onPreviousEpisode?.call();
+        break;
       case 'speed_increase':
         final newRateUp = (player.state.rate + 0.25).clamp(0.25, 3.0);
         player.setRate(newRateUp);
-        _settingsService.setDefaultPlaybackSpeed(newRateUp);
+        _settingsService.write(SettingsService.defaultPlaybackSpeed, newRateUp);
         break;
       case 'speed_decrease':
         final newRateDown = (player.state.rate - 0.25).clamp(0.25, 3.0);
         player.setRate(newRateDown);
-        _settingsService.setDefaultPlaybackSpeed(newRateDown);
+        _settingsService.write(SettingsService.defaultPlaybackSpeed, newRateDown);
         break;
       case 'speed_reset':
         player.setRate(1.0);
-        _settingsService.setDefaultPlaybackSpeed(1.0);
+        _settingsService.write(SettingsService.defaultPlaybackSpeed, 1.0);
         break;
       case 'sub_seek_next':
         player.command(['sub-seek', '1']);
@@ -360,6 +376,10 @@ class KeyboardShortcutsService {
         return t.hotkeys.actions.chapterNext;
       case 'chapter_previous':
         return t.hotkeys.actions.chapterPrevious;
+      case 'episode_next':
+        return t.hotkeys.actions.episodeNext;
+      case 'episode_previous':
+        return t.hotkeys.actions.episodePrevious;
       case 'speed_increase':
         return t.hotkeys.actions.speedIncrease;
       case 'speed_decrease':

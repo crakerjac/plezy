@@ -18,6 +18,7 @@ import 'playlist_item_card.dart';
 import '../../i18n/strings.g.dart';
 import '../../providers/download_provider.dart';
 import '../../utils/content_utils.dart';
+import '../../utils/platform_detector.dart';
 import '../../utils/dialogs.dart';
 import '../../utils/download_utils.dart';
 import '../../utils/global_key_utils.dart';
@@ -69,14 +70,14 @@ class _PlaylistDetailScreenState extends BaseMediaListDetailScreen<PlaylistDetai
         FocusableAction(icon: Symbols.play_arrow_rounded, tooltip: t.common.play, onPressed: playItems),
         FocusableAction(icon: Symbols.shuffle_rounded, tooltip: t.common.shuffle, onPressed: shufflePlayItems),
       ],
-      if (isVideoPlaylist && (items.isNotEmpty || hasRule))
+      if (!PlatformDetector.isAppleTV() && isVideoPlaylist && (items.isNotEmpty || hasRule))
         FocusableAction(
           icon: hasRule ? Symbols.sync_rounded : Symbols.download_rounded,
           tooltip: hasRule ? t.downloads.manageSyncRule : t.downloads.downloadNow,
           onPressed: hasRule ? _managePlaylistSyncRule : _downloadPlaylist,
           iconColor: hasRule ? Colors.teal : null,
         ),
-      if (hasRule)
+      if (!PlatformDetector.isAppleTV() && hasRule)
         FocusableAction(
           icon: Symbols.sync_disabled_rounded,
           tooltip: t.downloads.removeSyncRule,
@@ -137,7 +138,7 @@ class _PlaylistDetailScreenState extends BaseMediaListDetailScreen<PlaylistDetai
 
   @override
   Future<List<PlexMetadata>> fetchItems() async {
-    return await client.getPlaylist(widget.playlist.ratingKey);
+    return await client.fetchAllPlaylistItems(widget.playlist.ratingKey);
   }
 
   @override
@@ -356,6 +357,7 @@ class _PlaylistDetailScreenState extends BaseMediaListDetailScreen<PlaylistDetai
   }
 
   Future<void> _removeItem(int index) async {
+    if (items.isEmpty || index < 0 || index >= items.length) return;
     final item = items[index];
 
     // Check if item has playlistItemID (required for removal)
@@ -372,6 +374,12 @@ class _PlaylistDetailScreenState extends BaseMediaListDetailScreen<PlaylistDetai
     // Optimistically update UI
     setState(() {
       items.removeAt(index);
+      if (_focusedIndex >= items.length) {
+        _focusedIndex = (items.length - 1).clamp(0, items.length);
+      }
+      if (items.isEmpty) {
+        _focusedColumn = 0;
+      }
     });
 
     // Call API to persist the change
@@ -388,6 +396,7 @@ class _PlaylistDetailScreenState extends BaseMediaListDetailScreen<PlaylistDetai
         appLogger.e('Failed to remove playlist item, reverting UI');
         setState(() {
           items.insert(index, item);
+          _focusedIndex = index;
         });
 
         showErrorSnackBar(context, t.playlists.errorRemoving);

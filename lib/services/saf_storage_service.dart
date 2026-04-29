@@ -1,7 +1,7 @@
 import 'dart:io';
 
-import 'package:flutter/foundation.dart';
 import 'package:saf_util/saf_util.dart';
+import '../utils/app_logger.dart';
 import '../utils/platform_detector.dart';
 import 'package:saf_util/saf_util_platform_interface.dart';
 
@@ -27,7 +27,7 @@ class SafStorageService {
       final doc = await _safUtil.pickDirectory(writePermission: true, persistablePermission: true);
       return doc?.uri;
     } catch (e) {
-      debugPrint('SAF pickDirectory error: $e');
+      appLogger.w('SAF pickDirectory error', error: e);
       return null;
     }
   }
@@ -40,18 +40,20 @@ class SafStorageService {
       final result = await _safUtil.mkdirp(parentUri, [name]);
       return result.uri;
     } catch (e) {
-      debugPrint('SAF createDirectory error: $e');
+      appLogger.w('SAF createDirectory error', error: e);
       return null;
     }
   }
 
-  /// Get a child file/directory in a SAF directory
-  Future<SafDocumentFile?> getChild(String parentUri, String name) async {
+  /// Traverse to a child file/directory under a SAF directory.
+  /// [names] is the path-component list from [parentUri] to the target;
+  /// pass a single element for an immediate child.
+  Future<SafDocumentFile?> getChild(String parentUri, List<String> names) async {
     if (!isAvailable) return null;
     try {
-      return await _safUtil.child(parentUri, [name]);
+      return await _safUtil.child(parentUri, names);
     } catch (e) {
-      debugPrint('SAF getChild error: $e');
+      appLogger.w('SAF getChild error', error: e);
       return null;
     }
   }
@@ -64,7 +66,42 @@ class SafStorageService {
       final result = await _safUtil.mkdirp(parentUri, pathComponents);
       return result.uri;
     } catch (e) {
-      debugPrint('SAF createNestedDirectories error: $e');
+      appLogger.w('SAF createNestedDirectories error', error: e);
+      return null;
+    }
+  }
+
+  /// Delete a SAF file or directory. Returns true on success, false on error.
+  Future<bool> delete(String uri, {required bool isDir}) async {
+    if (!isAvailable) return false;
+    try {
+      await _safUtil.delete(uri, isDir);
+      return true;
+    } catch (e) {
+      appLogger.w('SAF delete error', error: e);
+      return false;
+    }
+  }
+
+  /// Check whether a SAF file or directory exists. Returns false on error.
+  Future<bool> exists(String uri, {required bool isDir}) async {
+    if (!isAvailable) return false;
+    try {
+      return await _safUtil.exists(uri, isDir);
+    } catch (e) {
+      appLogger.w('SAF exists error', error: e);
+      return false;
+    }
+  }
+
+  /// List children of a SAF directory. Returns null on error so callers can
+  /// distinguish "error" from "empty dir".
+  Future<List<SafDocumentFile>?> list(String uri) async {
+    if (!isAvailable) return null;
+    try {
+      return await _safUtil.list(uri);
+    } catch (e) {
+      appLogger.w('SAF list error', error: e);
       return null;
     }
   }

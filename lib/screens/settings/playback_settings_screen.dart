@@ -4,7 +4,9 @@ import 'package:flutter/material.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
 import '../../i18n/strings.g.dart';
+import '../../models/transcode_quality_preset.dart';
 import '../../mpv/player/platform/player_android.dart';
+import '../../utils/quality_preset_labels.dart';
 import '../../services/discord_rpc_service.dart';
 import '../../services/keyboard_shortcuts_service.dart';
 import '../../services/settings_service.dart' as settings;
@@ -55,6 +57,7 @@ class _PlaybackSettingsScreenState extends State<PlaybackSettingsScreen> {
   bool _useExoPlayer = true;
   bool _useExternalPlayer = false;
   String _selectedExternalPlayerName = '';
+  TranscodeQualityPreset _defaultQualityPreset = TranscodeQualityPreset.original;
 
   @override
   void initState() {
@@ -70,31 +73,34 @@ class _PlaybackSettingsScreenState extends State<PlaybackSettingsScreen> {
 
     if (!mounted) return;
     setState(() {
-      _enableHardwareDecoding = _settingsService.getEnableHardwareDecoding();
-      _bufferSize = _settingsService.getBufferSize();
-      _seekTimeSmall = _settingsService.getSeekTimeSmall();
-      _seekTimeLarge = _settingsService.getSeekTimeLarge();
-      _rewindOnResume = _settingsService.getRewindOnResume();
-      _sleepTimerDuration = _settingsService.getSleepTimerDuration();
-      _rememberTrackSelections = _settingsService.getRememberTrackSelections();
-      _clickVideoTogglesPlayback = _settingsService.getClickVideoTogglesPlayback();
-      _autoSkipIntro = _settingsService.getAutoSkipIntro();
-      _autoSkipCredits = _settingsService.getAutoSkipCredits();
-      _autoSkipDelay = _settingsService.getAutoSkipDelay();
-      _introPattern = _settingsService.getIntroPattern();
-      _creditsPattern = _settingsService.getCreditsPattern();
-      _maxVolume = _settingsService.getMaxVolume();
-      _enableDiscordRPC = _settingsService.getEnableDiscordRPC();
-      _enableCompanionRemoteServer = _settingsService.getEnableCompanionRemoteServer();
-      _autoPip = _settingsService.getAutoPip();
-      _matchContentFrameRate = _settingsService.getMatchContentFrameRate();
-      _matchRefreshRate = _settingsService.getMatchRefreshRate();
-      _matchDynamicRange = _settingsService.getMatchDynamicRange();
-      _displaySwitchDelay = _settingsService.getDisplaySwitchDelay();
-      _tunneledPlayback = _settingsService.getTunneledPlayback();
-      _useExoPlayer = _settingsService.getUseExoPlayer();
-      _useExternalPlayer = _settingsService.getUseExternalPlayer();
-      _selectedExternalPlayerName = _settingsService.getSelectedExternalPlayer().name;
+      _enableHardwareDecoding = _settingsService.read(settings.SettingsService.enableHardwareDecoding);
+      _bufferSize = _settingsService.read(settings.SettingsService.bufferSize);
+      _seekTimeSmall = _settingsService.read(settings.SettingsService.seekTimeSmall);
+      _seekTimeLarge = _settingsService.read(settings.SettingsService.seekTimeLarge);
+      _rewindOnResume = _settingsService.read(settings.SettingsService.rewindOnResume);
+      _sleepTimerDuration = _settingsService.read(settings.SettingsService.sleepTimerDuration);
+      _rememberTrackSelections = _settingsService.read(settings.SettingsService.rememberTrackSelections);
+      _clickVideoTogglesPlayback = _settingsService.read(settings.SettingsService.clickVideoTogglesPlayback);
+      _autoSkipIntro = _settingsService.read(settings.SettingsService.autoSkipIntro);
+      _autoSkipCredits = _settingsService.read(settings.SettingsService.autoSkipCredits);
+      _autoSkipDelay = _settingsService.read(settings.SettingsService.autoSkipDelay);
+      _introPattern = _settingsService.read(settings.SettingsService.introPattern);
+      _creditsPattern = _settingsService.read(settings.SettingsService.creditsPattern);
+      _maxVolume = _settingsService.read(settings.SettingsService.maxVolume);
+      _enableDiscordRPC = _settingsService.read(settings.SettingsService.enableDiscordRPC);
+      _enableCompanionRemoteServer = _settingsService.read(settings.SettingsService.enableCompanionRemoteServer);
+      _autoPip = _settingsService.read(settings.SettingsService.autoPip);
+      _matchContentFrameRate = _settingsService.read(settings.SettingsService.matchContentFrameRate);
+      _matchRefreshRate = _settingsService.read(settings.SettingsService.matchRefreshRate);
+      _matchDynamicRange = _settingsService.read(settings.SettingsService.matchDynamicRange);
+      _displaySwitchDelay = _settingsService.read(settings.SettingsService.displaySwitchDelay);
+      _tunneledPlayback = _settingsService.read(settings.SettingsService.tunneledPlayback);
+      _useExoPlayer = _settingsService.read(settings.SettingsService.useExoPlayer);
+      _useExternalPlayer = _settingsService.read(settings.SettingsService.useExternalPlayer);
+      _selectedExternalPlayerName = _settingsService.read(settings.SettingsService.selectedExternalPlayer).name;
+      _defaultQualityPreset = TranscodeQualityPreset.fromStorage(
+        _settingsService.read(settings.SettingsService.defaultQualityPreset),
+      );
       _isLoading = false;
     });
   }
@@ -124,9 +130,12 @@ class _PlaybackSettingsScreenState extends State<PlaybackSettingsScreen> {
             if (Platform.isAndroid) _buildMatchContentFrameRate(),
             if (Platform.isWindows) _buildMatchRefreshRate(),
             if (Platform.isWindows) _buildMatchDynamicRange(),
-            if (Platform.isWindows && (_matchRefreshRate || _matchDynamicRange)) _buildDisplaySwitchDelay(),
+            if ((Platform.isWindows && (_matchRefreshRate || _matchDynamicRange)) ||
+                (Platform.isAndroid && _matchContentFrameRate))
+              _buildDisplaySwitchDelay(),
             if (Platform.isAndroid && _useExoPlayer) _buildTunneledPlayback(),
             _buildBufferSizeSelector(),
+            _buildDefaultQualityTile(),
 
             // --- Subtitles & Config ---
             SettingsSectionHeader(t.settings.subtitlesAndConfig),
@@ -175,7 +184,7 @@ class _PlaybackSettingsScreenState extends State<PlaybackSettingsScreen> {
       selected: _useExoPlayer,
       onChanged: (value) async {
         setState(() => _useExoPlayer = value);
-        await _settingsService.setUseExoPlayer(value);
+        await _settingsService.write(settings.SettingsService.useExoPlayer, value);
       },
     );
   }
@@ -191,8 +200,8 @@ class _PlaybackSettingsScreenState extends State<PlaybackSettingsScreen> {
         final s = await settings.SettingsService.getInstance();
         if (!mounted) return;
         setState(() {
-          _useExternalPlayer = s.getUseExternalPlayer();
-          _selectedExternalPlayerName = s.getSelectedExternalPlayer().name;
+          _useExternalPlayer = s.read(settings.SettingsService.useExternalPlayer);
+          _selectedExternalPlayerName = s.read(settings.SettingsService.selectedExternalPlayer).name;
         });
       },
     );
@@ -206,7 +215,7 @@ class _PlaybackSettingsScreenState extends State<PlaybackSettingsScreen> {
       value: _enableHardwareDecoding,
       onChanged: (value) async {
         setState(() => _enableHardwareDecoding = value);
-        await _settingsService.setEnableHardwareDecoding(value);
+        await _settingsService.write(settings.SettingsService.enableHardwareDecoding, value);
       },
     );
   }
@@ -219,7 +228,7 @@ class _PlaybackSettingsScreenState extends State<PlaybackSettingsScreen> {
       value: _autoPip,
       onChanged: (value) async {
         setState(() => _autoPip = value);
-        await _settingsService.setAutoPip(value);
+        await _settingsService.write(settings.SettingsService.autoPip, value);
       },
     );
   }
@@ -232,7 +241,7 @@ class _PlaybackSettingsScreenState extends State<PlaybackSettingsScreen> {
       value: _matchContentFrameRate,
       onChanged: (value) async {
         setState(() => _matchContentFrameRate = value);
-        await _settingsService.setMatchContentFrameRate(value);
+        await _settingsService.write(settings.SettingsService.matchContentFrameRate, value);
       },
     );
   }
@@ -245,7 +254,7 @@ class _PlaybackSettingsScreenState extends State<PlaybackSettingsScreen> {
       value: _matchRefreshRate,
       onChanged: (value) async {
         setState(() => _matchRefreshRate = value);
-        await _settingsService.setMatchRefreshRate(value);
+        await _settingsService.write(settings.SettingsService.matchRefreshRate, value);
       },
     );
   }
@@ -258,7 +267,7 @@ class _PlaybackSettingsScreenState extends State<PlaybackSettingsScreen> {
       value: _matchDynamicRange,
       onChanged: (value) async {
         setState(() => _matchDynamicRange = value);
-        await _settingsService.setMatchDynamicRange(value);
+        await _settingsService.write(settings.SettingsService.matchDynamicRange, value);
       },
     );
   }
@@ -279,7 +288,7 @@ class _PlaybackSettingsScreenState extends State<PlaybackSettingsScreen> {
         currentValue: _displaySwitchDelay,
         onSave: (value) async {
           setState(() => _displaySwitchDelay = value);
-          await _settingsService.setDisplaySwitchDelay(value);
+          await _settingsService.write(settings.SettingsService.displaySwitchDelay, value);
         },
       ),
     );
@@ -293,7 +302,32 @@ class _PlaybackSettingsScreenState extends State<PlaybackSettingsScreen> {
       value: _tunneledPlayback,
       onChanged: (value) async {
         setState(() => _tunneledPlayback = value);
-        await _settingsService.setTunneledPlayback(value);
+        await _settingsService.write(settings.SettingsService.tunneledPlayback, value);
+      },
+    );
+  }
+
+  Widget _buildDefaultQualityTile() {
+    return ListTile(
+      leading: const AppIcon(Symbols.high_quality_rounded, fill: 1),
+      title: Text(t.settings.defaultQualityTitle),
+      subtitle: Text(qualityPresetLabel(_defaultQualityPreset)),
+      trailing: const AppIcon(Symbols.chevron_right_rounded, fill: 1),
+      onTap: () async {
+        final value = await showSelectionDialog<TranscodeQualityPreset>(
+          context: context,
+          title: t.settings.defaultQualityTitle,
+          options: TranscodeQualityPreset.displayOrder
+              .map((p) => DialogOption(value: p, title: qualityPresetLabel(p)))
+              .toList(),
+          currentValue: _defaultQualityPreset,
+        );
+        if (value != null) {
+          setState(() {
+            _defaultQualityPreset = value;
+            _settingsService.write(settings.SettingsService.defaultQualityPreset, value.storageKey);
+          });
+        }
       },
     );
   }
@@ -319,7 +353,7 @@ class _PlaybackSettingsScreenState extends State<PlaybackSettingsScreen> {
         if (value != null) {
           setState(() {
             _bufferSize = value;
-            _settingsService.setBufferSize(value);
+            _settingsService.write(settings.SettingsService.bufferSize, value);
           });
           if (Platform.isAndroid && value > 0) {
             final heapMB = await PlayerAndroid.getHeapSize();
@@ -377,7 +411,7 @@ class _PlaybackSettingsScreenState extends State<PlaybackSettingsScreen> {
         onSave: (value) async {
           setState(() {
             _seekTimeSmall = value;
-            _settingsService.setSeekTimeSmall(value);
+            _settingsService.write(settings.SettingsService.seekTimeSmall, value);
           });
           await _keyboardService?.refreshFromStorage();
         },
@@ -402,7 +436,7 @@ class _PlaybackSettingsScreenState extends State<PlaybackSettingsScreen> {
         onSave: (value) async {
           setState(() {
             _seekTimeLarge = value;
-            _settingsService.setSeekTimeLarge(value);
+            _settingsService.write(settings.SettingsService.seekTimeLarge, value);
           });
           await _keyboardService?.refreshFromStorage();
         },
@@ -427,7 +461,7 @@ class _PlaybackSettingsScreenState extends State<PlaybackSettingsScreen> {
         onSave: (value) async {
           setState(() {
             _rewindOnResume = value;
-            _settingsService.setRewindOnResume(value);
+            _settingsService.write(settings.SettingsService.rewindOnResume, value);
           });
         },
       ),
@@ -450,7 +484,7 @@ class _PlaybackSettingsScreenState extends State<PlaybackSettingsScreen> {
         currentValue: _sleepTimerDuration,
         onSave: (value) async {
           setState(() => _sleepTimerDuration = value);
-          await _settingsService.setSleepTimerDuration(value);
+          await _settingsService.write(settings.SettingsService.sleepTimerDuration, value);
         },
       ),
     );
@@ -472,7 +506,7 @@ class _PlaybackSettingsScreenState extends State<PlaybackSettingsScreen> {
         currentValue: _maxVolume,
         onSave: (value) async {
           setState(() => _maxVolume = value);
-          await _settingsService.setMaxVolume(value);
+          await _settingsService.write(settings.SettingsService.maxVolume, value);
         },
       ),
     );
@@ -488,7 +522,7 @@ class _PlaybackSettingsScreenState extends State<PlaybackSettingsScreen> {
       value: _enableDiscordRPC,
       onChanged: (value) async {
         setState(() => _enableDiscordRPC = value);
-        await _settingsService.setEnableDiscordRPC(value);
+        await _settingsService.write(settings.SettingsService.enableDiscordRPC, value);
         await DiscordRPCService.instance.setEnabled(value);
       },
     );
@@ -502,7 +536,7 @@ class _PlaybackSettingsScreenState extends State<PlaybackSettingsScreen> {
       value: _enableCompanionRemoteServer,
       onChanged: (value) async {
         setState(() => _enableCompanionRemoteServer = value);
-        await _settingsService.setEnableCompanionRemoteServer(value);
+        await _settingsService.write(settings.SettingsService.enableCompanionRemoteServer, value);
       },
     );
   }
@@ -515,7 +549,7 @@ class _PlaybackSettingsScreenState extends State<PlaybackSettingsScreen> {
       value: _rememberTrackSelections,
       onChanged: (value) async {
         setState(() => _rememberTrackSelections = value);
-        await _settingsService.setRememberTrackSelections(value);
+        await _settingsService.write(settings.SettingsService.rememberTrackSelections, value);
       },
     );
   }
@@ -528,7 +562,7 @@ class _PlaybackSettingsScreenState extends State<PlaybackSettingsScreen> {
       value: _clickVideoTogglesPlayback,
       onChanged: (value) async {
         setState(() => _clickVideoTogglesPlayback = value);
-        await _settingsService.setClickVideoTogglesPlayback(value);
+        await _settingsService.write(settings.SettingsService.clickVideoTogglesPlayback, value);
       },
     );
   }
@@ -543,7 +577,7 @@ class _PlaybackSettingsScreenState extends State<PlaybackSettingsScreen> {
       value: _autoSkipIntro,
       onChanged: (value) async {
         setState(() => _autoSkipIntro = value);
-        await _settingsService.setAutoSkipIntro(value);
+        await _settingsService.write(settings.SettingsService.autoSkipIntro, value);
       },
     );
   }
@@ -556,7 +590,7 @@ class _PlaybackSettingsScreenState extends State<PlaybackSettingsScreen> {
       value: _autoSkipCredits,
       onChanged: (value) async {
         setState(() => _autoSkipCredits = value);
-        await _settingsService.setAutoSkipCredits(value);
+        await _settingsService.write(settings.SettingsService.autoSkipCredits, value);
       },
     );
   }
@@ -577,7 +611,7 @@ class _PlaybackSettingsScreenState extends State<PlaybackSettingsScreen> {
         currentValue: _autoSkipDelay,
         onSave: (value) async {
           setState(() => _autoSkipDelay = value);
-          await _settingsService.setAutoSkipDelay(value);
+          await _settingsService.write(settings.SettingsService.autoSkipDelay, value);
         },
       ),
     );
@@ -589,14 +623,14 @@ class _PlaybackSettingsScreenState extends State<PlaybackSettingsScreen> {
       title: Text(t.settings.introPattern),
       subtitle: Text(t.settings.introPatternDescription),
       trailing: const AppIcon(Symbols.chevron_right_rounded, fill: 1),
-      onTap: () => showTextInputDialog(
+      onTap: () => showRegexInputDialog(
         context: context,
         title: t.settings.introPattern,
         currentValue: _introPattern,
         defaultValue: settings.SettingsService.defaultIntroPattern,
         onSave: (value) async {
           setState(() => _introPattern = value);
-          await _settingsService.setIntroPattern(value);
+          await _settingsService.write(settings.SettingsService.introPattern, value);
         },
       ),
     );
@@ -608,14 +642,14 @@ class _PlaybackSettingsScreenState extends State<PlaybackSettingsScreen> {
       title: Text(t.settings.creditsPattern),
       subtitle: Text(t.settings.creditsPatternDescription),
       trailing: const AppIcon(Symbols.chevron_right_rounded, fill: 1),
-      onTap: () => showTextInputDialog(
+      onTap: () => showRegexInputDialog(
         context: context,
         title: t.settings.creditsPattern,
         currentValue: _creditsPattern,
         defaultValue: settings.SettingsService.defaultCreditsPattern,
         onSave: (value) async {
           setState(() => _creditsPattern = value);
-          await _settingsService.setCreditsPattern(value);
+          await _settingsService.write(settings.SettingsService.creditsPattern, value);
         },
       ),
     );
