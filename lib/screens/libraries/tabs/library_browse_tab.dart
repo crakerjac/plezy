@@ -3,28 +3,37 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:material_symbols_icons/symbols.dart';
 import 'package:provider/provider.dart';
-import 'package:cached_network_image/cached_network_image.dart';
-import '../../../utils/plex_http_client.dart';
-import '../../../utils/plex_http_exception.dart';
+import 'package:cached_network_image_ce/cached_network_image.dart';
+import '../../../media/library_first_character.dart';
+import '../../../media/library_query.dart';
+import '../../../media/media_item.dart';
+import '../../../providers/multi_server_provider.dart';
+import '../../../utils/media_server_http_client.dart';
+import '../../../exceptions/media_server_exceptions.dart';
 import '../../../focus/dpad_navigator.dart';
 import '../../../focus/input_mode_tracker.dart';
-import '../../../../services/plex_client.dart';
-import '../../../models/plex_metadata.dart';
-import '../../../models/plex_filter.dart';
-import '../../../models/plex_first_character.dart';
-import '../../../models/plex_sort.dart';
-import '../../../providers/settings_provider.dart';
+import '../../../media/media_filter.dart';
+import '../../../media/media_sort.dart';
+import '../../../widgets/settings_builder.dart';
 import '../../../services/image_cache_service.dart';
+import '../../../services/library_query_translator.dart';
+import '../../../services/plex_constants.dart';
 import '../../../utils/error_message_utils.dart';
 import '../../../utils/grid_size_calculator.dart';
 import '../../../utils/layout_constants.dart';
-import '../../../utils/plex_image_helper.dart';
+import '../../../utils/media_image_helper.dart';
+import '../../../utils/provider_extensions.dart';
 import '../alpha_jump_bar.dart';
 import '../alpha_jump_helper.dart';
 import '../alpha_scroll_handle.dart';
+import '../library_alpha_bar_strategy.dart';
+import '../library_alpha_scroll_metrics.dart';
+import '../library_filter_sort_loader.dart';
 import '../../../widgets/focusable_media_card.dart';
 import '../../../widgets/focusable_filter_chip.dart';
+import '../../../widgets/loading_indicator_box.dart';
 import '../../../widgets/media_grid_delegate.dart';
+import '../../../widgets/media_card_list_layout.dart';
 import '../../../widgets/overlay_sheet.dart';
 import '../../../mixins/library_tab_focus_mixin.dart';
 import '../folder_tree_view.dart';
@@ -32,16 +41,18 @@ import '../filters_bottom_sheet.dart';
 import '../sort_bottom_sheet.dart';
 import '../../../widgets/app_icon.dart';
 import '../../../widgets/focusable_list_tile.dart';
-import '../state_messages.dart';
+import '../content_state_builder.dart';
 import '../../../services/storage_service.dart';
-import '../../../services/settings_service.dart' show ViewMode, EpisodePosterMode;
+import '../../../services/settings_service.dart';
 import '../../../mixins/grid_focus_node_mixin.dart';
 import '../../../mixins/item_updatable.dart';
+import '../../../mixins/watch_state_aware.dart';
 import '../../../mixins/deletion_aware.dart';
 import '../../../mixins/paginated_item_loader.dart';
 import '../../../widgets/skeleton_media_card.dart';
 import '../../../utils/deletion_notifier.dart';
 import '../../../utils/global_key_utils.dart';
+import '../../../utils/watch_state_notifier.dart';
 import '../../../utils/platform_detector.dart';
 import '../../../i18n/strings.g.dart';
 import '../../main_screen.dart';
@@ -49,7 +60,12 @@ import 'base_library_tab.dart';
 
 /// Browse tab for library screen
 /// Shows library items with grouping, filtering, and sorting
-class LibraryBrowseTab extends BaseLibraryTab<PlexMetadata> {
+class LibraryBrowseTab extends BaseLibraryTab<MediaItem> {
+  /// Invoked whenever the tab resets its inner scroll position to the top
+  /// (filter/sort change, library reload, etc.). Lets the parent resync the
+  /// outer floating header — see `_resetOuterScroll` in libraries_screen.
+  final VoidCallback? onResetScroll;
+
   const LibraryBrowseTab({
     super.key,
     required super.library,
@@ -59,16 +75,23 @@ class LibraryBrowseTab extends BaseLibraryTab<PlexMetadata> {
     super.isActive,
     super.suppressAutoFocus,
     super.onBack,
+    this.onResetScroll,
   });
 
   @override
   State<LibraryBrowseTab> createState() => _LibraryBrowseTabState();
 }
 
-class _LibraryBrowseTabState extends BaseLibraryTabState<PlexMetadata, LibraryBrowseTab>
-    with ItemUpdatable, LibraryTabFocusMixin, GridFocusNodeMixin, DeletionAware, PaginatedItemLoader<LibraryBrowseTab> {
+class _LibraryBrowseTabState extends BaseLibraryTabState<MediaItem, LibraryBrowseTab>
+    with
+        ItemUpdatable,
+        LibraryTabFocusMixin,
+        GridFocusNodeMixin,
+        WatchStateAware,
+        DeletionAware,
+        PaginatedItemLoader<LibraryBrowseTab> {
   @override
-  PlexClient get client => getClientForLibrary();
+  String? get itemServerId => widget.library.serverId;
 
   String _toGlobalKey(String ratingKey, {String? serverId}) =>
       buildGlobalKey(serverId ?? widget.library.serverId ?? '', ratingKey);
@@ -77,7 +100,26 @@ class _LibraryBrowseTabState extends BaseLibraryTabState<PlexMetadata, LibraryBr
   String? get deletionServerId => widget.library.serverId;
 
   @override
-  Set<String>? get deletionRatingKeys => loadedItems.values.map((e) => e.ratingKey).toSet();
+  String? get watchStateServerId => widget.library.serverId;
+
+  @override
+  Set<String>? get watchedIds => loadedItems.values.map((e) => e.id).toSet();
+
+  @override
+  Set<String>? get watchedGlobalKeys {
+    if (loadedItems.isEmpty) return <String>{};
+
+    final keys = <String>{};
+    for (final item in loadedItems.values) {
+      final serverId = item.serverId ?? widget.library.serverId;
+      if (serverId == null) return null;
+      keys.add(_toGlobalKey(item.id, serverId: serverId));
+    }
+    return keys;
+  }
+
+  @override
+  Set<String>? get deletionIds => loadedItems.values.map((e) => e.id).toSet();
 
   @override
   Set<String>? get deletionGlobalKeys {
@@ -87,15 +129,30 @@ class _LibraryBrowseTabState extends BaseLibraryTabState<PlexMetadata, LibraryBr
     for (final item in loadedItems.values) {
       final serverId = item.serverId ?? widget.library.serverId;
       if (serverId == null) return null;
-      keys.add(_toGlobalKey(item.ratingKey, serverId: serverId));
+      keys.add(_toGlobalKey(item.id, serverId: serverId));
     }
     return keys;
   }
 
   @override
+  void onWatchStateChanged(WatchStateEvent event) {
+    if (event.changeType == WatchStateChangeType.progressUpdate ||
+        event.changeType == WatchStateChangeType.removedFromContinueWatching) {
+      return;
+    }
+
+    final affectedIds = {event.itemId, ...event.parentChain};
+    for (final item in loadedItems.values) {
+      if (affectedIds.contains(item.id)) {
+        unawaited(updateItem(item.id));
+      }
+    }
+  }
+
+  @override
   void onDeletionEvent(DeletionEvent event) {
     // If we have an item that matches the rating key exactly, remove it and rebuild indices
-    final matchEntry = loadedItems.entries.where((e) => e.value.ratingKey == event.ratingKey).firstOrNull;
+    final matchEntry = loadedItems.entries.where((e) => e.value.id == event.itemId).firstOrNull;
     if (matchEntry != null) {
       setState(() {
         removeLoadedItemAndShift(matchEntry.key);
@@ -107,7 +164,7 @@ class _LibraryBrowseTabState extends BaseLibraryTabState<PlexMetadata, LibraryBr
     // If all children were deleted, remove our item.
     // Otherwise, just update the counts.
     for (final parentKey in event.parentChain) {
-      final parentEntry = loadedItems.entries.where((e) => e.value.ratingKey == parentKey).firstOrNull;
+      final parentEntry = loadedItems.entries.where((e) => e.value.id == parentKey).firstOrNull;
       if (parentEntry != null) {
         final item = parentEntry.value;
         final newLeafCount = (item.leafCount ?? 1) - event.leafCount;
@@ -126,7 +183,7 @@ class _LibraryBrowseTabState extends BaseLibraryTabState<PlexMetadata, LibraryBr
 
     // If neither the item nor its parents are loaded (evicted), the event
     // was already filtered by DeletionAware's upstream check against
-    // deletionGlobalKeys/deletionRatingKeys, so this point is unreachable.
+    // deletionGlobalKeys/deletionIds, so this point is unreachable.
     // The grid self-corrects when the next page fetch updates totalSize from
     // the server response on the next scroll.
   }
@@ -138,32 +195,54 @@ class _LibraryBrowseTabState extends BaseLibraryTabState<PlexMetadata, LibraryBr
   int get itemCount => totalSize;
 
   @override
-  void updateItemInLists(String ratingKey, PlexMetadata updatedMetadata) {
-    setState(() {
-      for (final entry in loadedItems.entries) {
-        if (entry.value.ratingKey == ratingKey) {
-          loadedItems[entry.key] = updatedMetadata;
-          break;
-        }
+  void updateItemInLists(String itemId, MediaItem updatedMetadata) {
+    for (final entry in loadedItems.entries) {
+      if (entry.value.id == itemId) {
+        loadedItems[entry.key] = updatedMetadata;
+        break;
       }
-    });
+    }
   }
 
   // Browse-specific state (not in base class)
-  List<PlexFilter> _filters = [];
-  List<PlexSort> _sortOptions = [];
+  List<MediaFilter> _filters = [];
+  List<MediaSort> _sortOptions = [];
   Map<String, String> _selectedFilters = {};
-  PlexSort? _selectedSort;
+  MediaSort? _selectedSort;
   bool _isSortDescending = false;
   String _selectedGrouping = 'all'; // all, seasons, episodes, folders
 
   // Alpha jump bar state
-  List<PlexFirstCharacter> _firstCharacters = [];
+  List<LibraryFirstCharacter> _firstCharacters = [];
   AlphaJumpHelper _alphaHelper = AlphaJumpHelper(const []);
+  late final LibraryAlphaBarStrategy _alphaStrategy = LibraryAlphaBarStrategy.forBackend(
+    widget.library.backend,
+    // Resolved on demand and only invoked by [PlexAlphaBarStrategy], which is
+    // only constructed when the library's backend is Plex — the bang is safe.
+    plexClientProvider: () {
+      final manager = context.read<MultiServerProvider>().serverManager;
+      return manager.getPlexClient(widget.library.serverId ?? '')!;
+    },
+    libraryKey: widget.library.id,
+    isShared: widget.library.isShared,
+  );
+
+  /// On Jellyfin libraries the alpha bar acts as a filter (matches the
+  /// JF web client's UX). Holds the active letter (`#`, `A`–`Z`) or null
+  /// when no filter is applied.
+  String? _jellyfinAlphaPrefix;
+
+  /// Pre-fetched filter values for Jellyfin libraries — populated by
+  /// `_loadContent` and consumed by the FiltersBottomSheet so the sheet
+  /// doesn't need to call back into a Plex client for value listings.
+  Map<String, List<MediaFilterValue>> _jellyfinFilterValues = const {};
   final ValueNotifier<int> _currentFirstVisibleIndex = ValueNotifier<int>(0);
-  int _currentColumnCount = 1;
-  double _lastCrossAxisExtent = 0;
+  LibraryAlphaScrollMetrics _scrollMetrics = LibraryAlphaScrollMetrics.empty;
   double _effectiveTopPadding = _gridTopPadding;
+  final GlobalKey _firstListItemKey = GlobalKey(debugLabel: 'first_library_list_item');
+  double? _measuredListRowHeight;
+  int? _listMetricsDensity;
+  bool? _listMetricsUsesWideRatio;
   final FocusNode _alphaJumpBarFocusNode = FocusNode(debugLabel: 'alpha_jump_bar');
   // When the user taps a letter, pin the highlight so scroll-based recalculation
   // doesn't immediately override it (e.g. when the letter has fewer items than a full row).
@@ -190,19 +269,30 @@ class _LibraryBrowseTabState extends BaseLibraryTabState<PlexMetadata, LibraryBr
   static const int _fetchSize = 200;
   Timer? _scrollIdleTimer;
   bool _rangeLoadScheduled = false;
+  bool _topScrollResetScheduled = false;
 
   // Focus nodes for filter chips
   final FocusNode _groupingChipFocusNode = FocusNode(debugLabel: 'grouping_chip');
   final FocusNode _filtersChipFocusNode = FocusNode(debugLabel: 'filters_chip');
   final FocusNode _sortChipFocusNode = FocusNode(debugLabel: 'sort_chip');
 
-  // Scroll controller for the CustomScrollView
-  final ScrollController _scrollController = ScrollController();
+  // The inner CustomScrollView attaches its position to NestedScrollView's
+  // shared inner controller (via PrimaryScrollController), which has one
+  // position per kept-alive tab — making `controller.position` ambiguous and
+  // throw an assertion. We capture this tab's specific [ScrollPosition] from
+  // a Builder placed inside the slivers list, and address it directly for
+  // reads, listener attachment, and programmatic jumpTo/animateTo.
+  ScrollPosition? _innerPosition;
 
-  @override
-  void initState() {
-    super.initState();
-    _scrollController.addListener(_onScrollChanged);
+  // Lets us trigger pull-to-refresh on the folder tree, which now lives as a
+  // sliver inside the same CustomScrollView (no longer self-owning RefreshIndicator).
+  final GlobalKey<FolderTreeViewState> _folderTreeKey = GlobalKey<FolderTreeViewState>();
+
+  void _bindInnerPosition(ScrollPosition? position) {
+    if (position == _innerPosition) return;
+    _innerPosition?.removeListener(_onScrollChanged);
+    _innerPosition = position;
+    _innerPosition?.addListener(_onScrollChanged);
   }
 
   @override
@@ -211,8 +301,8 @@ class _LibraryBrowseTabState extends BaseLibraryTabState<PlexMetadata, LibraryBr
     _scrollActivityTimer?.cancel();
     _scrollIdleTimer?.cancel();
     _alphaUpdateTimer?.cancel();
-    _scrollController.removeListener(_onScrollChanged);
-    _scrollController.dispose();
+    _innerPosition?.removeListener(_onScrollChanged);
+    // _innerPosition is owned by the inner CustomScrollView's Scrollable.
     _groupingChipFocusNode.dispose();
     _filtersChipFocusNode.dispose();
     _sortChipFocusNode.dispose();
@@ -240,7 +330,7 @@ class _LibraryBrowseTabState extends BaseLibraryTabState<PlexMetadata, LibraryBr
 
   // Override loadData to use our custom _loadContent
   @override
-  Future<List<PlexMetadata>> loadData() async {
+  Future<List<MediaItem>> loadData() async {
     // This is called by base class loadItems(), but we override loadItems() entirely
     // So this just returns empty - actual loading is done in _loadContent
     return [];
@@ -264,7 +354,7 @@ class _LibraryBrowseTabState extends BaseLibraryTabState<PlexMetadata, LibraryBr
 
   // Override buildContent - not used since we override build()
   @override
-  Widget buildContent(List<PlexMetadata> items) => const SizedBox.shrink();
+  Widget buildContent(List<MediaItem> items) => const SizedBox.shrink();
 
   /// Focus the first item in the grid/list/folder tree (for tab activation)
   @override
@@ -302,6 +392,7 @@ class _LibraryBrowseTabState extends BaseLibraryTabState<PlexMetadata, LibraryBr
   /// Focus the chips bar (for navigating from tab bar to content).
   /// Called by libraries screen when pressing DOWN on tab bar.
   void focusChipsBar() {
+    lastFocusedGridIndex = null;
     _groupingChipFocusNode.requestFocus();
   }
 
@@ -314,18 +405,31 @@ class _LibraryBrowseTabState extends BaseLibraryTabState<PlexMetadata, LibraryBr
     _isJumpScrolling = false;
     _jumpScrollGeneration++;
     _currentFirstVisibleIndex.value = 0;
+    _measuredListRowHeight = null;
 
-    // The browse tab state is kept alive across libraries, so ensure each
-    // library starts from top instead of inheriting the previous offset.
-    if (_scrollController.hasClients) {
-      _scrollController.jumpTo(0);
-    } else {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted && _scrollController.hasClients) {
-          _scrollController.jumpTo(0);
-        }
-      });
-    }
+    // The browse tab state is kept alive across libraries, so ensure this
+    // tab's scroll resets to 0 (other tabs keep their own positions). Defer
+    // the jump because library changes call this from didUpdateWidget; jumping
+    // there dispatches scroll notifications while the AppBar is building.
+    _scheduleTopScrollReset();
+  }
+
+  void _scheduleTopScrollReset() {
+    if (_topScrollResetScheduled) return;
+    _topScrollResetScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _topScrollResetScheduled = false;
+      if (!mounted) return;
+
+      final pos = _innerPosition;
+      if (pos != null && pos.hasPixels && pos.pixels != 0) {
+        pos.jumpTo(0);
+      }
+
+      // Inner-only resets bypass NestedScrollView's natural delta surrender,
+      // leaving the outer floating header in its prior partially-hidden state.
+      widget.onResetScroll?.call();
+    });
   }
 
   Future<void> _loadContent() async {
@@ -334,45 +438,32 @@ class _LibraryBrowseTabState extends BaseLibraryTabState<PlexMetadata, LibraryBr
 
     _resetForFullReload();
 
-    // Extract context dependencies before async gap - use server-specific client
-    final client = getClientForLibrary();
-
-    setState(() {
-      isLoading = true;
-      errorMessage = null;
-      items = [];
-      resetPaginationState();
-      // Clear filter/sort state while loading to prevent showing stale options
-      _filters = [];
-      _sortOptions = [];
-      _selectedFilters = {};
-      _selectedSort = null;
-      _isSortDescending = false;
-      _selectedGrouping = _getDefaultGrouping();
-      _firstCharacters = [];
-      _alphaHelper = AlphaJumpHelper(const []);
-    });
+    _resetTopOfPageState();
     _currentFirstVisibleIndex.value = 0;
 
+    // Plex returns categories from `/library/sections/{id}/filters` +
+    // `/sorts`; Jellyfin maps `/Items/Filters` into the same shape with
+    // values pre-cached and a hardcoded client-side sort list. Both flow
+    // through the unified [MediaServerClient.fetchLibraryFiltersWithValues].
+    final loader = LibraryFilterSortLoader(clientFor: context.getMediaClientForLibrary);
+
     try {
+      // Filters+sorts must resolve before items so the saved-sort restoration
+      // can match a saved key against the just-loaded sort list, and so the
+      // first item fetch already includes the restored sort param.
+      final loaded = await loader.load(widget.library);
       final storage = await StorageService.getInstance();
-
-      // Load filters and sorts for this library
-      final filters = await client.getLibraryFilters(widget.library.key);
-      final sorts = await client.getLibrarySorts(widget.library.key);
-
-      // Load saved preferences
       final savedFilters = storage.getLibraryFilters(sectionId: widget.library.globalKey);
       final savedSort = storage.getLibrarySort(widget.library.globalKey);
       final savedGrouping = storage.getLibraryGrouping(widget.library.globalKey);
 
-      // Check if request was superseded
-      if (generation != _contentRequestId) return;
-
-      if (!mounted) return;
+      if (generation != _contentRequestId || !mounted) return;
       setState(() {
-        _filters = filters;
-        _sortOptions = sorts;
+        _filters = loaded.filters;
+        _sortOptions = loaded.sorts;
+        // Plex returns no cached values (filters fetched lazily per-category);
+        // assigning the empty map is a no-op for Plex and a real payload for Jellyfin.
+        _jellyfinFilterValues = loaded.cachedValues;
         _selectedFilters = Map.from(savedFilters);
         _selectedGrouping = savedGrouping ?? _getDefaultGrouping();
 
@@ -380,7 +471,7 @@ class _LibraryBrowseTabState extends BaseLibraryTabState<PlexMetadata, LibraryBr
         if (savedSort != null) {
           final sortKey = savedSort['key'] as String?;
           if (sortKey != null) {
-            final sort = sorts.where((s) => s.key == sortKey).firstOrNull;
+            final sort = loaded.sorts.where((s) => s.key == sortKey).firstOrNull;
             if (sort != null) {
               _selectedSort = sort;
               _isSortDescending = (savedSort['descending'] as bool?) ?? false;
@@ -401,6 +492,27 @@ class _LibraryBrowseTabState extends BaseLibraryTabState<PlexMetadata, LibraryBr
     }
   }
 
+  /// Initial UI state both Plex and Jellyfin paths need before fetching:
+  /// loading flag set, lists cleared, filter/sort caches reset.
+  void _resetTopOfPageState() {
+    setState(() {
+      isLoading = true;
+      errorMessage = null;
+      items = [];
+      resetPaginationState();
+      _filters = [];
+      _sortOptions = [];
+      _selectedFilters = {};
+      _selectedSort = null;
+      _isSortDescending = false;
+      _selectedGrouping = _getDefaultGrouping();
+      _firstCharacters = [];
+      _alphaHelper = AlphaJumpHelper(const []);
+      _scrollMetrics = LibraryAlphaScrollMetrics.empty;
+      _measuredListRowHeight = null;
+    });
+  }
+
   /// Build the filter params map for API calls
   Map<String, String> _buildFilterParams() {
     final filterParams = Map<String, String>.from(_selectedFilters);
@@ -413,7 +525,7 @@ class _LibraryBrowseTabState extends BaseLibraryTabState<PlexMetadata, LibraryBr
       }
     } else if (_selectedGrouping == 'all' && widget.library.isShared) {
       // Shared libraries: filter to video content only (exclude library section entries)
-      filterParams['type'] = '1,2,3,4';
+      filterParams['type'] = PlexMetadataType.videoCsv;
     }
 
     // Add sort
@@ -422,6 +534,12 @@ class _LibraryBrowseTabState extends BaseLibraryTabState<PlexMetadata, LibraryBr
     }
 
     filterParams['includeCollections'] = '1';
+
+    // Jellyfin alpha-bar filter — picked up by DataAggregationService and
+    // converted to NameStartsWith / NameLessThan on the wire.
+    if (_jellyfinAlphaPrefix != null) {
+      filterParams['alphaPrefix'] = _jellyfinAlphaPrefix!;
+    }
 
     return filterParams;
   }
@@ -465,23 +583,29 @@ class _LibraryBrowseTabState extends BaseLibraryTabState<PlexMetadata, LibraryBr
   }
 
   @override
-  Future<LibraryContentResult> fetchPage(int start, int size, AbortController? abort) {
-    return getClientForLibrary().getLibraryContent(
-      widget.library.key,
-      start: start,
-      size: size,
-      filters: _buildFilterParams(),
+  Future<LibraryPage<MediaItem>> fetchPage(int start, int size, AbortController? abort) async {
+    final client = context.getMediaClientForLibrary(widget.library);
+    final query = libraryQueryFromPlexMap(
+      map: _buildFilterParams(),
+      libraryKind: widget.library.kind,
+      offset: start,
+      limit: size,
+    );
+    return client.fetchLibraryPagedContent(
+      widget.library.id,
+      query: query,
+      libraryKind: widget.library.kind,
       abort: abort,
     );
   }
 
   @override
-  void onPageLoaded(int start, List<PlexMetadata> pageItems) {
+  void onPageLoaded(int start, List<MediaItem> pageItems) {
     _prefetchImages(start, pageItems);
   }
 
   String _getDefaultGrouping() {
-    final type = widget.library.type.toLowerCase();
+    final type = widget.library.kind.id.toLowerCase();
     if (type == 'show') return 'shows';
     if (type == 'movie') return 'movies';
     return 'all';
@@ -503,16 +627,21 @@ class _LibraryBrowseTabState extends BaseLibraryTabState<PlexMetadata, LibraryBr
   }
 
   List<String> _getGroupingOptions() {
-    final type = widget.library.type.toLowerCase();
+    final type = widget.library.kind.id.toLowerCase();
+    // Folder browsing relies on a section folder API
+    // (Plex `/library/sections/{id}/folders`); gated by capability so any
+    // future backend that exposes the same can opt in without touching
+    // this method.
+    final canFolder = context.tryGetMediaClientForServer(widget.library.serverId)?.capabilities.folderGrouping ?? false;
     if (type == 'show') {
-      return ['shows', 'seasons', 'episodes', 'folders'];
+      return ['shows', 'seasons', 'episodes', if (canFolder) 'folders'];
     } else if (type == 'movie') {
-      return ['movies', 'folders'];
+      return ['movies', if (canFolder) 'folders'];
     } else if (type == 'mixed') {
       // Shared libraries: all video content types, no folders
       return ['all', 'movies', 'shows', 'seasons', 'episodes'];
     }
-    return ['all', 'folders'];
+    return ['all', if (canFolder) 'folders'];
   }
 
   String _getGroupingLabel(String grouping) {
@@ -533,7 +662,7 @@ class _LibraryBrowseTabState extends BaseLibraryTabState<PlexMetadata, LibraryBr
   }
 
   String _getErrorMessage(dynamic error) {
-    if (error is PlexHttpException) {
+    if (error is MediaServerHttpException) {
       return mapHttpErrorToMessage(error, context: t.libraries.content);
     }
     return mapUnexpectedErrorToMessage(error, context: t.libraries.content);
@@ -565,6 +694,7 @@ class _LibraryBrowseTabState extends BaseLibraryTabState<PlexMetadata, LibraryBr
                     children: options.map((grouping) {
                       final isSelected = _selectedGrouping == grouping;
                       return FocusableListTile(
+                        key: ValueKey(grouping),
                         dense: true,
                         leading: AppIcon(
                           isSelected ? Symbols.radio_button_checked_rounded : Symbols.radio_button_unchecked_rounded,
@@ -601,6 +731,10 @@ class _LibraryBrowseTabState extends BaseLibraryTabState<PlexMetadata, LibraryBr
         selectedFilters: _selectedFilters,
         serverId: widget.library.serverId!,
         libraryKey: widget.library.globalKey,
+        // Pre-populated values arrive only from backends that bundle them
+        // with the category listing (Jellyfin's `/Items/Filters`). The empty
+        // map for Plex libraries falls through to lazy `getFilterValues`.
+        cachedValues: _jellyfinFilterValues.isEmpty ? null : _jellyfinFilterValues,
         onFiltersChanged: (filters) async {
           setState(() {
             _selectedFilters.clear();
@@ -622,7 +756,7 @@ class _LibraryBrowseTabState extends BaseLibraryTabState<PlexMetadata, LibraryBr
     SelectKeyUpSuppressor.suppressSelectUntilKeyUp();
     // Track pending state in local variables so the callbacks don't trigger
     // setState/_loadItems while the sheet is open (which would steal focus).
-    PlexSort? pendingSort = _selectedSort;
+    MediaSort? pendingSort = _selectedSort;
     bool pendingDescending = _isSortDescending;
     bool pendingCleared = false;
     OverlaySheetController.of(context)
@@ -683,11 +817,28 @@ class _LibraryBrowseTabState extends BaseLibraryTabState<PlexMetadata, LibraryBr
         ? lastFocusedGridIndex!
         : 0;
 
+    // Drop the chip's focus first so the targeted grid item's request isn't
+    // racing against the chip's still-held primary focus state. Without this,
+    // dpad DOWN from a chip occasionally fails to move focus to the grid.
+    if (FocusManager.instance.primaryFocus == _groupingChipFocusNode ||
+        FocusManager.instance.primaryFocus == _filtersChipFocusNode ||
+        FocusManager.instance.primaryFocus == _sortChipFocusNode) {
+      FocusManager.instance.primaryFocus?.unfocus();
+    }
+
     // Use firstItemFocusNode for index 0 (matches _buildMediaCardItem)
-    if (targetIndex == 0) {
-      firstItemFocusNode.requestFocus();
+    final target = targetIndex == 0
+        ? firstItemFocusNode
+        : getGridItemFocusNode(targetIndex, prefix: 'browse_grid_item');
+
+    // Defer to a post-frame so the focus node has a chance to attach if the
+    // grid item is being built/rebuilt in the same frame.
+    if (target.context != null) {
+      target.requestFocus();
     } else {
-      getGridItemFocusNode(targetIndex, prefix: 'browse_grid_item').requestFocus();
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) target.requestFocus();
+      });
     }
   }
 
@@ -696,10 +847,11 @@ class _LibraryBrowseTabState extends BaseLibraryTabState<PlexMetadata, LibraryBr
   /// FocusNode detached), so we target the last-column item in the first
   /// visible row — the grid cell closest to the alpha bar.
   void _navigateToGridNearScroll() {
-    if (totalSize == 0 || _currentColumnCount < 1) return;
+    final columnCount = _scrollMetrics.columnCount;
+    if (totalSize == 0 || columnCount < 1) return;
 
-    final row = _currentFirstVisibleIndex.value ~/ _currentColumnCount;
-    var targetIndex = ((row + 1) * _currentColumnCount - 1).clamp(0, totalSize - 1);
+    final row = _currentFirstVisibleIndex.value ~/ columnCount;
+    var targetIndex = ((row + 1) * columnCount - 1).clamp(0, totalSize - 1);
 
     // Find nearest loaded item — skeleton cards have no FocusNode
     if (!loadedItems.containsKey(targetIndex)) {
@@ -752,46 +904,39 @@ class _LibraryBrowseTabState extends BaseLibraryTabState<PlexMetadata, LibraryBr
   /// The letter currently visible at the top of the grid, determined by
   /// how many items we've scrolled past relative to the API's cumulative
   /// firstCharacter counts.
-  String _alphaLetterFor(int index) => _alphaHelper.currentLetter(index);
+  String _alphaLetterFor(int index) =>
+      _alphaStrategy.currentLetter(index, _alphaHelper, jellyfinAlphaPrefix: _jellyfinAlphaPrefix);
 
   /// Whether the alpha jump bar should be shown.
   /// Only shown when sorting by title (titleSort) and not in folders mode.
-  bool get _shouldShowAlphaJumpBar {
-    if (_selectedGrouping == 'folders') return false;
-    if (_firstCharacters.isEmpty) return false;
-    if (_firstCharacters.length < 6 || _alphaHelper.totalItemCount < 80) return false;
-    // Show when no sort is selected (default is titleSort) or when explicitly sorting by title
-    final sortKey = _selectedSort?.key ?? '';
-    return sortKey.isEmpty || sortKey.startsWith('titleSort');
-  }
+  bool get _shouldShowAlphaJumpBar => _alphaStrategy.shouldShow(
+    totalItemCount: totalSize,
+    loadedCharacterCount: _firstCharacters.length,
+    sortKey: _selectedSort?.key,
+    isFolderGrouping: _selectedGrouping == 'folders',
+    jellyfinAlphaPrefix: _jellyfinAlphaPrefix,
+    isPhone: _isPhone(context),
+  );
 
   /// Fetch first characters for the current library/filter state
   Future<void> _loadFirstCharacters({int? requestId}) async {
-    // Shared libraries don't support first characters
-    if (widget.library.isShared) return;
     final currentRequestId = requestId ?? ++_firstCharactersRequestId;
-    final client = getClientForLibrary();
     final filterParams = Map<String, String>.from(_selectedFilters);
     final typeId = _getGroupingTypeId();
 
-    filterParams['includeCollections'] = '1';
-
     try {
-      final chars = await client.getFirstCharacters(
-        widget.library.key,
-        type: typeId.isNotEmpty ? int.tryParse(typeId) : null,
-        filters: filterParams.isNotEmpty ? filterParams : null,
+      final result = await _alphaStrategy.loadCharacters(
+        filters: filterParams,
+        typeId: typeId.isNotEmpty ? int.tryParse(typeId) : null,
       );
       if (!mounted || currentRequestId != _firstCharactersRequestId) return;
-
       setState(() {
-        _firstCharacters = chars;
-        _alphaHelper = AlphaJumpHelper(chars);
+        _firstCharacters = result.chars;
+        _alphaHelper = result.helper;
       });
     } catch (_) {
       // Non-critical — hide the bar on failure
       if (!mounted || currentRequestId != _firstCharactersRequestId) return;
-
       setState(() {
         _firstCharacters = [];
         _alphaHelper = AlphaJumpHelper(const []);
@@ -801,6 +946,11 @@ class _LibraryBrowseTabState extends BaseLibraryTabState<PlexMetadata, LibraryBr
 
   /// Track scroll position and trigger debounced range loading.
   void _onScrollChanged() {
+    // The inner controller (PrimaryScrollController) is shared across tabs.
+    // Skip if this tab isn't active so we don't react to a sibling tab's
+    // scroll events.
+    if (!widget.isActive) return;
+
     // Debounced scroll-idle handler: load visible range when scrolling settles
     _scrollIdleTimer?.cancel();
     _scrollIdleTimer = Timer(const Duration(milliseconds: 200), () {
@@ -822,7 +972,7 @@ class _LibraryBrowseTabState extends BaseLibraryTabState<PlexMetadata, LibraryBr
       prefetchAhead(range.firstIndex, range.visibleCount, pageSize: _fetchSize);
     }
 
-    if (!_shouldShowAlphaJumpBar || _currentColumnCount < 1) return;
+    if (!_shouldShowAlphaJumpBar || !_scrollMetrics.isUsable) return;
 
     // During a jump animation, skip alpha bar processing to avoid flashing.
     if (_isJumpScrolling) return;
@@ -849,41 +999,50 @@ class _LibraryBrowseTabState extends BaseLibraryTabState<PlexMetadata, LibraryBr
 
   /// Recompute the first-visible-index from the current scroll offset.
   void _updateVisibleIndex() {
-    final offset = _scrollController.offset;
+    final pos = _innerPosition;
+    if (pos == null) return;
+    final offset = pos.pixels;
     final firstInRow = _itemIndexFromScrollOffset(offset);
     // Use the last item in the first visible row so the highlighted letter
     // updates as soon as items with a new letter appear in that row.
     final maxIndex = totalSize > 0 ? totalSize - 1 : 0;
-    final lastInRow = (firstInRow + _currentColumnCount - 1).clamp(0, maxIndex);
+    final lastInRow = (firstInRow + _scrollMetrics.columnCount - 1).clamp(0, maxIndex);
     if (lastInRow != _currentFirstVisibleIndex.value) {
       _currentFirstVisibleIndex.value = lastInRow;
     }
   }
 
   /// Compute the first visible item index from a scroll offset.
-  /// The visible area starts below the chips bar, so we offset accordingly.
+  /// Chips bar is the first sliver (height = _chipsBarHeight) followed by the
+  /// grid's own top padding before the first row.
   int _itemIndexFromScrollOffset(double offset) {
-    if (_lastCrossAxisExtent <= 0 || _currentColumnCount < 1) return 0;
-
-    final itemWidth = _lastCrossAxisExtent / _currentColumnCount;
-    final itemHeight = itemWidth / GridLayoutConstants.posterAspectRatio;
-    final rowHeight = itemHeight + GridLayoutConstants.mainAxisSpacing;
-    if (rowHeight <= 0) return 0;
-
-    // The visible area starts at _chipsBarHeight from the viewport top.
-    // Grid content starts at _effectiveTopPadding in scroll coordinates.
-    // First visible row = (offset + chipsBarHeight - effectiveTopPadding) / rowHeight
-    final contentOffset = (offset + _chipsBarHeight - _effectiveTopPadding).clamp(0.0, double.infinity);
-    final row = (contentOffset / rowHeight).floor();
-    final maxIndex = totalSize > 0 ? totalSize - 1 : 0;
-    return (row * _currentColumnCount).clamp(0, maxIndex);
+    return _scrollMetrics.itemIndexFromScrollOffset(
+      offset,
+      contentStartOffset: _contentStartScrollOffset,
+      totalSize: totalSize,
+    );
   }
 
-  /// Scroll to the item at [targetIndex], loading more pages if necessary.
-  /// The target index is a cumulative offset from the API's firstCharacter
-  /// counts — the same model used by [_currentAlphaLetter] so highlight
-  /// and jump always agree.
+  double get _contentStartScrollOffset => _chipsBarHeight + _effectiveTopPadding;
+
+  /// Handle a tap on the letter at [targetIndex] in the alpha bar. The
+  /// active [LibraryAlphaBarStrategy] owns the per-backend behaviour and
+  /// invokes one of the two callbacks — Plex scrolls the grid to the
+  /// cumulative item offset, Jellyfin toggles a `NameStartsWith` filter
+  /// (matches the JF web client UX).
   void _jumpToIndex(int targetIndex) {
+    _alphaStrategy.onLetterPressed(
+      targetIndex,
+      _alphaHelper,
+      currentJellyfinPrefix: _jellyfinAlphaPrefix,
+      onPlexJump: _scrollGridToIndex,
+      onJellyfinPrefixChange: _applyJellyfinAlphaPrefix,
+    );
+  }
+
+  /// Scroll the current layout so the item at [targetIndex] becomes the first visible
+  /// row. Used by [PlexAlphaBarStrategy] via [_jumpToIndex].
+  void _scrollGridToIndex(int targetIndex) {
     _jumpScrollGeneration++;
     _isJumpScrolling = true;
 
@@ -894,22 +1053,36 @@ class _LibraryBrowseTabState extends BaseLibraryTabState<PlexMetadata, LibraryBr
     _scrollToItemIndex(clamped);
   }
 
-  /// Scroll the grid so that [index] is visible just below the chips bar
+  /// Apply the new Jellyfin `NameStartsWith` prefix from the alpha bar and
+  /// refetch from the top of the now-filtered dataset. Used by
+  /// [JellyfinAlphaBarStrategy] via [_jumpToIndex].
+  void _applyJellyfinAlphaPrefix(String? nextPrefix) {
+    setState(() {
+      _jellyfinAlphaPrefix = nextPrefix;
+      // Clear loaded items + total so the grid blanks while the new filtered
+      // page loads. PaginatedItemLoader internals will repopulate from
+      // offset 0 once the next fetchPage call returns.
+      resetPaginationState();
+      isLoading = true;
+    });
+    _scheduleTopScrollReset();
+    _loadItems();
+  }
+
+  /// Scroll the current layout so that [index] is visible just below the chips bar
   void _scrollToItemIndex(int index) {
-    if (_currentColumnCount < 1 || _lastCrossAxisExtent <= 0 || !_scrollController.hasClients) {
+    final pos = _innerPosition;
+    if (!_scrollMetrics.isUsable || pos == null) {
       _isJumpScrolling = false;
       return;
     }
 
-    final itemWidth = _lastCrossAxisExtent / _currentColumnCount;
-    final itemHeight = itemWidth / GridLayoutConstants.posterAspectRatio;
-    final rowHeight = itemHeight + GridLayoutConstants.mainAxisSpacing;
-    final targetRow = index ~/ _currentColumnCount;
-    // Position the target row right below the chips bar
-    final offset = _effectiveTopPadding + targetRow * rowHeight - _chipsBarHeight;
+    // Position the target row at the top of the viewport. Chips and the grid's
+    // top padding both precede the items in scroll coordinates.
+    final offset = _scrollMetrics.scrollOffsetForItemIndex(index, contentStartOffset: _contentStartScrollOffset);
 
     final gen = _jumpScrollGeneration;
-    final maxExtent = _scrollController.position.maxScrollExtent;
+    final maxExtent = pos.maxScrollExtent;
     if (!maxExtent.isFinite) {
       _isJumpScrolling = false;
       return;
@@ -919,55 +1092,37 @@ class _LibraryBrowseTabState extends BaseLibraryTabState<PlexMetadata, LibraryBr
     // If a newer jump already superseded this one, skip the animation
     // entirely — the next call will handle the final position.
     if (gen != _jumpScrollGeneration) {
-      _scrollController.jumpTo(clampedOffset);
+      pos.jumpTo(clampedOffset);
       return;
     }
 
-    _scrollController
-        .animateTo(clampedOffset, duration: const Duration(milliseconds: 300), curve: Curves.easeInOut)
-        .then((_) {
-          // Only clear the flag if no newer jump has started.
-          if (mounted && gen == _jumpScrollGeneration) {
-            _isJumpScrolling = false;
-          }
-        });
+    pos.animateTo(clampedOffset, duration: const Duration(milliseconds: 300), curve: Curves.easeInOut).then((_) {
+      // Only clear the flag if no newer jump has started.
+      if (mounted && gen == _jumpScrollGeneration) {
+        _isJumpScrolling = false;
+      }
+    });
   }
 
   @override
   Widget build(BuildContext context) {
     super.build(context); // Required for AutomaticKeepAliveClientMixin
 
-    // For folders mode, use FolderTreeView instead of grid/list
-    if (_selectedGrouping == 'folders') {
-      return Column(
-        children: [
-          _buildChipsBar(),
-          Expanded(
-            child: FolderTreeView(
-              libraryKey: widget.library.key,
-              serverId: widget.library.serverId,
-              onRefresh: updateItem,
-              firstItemFocusNode: firstItemFocusNode,
-              onNavigateUp: _navigateToChips,
-            ),
-          ),
-        ],
-      );
-    }
+    // Chips are inline as a floating sliver in the inner scroll. The alpha
+    // jump bar is the only overlay; we offset it by the typical app bar height
+    // so it isn't obscured by the floating outer header. Using MediaQuery
+    // (not the absorber handle) avoids rebuilding during layout — listening to
+    // the handle from a builder fires notifyListeners during the build phase
+    // and triggers a setState-in-build assertion.
+    final media = MediaQuery.of(context);
+    final overlayTopPadding = media.padding.top + kToolbarHeight;
 
-    // For list/grid modes, use Stack with chips layered on top of grid.
-    // This allows the grid to use Clip.none for focus decorations while
-    // the chips bar (with background) covers any overflow at the top.
     return Stack(
       children: [
-        // Grid fills the entire area, with top padding for chips bar
         Positioned.fill(child: _buildScrollableContent()),
-        // Chips bar on top with solid background
-        Positioned(top: 0, left: 0, right: 0, child: _buildChipsBar()),
-        // Alpha jump bar / scroll handle on the right edge
         if (_shouldShowAlphaJumpBar)
           Positioned(
-            top: _chipsBarHeight,
+            top: overlayTopPadding,
             right: 0,
             bottom: 0,
             child: _isPhone(context)
@@ -999,9 +1154,11 @@ class _LibraryBrowseTabState extends BaseLibraryTabState<PlexMetadata, LibraryBr
     );
   }
 
-  /// Builds the scrollable content (grid/list) with scroll-idle loading
+  /// Builds the scrollable content with chips, then either folder tree or grid/list.
   Widget _buildScrollableContent() {
-    return NotificationListener<ScrollNotification>(
+    final isFolders = _selectedGrouping == 'folders';
+
+    Widget scrollView = NotificationListener<ScrollNotification>(
       onNotification: (notification) {
         // Track scroll activity for phone scroll handle and range-load gating
         if (notification is ScrollStartNotification) {
@@ -1015,13 +1172,57 @@ class _LibraryBrowseTabState extends BaseLibraryTabState<PlexMetadata, LibraryBr
         }
         return false;
       },
-      child: CustomScrollView(
-        controller: _scrollController,
-        // Allow focus decoration to render outside scroll bounds
-        clipBehavior: Clip.none,
-        slivers: _buildContentSlivers(),
+      child: Builder(
+        builder: (context) => CustomScrollView(
+          // No explicit controller: this picks up NestedScrollView's
+          // PrimaryScrollController, which is what wires inner scroll deltas
+          // through to the outer floating header.
+          // Allow focus decoration to render outside scroll bounds.
+          clipBehavior: Clip.none,
+          slivers: [
+            SliverOverlapInjector(handle: NestedScrollView.sliverOverlapAbsorberHandleFor(context)),
+            // Capture-only sliver: an invisible Builder whose context lives
+            // inside this CustomScrollView, used to grab the per-tab
+            // ScrollPosition. NSV's shared inner controller has one position
+            // per kept-alive tab; we need this tab's specific one.
+            SliverToBoxAdapter(
+              child: Builder(
+                builder: (innerCtx) {
+                  WidgetsBinding.instance.addPostFrameCallback((_) {
+                    if (mounted) {
+                      _bindInnerPosition(Scrollable.maybeOf(innerCtx)?.position);
+                    }
+                  });
+                  return const SizedBox.shrink();
+                },
+              ),
+            ),
+            // Floating chips: scroll off with content but snap back into view
+            // on upward direction reversal, matching the outer floating
+            // SliverAppBar's behavior.
+            SliverPersistentHeader(
+              floating: true,
+              pinned: false,
+              delegate: _ChipsBarDelegate(builder: (_) => _buildChipsBar(), height: _chipsBarHeight),
+            ),
+            ..._buildContentSlivers(),
+          ],
+        ),
       ),
     );
+
+    // Folders mode previously had its own RefreshIndicator inside FolderTreeView;
+    // it now lives at this level since FolderTreeView is a sliver.
+    if (isFolders) {
+      scrollView = RefreshIndicator(
+        onRefresh: () async {
+          await _folderTreeKey.currentState?.refresh();
+        },
+        child: scrollView,
+      );
+    }
+
+    return scrollView;
   }
 
   /// Self-healing: when a skeleton is rendered after scrolling stops,
@@ -1040,28 +1241,25 @@ class _LibraryBrowseTabState extends BaseLibraryTabState<PlexMetadata, LibraryBr
   }
 
   /// Returns the first-visible index and visible count from the scroll
-  /// controller + grid metrics, or null if the viewport isn't measured yet.
+  /// position + layout metrics, or null if the viewport isn't measured yet.
   ({int firstIndex, int visibleCount})? _computeVisibleRange() {
-    if (_currentColumnCount < 1 || !_scrollController.hasClients || _lastCrossAxisExtent <= 0) return null;
-    final offset = _scrollController.offset;
-    final viewportHeight = _scrollController.position.viewportDimension;
+    final pos = _innerPosition;
+    if (!_scrollMetrics.isUsable || pos == null) return null;
+    final offset = pos.pixels;
+    final viewportHeight = pos.viewportDimension;
     if (!viewportHeight.isFinite) return null;
 
-    final itemWidth = _lastCrossAxisExtent / _currentColumnCount;
-    final itemHeight = itemWidth / GridLayoutConstants.posterAspectRatio;
-    final rowHeight = itemHeight + GridLayoutConstants.mainAxisSpacing;
-    if (rowHeight <= 0) return null;
-
-    final visibleRows = (viewportHeight / rowHeight).ceil() + 1;
-    return (firstIndex: _itemIndexFromScrollOffset(offset), visibleCount: visibleRows * _currentColumnCount);
+    final visibleCount = _scrollMetrics.visibleItemCount(viewportHeight);
+    if (visibleCount <= 0) return null;
+    return (firstIndex: _itemIndexFromScrollOffset(offset), visibleCount: visibleCount);
   }
 
   /// Compute initial fetch size based on viewport dimensions.
   int _calculateInitialFetchSize() {
     try {
       final screenSize = MediaQuery.sizeOf(context);
-      final settingsProvider = context.read<SettingsProvider>();
-      final maxExtent = GridSizeCalculator.getMaxCrossAxisExtent(context, settingsProvider.libraryDensity);
+      final density = context.settingsRead(SettingsService.libraryDensity);
+      final maxExtent = GridSizeCalculator.getMaxCrossAxisExtent(context, density);
       final crossAxisSpacing = GridLayoutConstants.crossAxisSpacing;
       final columnCount = ((screenSize.width + crossAxisSpacing) / (maxExtent + crossAxisSpacing)).ceil().clamp(1, 100);
       final itemWidth = screenSize.width / columnCount;
@@ -1077,50 +1275,51 @@ class _LibraryBrowseTabState extends BaseLibraryTabState<PlexMetadata, LibraryBr
   }
 
   /// Prefetch images for items near the viewport to reduce pop-in.
-  void _prefetchImages(int startIndex, List<PlexMetadata> items) {
-    if (!_scrollController.hasClients || _lastCrossAxisExtent <= 0 || _currentColumnCount < 1) return;
+  void _prefetchImages(int startIndex, List<MediaItem> items) {
+    final pos = _innerPosition;
+    if (pos == null || !_scrollMetrics.isUsable) return;
 
-    final offset = _scrollController.offset;
-    final viewportHeight = _scrollController.position.viewportDimension;
+    final offset = pos.pixels;
+    final viewportHeight = pos.viewportDimension;
     if (!viewportHeight.isFinite) return;
     final firstVisible = _itemIndexFromScrollOffset(offset);
-    final itemWidth = _lastCrossAxisExtent / _currentColumnCount;
-    final itemHeight = itemWidth / GridLayoutConstants.posterAspectRatio;
-    final rowHeight = itemHeight + GridLayoutConstants.mainAxisSpacing;
-    if (rowHeight <= 0) return;
+    final itemWidth = _scrollMetrics.itemWidth;
+    final itemHeight = _scrollMetrics.itemHeight;
+    if (itemWidth <= 0 || itemHeight <= 0) return;
 
-    final visibleRows = (viewportHeight / rowHeight).ceil() + 1;
-    final visibleEnd = firstVisible + visibleRows * _currentColumnCount;
+    final visibleEnd = firstVisible + _scrollMetrics.visibleItemCount(viewportHeight);
     // Prefetch 2 rows beyond visible area
-    final prefetchEnd = visibleEnd + 2 * _currentColumnCount;
+    final prefetchEnd = visibleEnd + 2 * _scrollMetrics.columnCount;
 
-    final client = getClientForLibrary();
-    final devicePixelRatio = PlexImageHelper.effectiveDevicePixelRatio(context);
+    final client = getMediaClientForLibrary();
+    final devicePixelRatio = MediaImageHelper.effectiveDevicePixelRatio(context);
+    final episodePosterMode = context.settingsRead(SettingsService.episodePosterMode);
 
     for (var i = 0; i < items.length; i++) {
       final index = startIndex + i;
       if (index < firstVisible || index > prefetchEnd) continue;
 
-      final thumb = items[i].thumb;
+      final item = items[i];
+      final thumb = item.posterThumb(mode: episodePosterMode);
       if (thumb == null || thumb.isEmpty) continue;
+      final imageType = item.usesWideAspectRatio(episodePosterMode) ? ImageType.thumb : ImageType.poster;
 
-      final imageUrl = PlexImageHelper.getOptimizedImageUrl(
+      final imageUrl = MediaImageHelper.getOptimizedImageUrl(
         client: client,
         thumbPath: thumb,
         maxWidth: itemWidth,
         maxHeight: itemHeight,
         devicePixelRatio: devicePixelRatio,
-        enableTranscoding: PlexImageHelper.shouldTranscode(thumb),
-        imageType: ImageType.poster,
+        imageType: imageType,
       );
       if (imageUrl.isEmpty) continue;
 
       final scaledWidth = itemWidth * devicePixelRatio;
       final scaledHeight = itemHeight * devicePixelRatio;
-      final (_, memHeight) = PlexImageHelper.getMemCacheDimensions(
+      final (_, memHeight) = MediaImageHelper.getMemCacheDimensions(
         displayWidth: scaledWidth.isFinite && scaledWidth > 0 ? scaledWidth.round() : 0,
         displayHeight: scaledHeight.isFinite && scaledHeight > 0 ? scaledHeight.round() : 0,
-        imageType: ImageType.poster,
+        imageType: imageType,
       );
 
       precacheImage(
@@ -1207,77 +1406,129 @@ class _LibraryBrowseTabState extends BaseLibraryTabState<PlexMetadata, LibraryBr
 
   /// Builds content as slivers for the CustomScrollView
   List<Widget> _buildContentSlivers() {
+    // Folders mode: hand off to the FolderTreeView sliver, which owns its own
+    // loading/empty/error states.
+    if (_selectedGrouping == 'folders') {
+      return [
+        FolderTreeView(
+          key: _folderTreeKey,
+          libraryKey: widget.library.id,
+          serverId: widget.library.serverId,
+          onRefresh: updateItem,
+          firstItemFocusNode: firstItemFocusNode,
+          onNavigateUp: _navigateToChips,
+        ),
+      ];
+    }
+
     if (isLoading && totalSize == 0 && loadedItems.isEmpty) {
-      return [const SliverFillRemaining(child: Center(child: CircularProgressIndicator()))];
+      return [LoadingIndicatorBox.sliver];
     }
 
     if (errorMessage != null && loadedItems.isEmpty) {
-      return [
-        SliverFillRemaining(
-          child: ErrorStateWidget(
-            message: errorMessage!,
-            icon: Symbols.error_outline_rounded,
-            onRetry: _loadContent,
-            retryLabel: t.common.retry,
-          ),
-        ),
-      ];
+      return [SliverErrorState(message: errorMessage!, onRetry: _loadContent)];
     }
 
     if (totalSize == 0 && !isLoading) {
-      return [
-        SliverFillRemaining(
-          child: EmptyStateWidget(message: t.libraries.thisLibraryIsEmpty, icon: Symbols.folder_open_rounded),
-        ),
-      ];
+      return [SliverEmptyState(message: t.libraries.thisLibraryIsEmpty, icon: Symbols.folder_open_rounded)];
     }
 
     return [
-      Consumer<SettingsProvider>(
-        builder: (context, settingsProvider, child) {
-          return _buildItemsSliver(context, settingsProvider);
-        },
+      SettingsBuilder(
+        prefs: const [SettingsService.viewMode, SettingsService.libraryDensity, SettingsService.episodePosterMode],
+        builder: (context) => _buildItemsSliver(context),
       ),
     ];
   }
 
-  // Top padding for grid content = chips bar height + extra space for focus decoration.
-  // Chips bar is ~48px, focus ring extends ~6px beyond item bounds.
-  // On phone there's no D-pad focus decoration so extra clearance is unnecessary.
-  static const double _gridTopPadding = _chipsBarHeight + 12.0;
-  static const double _gridTopPaddingPhone = _chipsBarHeight;
+  // Top padding for grid content. Chips are inline above the grid now, so this
+  // is purely focus-decoration clearance (~6px) on desktop. Phone has no D-pad
+  // focus ring so no extra clearance is needed.
+  static const double _gridTopPadding = 12.0;
+  static const double _gridTopPaddingPhone = 0.0;
 
   /// Width of the alpha jump bar widget
   static const double _alphaJumpBarWidth = 20.0;
 
+  void _setListScrollMetrics({required int density, required bool usesWideAspectRatio}) {
+    if (_listMetricsDensity != density || _listMetricsUsesWideRatio != usesWideAspectRatio) {
+      _measuredListRowHeight = null;
+      _listMetricsDensity = density;
+      _listMetricsUsesWideRatio = usesWideAspectRatio;
+    }
+
+    final itemWidth = MediaCardListLayout.posterWidth(density: density, usesWideAspectRatio: usesWideAspectRatio);
+    final itemHeight = MediaCardListLayout.posterHeight(density: density, usesWideAspectRatio: usesWideAspectRatio);
+    final rowHeight =
+        _measuredListRowHeight ??
+        MediaCardListLayout.estimatedRowHeight(density: density, usesWideAspectRatio: usesWideAspectRatio);
+    _scrollMetrics = LibraryAlphaScrollMetrics(
+      columnCount: 1,
+      rowHeight: rowHeight,
+      itemWidth: itemWidth,
+      itemHeight: itemHeight,
+    );
+  }
+
+  Widget _buildMeasuredFirstListItem(Widget child) {
+    WidgetsBinding.instance.addPostFrameCallback((_) => _measureFirstListRowHeight());
+    return KeyedSubtree(key: _firstListItemKey, child: child);
+  }
+
+  void _measureFirstListRowHeight() {
+    if (!mounted) return;
+    if (SettingsService.instanceOrNull?.read(SettingsService.viewMode) != ViewMode.list) return;
+    final height = (_firstListItemKey.currentContext?.findRenderObject() as RenderBox?)?.size.height;
+    if (height == null || height <= 0) return;
+    if ((_measuredListRowHeight ?? 0) == height) return;
+    _measuredListRowHeight = height;
+    _scrollMetrics = _scrollMetrics.copyWith(rowHeight: height);
+    _updateVisibleIndex();
+  }
+
   /// Builds either a sliver list or sliver grid based on the view mode
-  Widget _buildItemsSliver(BuildContext context, SettingsProvider settingsProvider) {
+  Widget _buildItemsSliver(BuildContext context) {
+    final svc = SettingsService.instanceOrNull!;
+    final viewMode = svc.read(SettingsService.viewMode);
+    final libraryDensity = svc.read(SettingsService.libraryDensity);
+    final episodePosterMode = svc.read(SettingsService.episodePosterMode);
     final itemCount = totalSize;
     final isPhone = _isPhone(context);
     final topPadding = isPhone ? _gridTopPaddingPhone : _gridTopPadding;
     _effectiveTopPadding = topPadding;
     final rightPadding = _shouldShowAlphaJumpBar && !isPhone ? _alphaJumpBarWidth : 8.0;
 
-    if (settingsProvider.viewMode == ViewMode.list) {
+    final useWideRatio = _selectedGrouping == 'episodes' && episodePosterMode == EpisodePosterMode.episodeThumbnail;
+
+    if (viewMode == ViewMode.list) {
       // In list view, all items are in a single column (first column)
       return SliverPadding(
         padding: EdgeInsets.fromLTRB(8, topPadding, rightPadding, 8),
-        sliver: SliverList.builder(
-          itemCount: itemCount,
-          itemBuilder: (context, index) => _buildMediaCardItem(
-            index,
-            isFirstRow: index == 0,
-            isFirstColumn: true, // List view = single column
-            disableScale: true,
-          ),
+        sliver: SliverLayoutBuilder(
+          builder: (context, _) {
+            _setListScrollMetrics(density: libraryDensity, usesWideAspectRatio: useWideRatio);
+            return SliverList.builder(
+              itemCount: itemCount,
+              itemBuilder: (context, index) {
+                final child = _buildMediaCardItem(
+                  index,
+                  isFirstRow: index == 0,
+                  isFirstColumn: true, // List view = single column
+                  isLastColumn: true,
+                  disableScale: true,
+                  columnCount: 1,
+                  itemCount: itemCount,
+                );
+                return index == 0 ? _buildMeasuredFirstListItem(child) : child;
+              },
+            );
+          },
         ),
       );
     } else {
       // In grid view, calculate columns and pass to item builder
       // Use 16:9 aspect ratio when browsing episodes with episode thumbnail mode
-      final useWideRatio =
-          _selectedGrouping == 'episodes' && settingsProvider.episodePosterMode == EpisodePosterMode.episodeThumbnail;
-      final baseMaxExtent = GridSizeCalculator.getMaxCrossAxisExtent(context, settingsProvider.libraryDensity);
+      final baseMaxExtent = GridSizeCalculator.getMaxCrossAxisExtent(context, libraryDensity);
       final effectiveMaxExtent = useWideRatio ? baseMaxExtent * 1.8 : baseMaxExtent;
       final hasAlphaBarReservation = rightPadding > 8.0;
       return SliverPadding(
@@ -1290,12 +1541,18 @@ class _LibraryBrowseTabState extends BaseLibraryTabState<PlexMetadata, LibraryBr
             final baselineWidth = constraints.crossAxisExtent + (rightPadding - 8.0);
             final columnCount = GridSizeCalculator.getColumnCount(baselineWidth, effectiveMaxExtent);
             // Cache grid metrics for alpha jump bar scroll calculations
-            _lastCrossAxisExtent = constraints.crossAxisExtent;
-            _currentColumnCount = columnCount;
+            final itemWidth = constraints.crossAxisExtent / columnCount;
+            final itemHeight = itemWidth / GridLayoutConstants.posterAspectRatio;
+            _scrollMetrics = LibraryAlphaScrollMetrics(
+              columnCount: columnCount,
+              rowHeight: itemHeight + GridLayoutConstants.mainAxisSpacing,
+              itemWidth: itemWidth,
+              itemHeight: itemHeight,
+            );
             return SliverGrid.builder(
               gridDelegate: MediaGridDelegate.createDelegate(
                 context: context,
-                density: settingsProvider.libraryDensity,
+                density: libraryDensity,
                 useWideAspectRatio: useWideRatio,
                 maxCrossAxisExtentOverride: hasAlphaBarReservation ? constraints.crossAxisExtent / columnCount : null,
               ),
@@ -1305,6 +1562,8 @@ class _LibraryBrowseTabState extends BaseLibraryTabState<PlexMetadata, LibraryBr
                 isFirstRow: GridSizeCalculator.isFirstRow(index, columnCount),
                 isFirstColumn: GridSizeCalculator.isFirstColumn(index, columnCount),
                 isLastColumn: (index % columnCount) == (columnCount - 1),
+                columnCount: columnCount,
+                itemCount: itemCount,
               ),
             );
           },
@@ -1319,6 +1578,8 @@ class _LibraryBrowseTabState extends BaseLibraryTabState<PlexMetadata, LibraryBr
     required bool isFirstColumn,
     bool isLastColumn = false,
     bool disableScale = false,
+    int columnCount = 1,
+    int itemCount = 0,
   }) {
     final item = loadedItems[index];
 
@@ -1332,18 +1593,86 @@ class _LibraryBrowseTabState extends BaseLibraryTabState<PlexMetadata, LibraryBr
     // All other items get managed focus nodes for restoration
     final focusNode = index == 0 ? firstItemFocusNode : getGridItemFocusNode(index, prefix: 'browse_grid_item');
 
+    // Explicit row navigation. Default directional focus traversal becomes
+    // unreliable while items are mounting/unmounting under fast scrolling and
+    // can spuriously jump to overlay widgets like the floating chips header.
+    VoidCallback? navigateUp;
+    if (isFirstRow) {
+      navigateUp = _navigateToChips;
+    } else if (columnCount > 0 && index >= columnCount) {
+      navigateUp = () => _focusGridItem(index - columnCount);
+    }
+
+    VoidCallback? navigateDown;
+    if (columnCount > 0 && index + columnCount < itemCount) {
+      navigateDown = () => _focusGridItem(index + columnCount);
+    }
+
+    VoidCallback? navigateLeft;
+    if (isFirstColumn) {
+      navigateLeft = _navigateToSidebar;
+    } else if (index > 0) {
+      navigateLeft = () => _focusGridItem(index - 1);
+    }
+
+    VoidCallback? navigateRight;
+    if (isLastColumn && _shouldShowAlphaJumpBar && !_isPhone(context)) {
+      navigateRight = _navigateToAlphaJumpBar;
+    } else if (!isLastColumn && index + 1 < itemCount) {
+      navigateRight = () => _focusGridItem(index + 1);
+    }
+
     return FocusableMediaCard(
-      key: Key(item.ratingKey),
+      key: Key(item.id),
       item: item,
       focusNode: focusNode,
       disableScale: disableScale,
       onRefresh: updateItem,
-      onNavigateUp: isFirstRow ? _navigateToChips : null,
-      onNavigateLeft: isFirstColumn ? _navigateToSidebar : null,
-      onNavigateRight: isLastColumn && _shouldShowAlphaJumpBar && !_isPhone(context) ? _navigateToAlphaJumpBar : null,
+      onNavigateUp: navigateUp,
+      onNavigateDown: navigateDown,
+      onNavigateLeft: navigateLeft,
+      onNavigateRight: navigateRight,
       onBack: widget.onBack,
       onFocusChange: (hasFocus) => trackGridItemFocus(index, hasFocus),
       onListRefresh: _loadItems,
     );
   }
+
+  /// Move focus to the grid item at [targetIndex] (or its skeleton's row).
+  /// Used by the explicit dpad navigation handlers.
+  void _focusGridItem(int targetIndex) {
+    if (targetIndex < 0 || targetIndex >= totalSize) return;
+    final node = targetIndex == 0 ? firstItemFocusNode : getGridItemFocusNode(targetIndex, prefix: 'browse_grid_item');
+    if (node.context != null) {
+      node.requestFocus();
+    } else {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) node.requestFocus();
+      });
+    }
+  }
+}
+
+/// SliverPersistentHeader delegate for the chips bar. Fixed-height floating
+/// header that snaps in on scroll direction reversal.
+class _ChipsBarDelegate extends SliverPersistentHeaderDelegate {
+  final WidgetBuilder builder;
+  final double height;
+
+  const _ChipsBarDelegate({required this.builder, required this.height});
+
+  @override
+  double get minExtent => height;
+
+  @override
+  double get maxExtent => height;
+
+  @override
+  Widget build(BuildContext context, double shrinkOffset, bool overlapsContent) {
+    return SizedBox(height: height, child: builder(context));
+  }
+
+  @override
+  bool shouldRebuild(covariant _ChipsBarDelegate oldDelegate) =>
+      builder != oldDelegate.builder || height != oldDelegate.height;
 }

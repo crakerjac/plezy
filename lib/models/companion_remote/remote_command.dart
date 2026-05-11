@@ -1,5 +1,12 @@
+// ignore_for_file: invalid_annotation_target
+import 'package:freezed_annotation/freezed_annotation.dart';
+
+import '../../utils/json_converters.dart';
+
+part 'remote_command.freezed.dart';
+part 'remote_command.g.dart';
+
 enum RemoteCommandType {
-  // Navigation
   dpadUp,
   dpadDown,
   dpadLeft,
@@ -8,7 +15,6 @@ enum RemoteCommandType {
   back,
   contextMenu,
 
-  // Playback
   play,
   pause,
   playPause,
@@ -20,13 +26,11 @@ enum RemoteCommandType {
   skipIntro,
   skipCredits,
 
-  // Volume
   volumeUp,
   volumeDown,
   volumeMute,
   volumeSet,
 
-  // Tab Navigation
   tabNext,
   tabPrevious,
   tabDiscover,
@@ -35,7 +39,6 @@ enum RemoteCommandType {
   tabDownloads,
   tabSettings,
 
-  // Quick Actions
   home,
   search,
   subtitles,
@@ -43,7 +46,6 @@ enum RemoteCommandType {
   qualitySettings,
   fullscreen,
 
-  // Session Management
   ping,
   pong,
   deviceInfo,
@@ -52,24 +54,16 @@ enum RemoteCommandType {
   syncState,
 }
 
-class RemoteCommand {
-  final RemoteCommandType type;
-  final Map<String, dynamic>? data;
+class _RemoteCommandTypeConverter extends IndexedEnumConverter<RemoteCommandType> {
+  const _RemoteCommandTypeConverter() : super(RemoteCommandType.values, RemoteCommandType.ping);
+}
 
-  const RemoteCommand({required this.type, this.data});
+@freezed
+sealed class RemoteCommand with _$RemoteCommand {
+  const factory RemoteCommand({
+    @JsonKey(name: 't') @_RemoteCommandTypeConverter() required RemoteCommandType type,
+    @JsonKey(name: 'd') Map<String, dynamic>? data,
+  }) = _RemoteCommand;
 
-  factory RemoteCommand.fromJson(Map<String, dynamic> json) {
-    final index = json['t'] as int;
-    return RemoteCommand(
-      type: index < RemoteCommandType.values.length ? RemoteCommandType.values[index] : RemoteCommandType.ping,
-      data: json['d'] as Map<String, dynamic>?,
-    );
-  }
-
-  Map<String, dynamic> toJson() {
-    return {'t': type.index, if (data != null) 'd': data};
-  }
-
-  @override
-  String toString() => 'RemoteCommand(${type.name}, data: $data)';
+  factory RemoteCommand.fromJson(Map<String, dynamic> json) => _$RemoteCommandFromJson(json);
 }

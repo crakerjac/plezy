@@ -3,10 +3,11 @@ import 'package:flutter/services.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
 import '../../focus/focusable_button.dart';
+import '../../focus/focusable_text_field.dart';
 import '../../focus/focusable_wrapper.dart';
 import '../../i18n/strings.g.dart';
+import '../../mixins/controller_disposer_mixin.dart';
 
-/// Dialog for joining a watch together session
 class JoinSessionDialog extends StatefulWidget {
   const JoinSessionDialog({super.key});
 
@@ -14,13 +15,18 @@ class JoinSessionDialog extends StatefulWidget {
   State<JoinSessionDialog> createState() => _JoinSessionDialogState();
 }
 
-class _JoinSessionDialogState extends State<JoinSessionDialog> {
+class _JoinSessionDialogState extends State<JoinSessionDialog> with ControllerDisposerMixin {
   final _formKey = GlobalKey<FormState>();
-  final _sessionIdController = TextEditingController();
+  late final _sessionIdController = createTextEditingController();
+  final _closeFocusNode = FocusNode(debugLabel: 'JoinSessionClose');
+  final _sessionIdFocusNode = FocusNode(debugLabel: 'JoinSessionCode');
+  final _joinFocusNode = FocusNode(debugLabel: 'JoinSessionSubmit');
 
   @override
   void dispose() {
-    _sessionIdController.dispose();
+    _closeFocusNode.dispose();
+    _sessionIdFocusNode.dispose();
+    _joinFocusNode.dispose();
     super.dispose();
   }
 
@@ -39,17 +45,19 @@ class _JoinSessionDialogState extends State<JoinSessionDialog> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                // Header
                 Row(
                   children: [
                     Icon(Symbols.group_add, color: theme.colorScheme.primary),
                     const SizedBox(width: 12),
                     Expanded(child: Text(t.watchTogether.joinWatchSession, style: theme.textTheme.titleLarge)),
                     FocusableWrapper(
+                      focusNode: _closeFocusNode,
                       useBackgroundFocus: true,
                       disableScale: true,
                       borderRadius: 20,
+                      descendantsAreFocusable: false,
                       onSelect: () => Navigator.of(context).pop(),
+                      onNavigateDown: _sessionIdFocusNode.requestFocus,
                       child: IconButton(onPressed: () => Navigator.of(context).pop(), icon: const Icon(Symbols.close)),
                     ),
                   ],
@@ -57,9 +65,9 @@ class _JoinSessionDialogState extends State<JoinSessionDialog> {
 
                 const SizedBox(height: 24),
 
-                // Session ID input
-                TextFormField(
+                FocusableTextFormField(
                   controller: _sessionIdController,
+                  focusNode: _sessionIdFocusNode,
                   decoration: InputDecoration(
                     labelText: t.watchTogether.sessionCode,
                     hintText: t.watchTogether.enterCodeHint,
@@ -86,13 +94,14 @@ class _JoinSessionDialogState extends State<JoinSessionDialog> {
                     }
                     return null;
                   },
+                  onNavigateUp: _closeFocusNode.requestFocus,
+                  onNavigateDown: _joinFocusNode.requestFocus,
                   onFieldSubmitted: (_) => _join(),
                   autofocus: true,
                 ),
 
                 const SizedBox(height: 16),
 
-                // Instructions
                 Text(
                   t.watchTogether.joinInstructions,
                   style: theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant),
@@ -100,9 +109,10 @@ class _JoinSessionDialogState extends State<JoinSessionDialog> {
 
                 const SizedBox(height: 24),
 
-                // Join button
                 FocusableButton(
+                  focusNode: _joinFocusNode,
                   onPressed: _join,
+                  onNavigateUp: _sessionIdFocusNode.requestFocus,
                   child: FilledButton.icon(
                     onPressed: _join,
                     icon: const Icon(Symbols.group_add),
@@ -137,7 +147,6 @@ class _JoinSessionDialogState extends State<JoinSessionDialog> {
   }
 }
 
-/// Text formatter to convert input to uppercase
 class UpperCaseTextFormatter extends TextInputFormatter {
   @override
   TextEditingValue formatEditUpdate(TextEditingValue oldValue, TextEditingValue newValue) {
@@ -145,9 +154,6 @@ class UpperCaseTextFormatter extends TextInputFormatter {
   }
 }
 
-/// Show the join session dialog
-///
-/// Returns the session ID if user confirms, null if cancelled
 Future<String?> showJoinSessionDialog(BuildContext context) {
   return showDialog<String>(context: context, builder: (context) => const JoinSessionDialog());
 }

@@ -1,16 +1,20 @@
 import 'package:flutter/material.dart';
 import 'package:material_symbols_icons/symbols.dart';
-import '../models/plex_metadata.dart';
+import '../media/media_backend.dart';
+import '../media/media_item.dart';
+import '../media/media_kind.dart';
+import '../media/media_server_client.dart';
+import '../utils/provider_extensions.dart';
 import '../widgets/desktop_app_bar.dart';
-import '../widgets/plex_optimized_image.dart';
-import '../utils/plex_image_helper.dart';
+import '../widgets/optimized_media_image.dart';
+import '../utils/media_image_helper.dart';
 import '../i18n/strings.g.dart';
 import 'base_media_list_detail_screen.dart';
 import 'focusable_detail_screen_mixin.dart';
 import '../mixins/grid_focus_node_mixin.dart';
 import '../focus/focusable_action_bar.dart';
 
-/// Screen to browse all media featuring a specific actor
+/// Screen to browse all media featuring a specific actor.
 class ActorMediaScreen extends StatefulWidget {
   final String actorName;
   final String personId;
@@ -18,6 +22,7 @@ class ActorMediaScreen extends StatefulWidget {
   final String? characterName;
   final String serverId;
   final String? serverName;
+  final MediaBackend backend;
 
   const ActorMediaScreen({
     super.key,
@@ -27,6 +32,7 @@ class ActorMediaScreen extends StatefulWidget {
     this.characterName,
     required this.serverId,
     this.serverName,
+    required this.backend,
   });
 
   @override
@@ -39,7 +45,16 @@ class _ActorMediaScreenState extends BaseMediaListDetailScreen<ActorMediaScreen>
         GridFocusNodeMixin<ActorMediaScreen>,
         FocusableDetailScreenMixin<ActorMediaScreen> {
   @override
-  PlexMetadata get mediaItem => PlexMetadata(ratingKey: '', serverId: widget.serverId, serverName: widget.serverName);
+  MediaItem get mediaItem => MediaItem(
+    id: '',
+    backend: widget.backend,
+    kind: MediaKind.unknown,
+    serverId: widget.serverId,
+    serverName: widget.serverName,
+  );
+
+  @override
+  String? get itemServerId => widget.serverId;
 
   @override
   String get title => widget.actorName;
@@ -56,10 +71,10 @@ class _ActorMediaScreenState extends BaseMediaListDetailScreen<ActorMediaScreen>
     super.dispose();
   }
 
+  MediaServerClient get _mediaClient => context.getMediaClientForServer(widget.serverId);
+
   @override
-  Future<List<PlexMetadata>> fetchItems() async {
-    return await client.fetchAllPersonMedia(widget.personId);
-  }
+  Future<List<MediaItem>> fetchItems() => _mediaClient.fetchPersonMedia(widget.personId);
 
   @override
   Future<void> loadItems() async {
@@ -81,8 +96,8 @@ class _ActorMediaScreenState extends BaseMediaListDetailScreen<ActorMediaScreen>
           children: [
             ClipRRect(
               borderRadius: BorderRadius.circular(40),
-              child: PlexOptimizedImage(
-                client: client,
+              child: OptimizedMediaImage(
+                client: _mediaClient,
                 imagePath: widget.actorThumb,
                 width: 80,
                 height: 80,

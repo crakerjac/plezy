@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import '../models/shader_preset.dart';
 import '../mpv/player/player.dart';
 import '../utils/app_logger.dart';
@@ -18,11 +20,12 @@ class ShaderService {
 
   ShaderService(this._player);
 
-  /// The currently applied shader preset
   ShaderPreset get currentPreset => _currentPreset;
 
+  static bool get isPlatformSupported => !Platform.isIOS;
+
   /// Check if the player is MPV (shaders are MPV-only)
-  bool get isSupported => _player.playerType == 'mpv';
+  bool get isSupported => _player.playerType == 'mpv' && isPlatformSupported;
 
   /// Apply a shader preset to the video player.
   ///
@@ -35,7 +38,6 @@ class ShaderService {
     }
 
     try {
-      // Handle NVScaler HDR auto-skip
       if (preset.type == ShaderPresetType.nvscaler && preset.nvscalerConfig?.autoHdrSkip == true) {
         final isHdr = await _isHdrContent();
         if (isHdr) {
@@ -47,7 +49,6 @@ class ShaderService {
         }
       }
 
-      // Get shader paths for the preset
       final shaderPaths = await ShaderAssetLoader.getShadersForPreset(preset);
 
       if (shaderPaths.isEmpty) {
@@ -58,10 +59,8 @@ class ShaderService {
         return;
       }
 
-      // Clear existing shaders first
       await _clearShaders();
 
-      // Apply new shader chain
       for (final shaderPath in shaderPaths) {
         await _player.command(['change-list', 'glsl-shaders', 'append', shaderPath]);
       }
@@ -78,7 +77,6 @@ class ShaderService {
     }
   }
 
-  /// Clear all currently applied shaders.
   Future<void> _clearShaders() async {
     try {
       await _player.command(['change-list', 'glsl-shaders', 'clr', '']);
@@ -128,7 +126,6 @@ class ShaderService {
     }
   }
 
-  /// Disable all shaders.
   Future<void> disable() async {
     await applyPreset(ShaderPreset.none);
   }

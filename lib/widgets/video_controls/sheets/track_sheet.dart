@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
-import '../../../models/plex_media_info.dart';
+import '../../../media/media_source_info.dart';
 import '../../../mpv/mpv.dart';
 import '../../../i18n/strings.g.dart';
 import '../../../utils/scroll_utils.dart';
@@ -10,6 +10,7 @@ import '../../../widgets/app_icon.dart';
 import '../../../widgets/focusable_list_tile.dart';
 import '../../../widgets/overlay_sheet.dart';
 import 'base_video_control_sheet.dart';
+import 'sheet_column_header.dart';
 import 'subtitle_search_sheet.dart';
 import '../helpers/track_filter_helper.dart';
 import '../helpers/track_selection_helper.dart';
@@ -30,9 +31,14 @@ class TrackSheet extends StatelessWidget {
   /// player's in-stream audio selection (the transcoded stream only has one
   /// audio track).
   final bool isTranscoding;
-  final List<PlexAudioTrack> sourceAudioTracks;
+  final List<MediaAudioTrack> sourceAudioTracks;
   final int? selectedAudioStreamId;
   final ValueChanged<int>? onSwitchAudioStreamId;
+
+  /// Whether OpenSubtitles search is supported by the active server. Plex
+  /// proxies the OpenSubtitles plugin; Jellyfin doesn't expose an
+  /// equivalent today.
+  final bool subtitleSearchSupported;
 
   const TrackSheet({
     super.key,
@@ -48,6 +54,7 @@ class TrackSheet extends StatelessWidget {
     this.sourceAudioTracks = const [],
     this.selectedAudioStreamId,
     this.onSwitchAudioStreamId,
+    this.subtitleSearchSupported = true,
   });
 
   @override
@@ -67,7 +74,6 @@ class TrackSheet extends StatelessWidget {
         final showAudio = useSourceAudio || playerAudioTracks.length > 1;
         final showSubtitles = subtitleTracks.isNotEmpty;
 
-        // Determine title/icon based on what's shown
         final String title;
         final IconData icon;
         if (showAudio && showSubtitles) {
@@ -130,6 +136,7 @@ class TrackSheet extends StatelessWidget {
                           onSecondaryTrackChanged: onSecondarySubtitleTrackChanged,
                           supportsSecondary: supportsSecondary,
                           showHeader: true,
+                          subtitleSearchSupported: subtitleSearchSupported,
                         ),
                       ),
                     ),
@@ -153,6 +160,7 @@ class TrackSheet extends StatelessWidget {
                 onSecondaryTrackChanged: onSecondarySubtitleTrackChanged,
                 supportsSecondary: supportsSecondary,
                 showHeader: false,
+                subtitleSearchSupported: subtitleSearchSupported,
               );
             },
           ),
@@ -163,7 +171,7 @@ class TrackSheet extends StatelessWidget {
 }
 
 class _SourceAudioColumn extends StatefulWidget {
-  final List<PlexAudioTrack> tracks;
+  final List<MediaAudioTrack> tracks;
   final int? selectedStreamId;
   final ValueChanged<int> onSelected;
   final bool showHeader;
@@ -180,40 +188,33 @@ class _SourceAudioColumn extends StatefulWidget {
 }
 
 class _SourceAudioColumnState extends State<_SourceAudioColumn> {
-  final _firstItemKey = GlobalKey();
-  final _scrollController = ScrollController();
-  bool _didInitialScroll = false;
+  final _initialScroll = InitialItemScrollController();
 
   @override
   void dispose() {
-    _scrollController.dispose();
+    _initialScroll.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     final selectedId = widget.selectedStreamId;
-    if (!_didInitialScroll && selectedId != null) {
-      final selectedIndex = widget.tracks.indexWhere((t) => t.id == selectedId);
-      if (selectedIndex > 0) {
-        _didInitialScroll = true;
-        scrollToCurrentItem(_scrollController, _firstItemKey, selectedIndex);
-      }
-    }
+    final selectedIndex = selectedId == null ? null : widget.tracks.indexWhere((t) => t.id == selectedId);
+    _initialScroll.maybeScrollTo(selectedIndex);
 
     return Column(
       children: [
-        if (widget.showHeader) _ColumnHeader(label: t.videoControls.audioLabel),
+        if (widget.showHeader) SheetColumnHeader(label: t.videoControls.audioLabel),
         Expanded(
           child: ListView.builder(
-            controller: _scrollController,
+            controller: _initialScroll.controller,
             itemCount: widget.tracks.length,
             itemBuilder: (context, index) {
               final track = widget.tracks[index];
               final isSelected = track.id == selectedId;
               return TrackSelectionHelper.buildTrackTile<AudioTrack>(
                 context: context,
-                key: index == 0 ? _firstItemKey : null,
+                key: index == 0 ? _initialScroll.firstItemKey : null,
                 label: track.label,
                 isSelected: isSelected,
                 onTap: () {
@@ -249,34 +250,26 @@ class _AudioColumn extends StatefulWidget {
 }
 
 class _AudioColumnState extends State<_AudioColumn> {
-  final _firstItemKey = GlobalKey();
-  final _scrollController = ScrollController();
-  bool _didInitialScroll = false;
+  final _initialScroll = InitialItemScrollController();
 
   @override
   void dispose() {
-    _scrollController.dispose();
+    _initialScroll.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     final selectedId = widget.selection.audio?.id ?? '';
-
-    if (!_didInitialScroll) {
-      final selectedIndex = widget.tracks.indexWhere((t) => t.id == selectedId);
-      if (selectedIndex > 0) {
-        _didInitialScroll = true;
-        scrollToCurrentItem(_scrollController, _firstItemKey, selectedIndex);
-      }
-    }
+    final selectedIndex = widget.tracks.indexWhere((t) => t.id == selectedId);
+    _initialScroll.maybeScrollTo(selectedIndex);
 
     return Column(
       children: [
-        if (widget.showHeader) _ColumnHeader(label: t.videoControls.audioLabel),
+        if (widget.showHeader) SheetColumnHeader(label: t.videoControls.audioLabel),
         Expanded(
           child: ListView.builder(
-            controller: _scrollController,
+            controller: _initialScroll.controller,
             itemCount: widget.tracks.length,
             itemBuilder: (context, index) {
               final track = widget.tracks[index];
@@ -289,7 +282,7 @@ class _AudioColumnState extends State<_AudioColumn> {
               );
               return TrackSelectionHelper.buildTrackTile<AudioTrack>(
                 context: context,
-                key: index == 0 ? _firstItemKey : null,
+                key: index == 0 ? _initialScroll.firstItemKey : null,
                 label: label,
                 isSelected: track.id == selectedId,
                 onTap: () {
@@ -318,6 +311,7 @@ class _SubtitleColumn extends StatefulWidget {
   final Function(SubtitleTrack)? onSecondaryTrackChanged;
   final bool supportsSecondary;
   final bool showHeader;
+  final bool subtitleSearchSupported;
 
   const _SubtitleColumn({
     required this.tracks,
@@ -331,6 +325,7 @@ class _SubtitleColumn extends StatefulWidget {
     this.onSecondaryTrackChanged,
     this.supportsSecondary = false,
     required this.showHeader,
+    this.subtitleSearchSupported = true,
   });
 
   @override
@@ -338,13 +333,11 @@ class _SubtitleColumn extends StatefulWidget {
 }
 
 class _SubtitleColumnState extends State<_SubtitleColumn> {
-  final _firstItemKey = GlobalKey();
-  final _scrollController = ScrollController();
-  bool _didInitialScroll = false;
+  final _initialScroll = InitialItemScrollController();
 
   @override
   void dispose() {
-    _scrollController.dispose();
+    _initialScroll.dispose();
     super.dispose();
   }
 
@@ -358,28 +351,21 @@ class _SubtitleColumnState extends State<_SubtitleColumn> {
     // +1 for "Off" row
     final itemCount = widget.tracks.length + 1;
 
-    if (!_didInitialScroll && !isOffSelected) {
-      // +1 because index 0 is the "Off" row
-      final selectedIndex = widget.tracks.indexWhere((t) => t.id == selectedSub.id) + 1;
-      if (selectedIndex > 0) {
-        _didInitialScroll = true;
-        scrollToCurrentItem(_scrollController, _firstItemKey, selectedIndex);
-      }
-    }
+    final selectedIndex = isOffSelected ? null : widget.tracks.indexWhere((t) => t.id == selectedSub.id) + 1;
+    _initialScroll.maybeScrollTo(selectedIndex);
 
     return Column(
       children: [
-        if (widget.showHeader) _ColumnHeader(label: t.videoControls.subtitlesLabel),
+        if (widget.showHeader) SheetColumnHeader(label: t.videoControls.subtitlesLabel),
         Expanded(
           child: ListView.builder(
-            controller: _scrollController,
+            controller: _initialScroll.controller,
             itemCount: itemCount,
             itemBuilder: (context, index) {
-              // "Off" row
               if (index == 0) {
                 return TrackSelectionHelper.buildOffTile<SubtitleTrack>(
                   context: context,
-                  key: _firstItemKey,
+                  key: _initialScroll.firstItemKey,
                   isSelected: isOffSelected,
                   onTap: () {
                     // Turning off primary also clears secondary
@@ -416,7 +402,6 @@ class _SubtitleColumnState extends State<_SubtitleColumn> {
                 index: index - 1,
               );
 
-              // Determine badge
               Widget? badge;
               if (widget.supportsSecondary && hasSecondary) {
                 if (isPrimary) {
@@ -469,7 +454,7 @@ class _SubtitleColumnState extends State<_SubtitleColumn> {
             },
           ),
         ),
-        if (widget.ratingKey.isNotEmpty) ...[
+        if (widget.ratingKey.isNotEmpty && widget.subtitleSearchSupported) ...[
           Divider(height: 1, color: Theme.of(context).dividerColor),
           FocusableListTile(
             leading: const AppIcon(Symbols.search_rounded),
@@ -487,28 +472,6 @@ class _SubtitleColumnState extends State<_SubtitleColumn> {
           ),
         ],
       ],
-    );
-  }
-}
-
-class _ColumnHeader extends StatelessWidget {
-  final String label;
-
-  const _ColumnHeader({required this.label});
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-      child: Align(
-        alignment: Alignment.centerLeft,
-        child: Text(
-          label,
-          style: Theme.of(
-            context,
-          ).textTheme.titleSmall?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
-        ),
-      ),
     );
   }
 }

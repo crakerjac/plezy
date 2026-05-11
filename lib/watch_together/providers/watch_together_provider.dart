@@ -432,6 +432,7 @@ class WatchTogetherProvider with ChangeNotifier {
       final disconnectedName = _participants.where((p) => p.peerId == peerId).map((p) => p.displayName).firstOrNull;
 
       _participants.removeWhere((p) => p.peerId == peerId);
+      unawaited(_syncManager?.handlePeerDisconnected(peerId));
 
       // If host disconnected unexpectedly, start grace period for reconnection.
       // Skip if the host already sent a deliberate leave message.
@@ -543,7 +544,7 @@ class WatchTogetherProvider with ChangeNotifier {
         if (message.peerId != null && message.position != null) {
           final index = _participants.indexWhere((p) => p.peerId == message.peerId);
           if (index >= 0) {
-            _participants[index] = _participants[index].copyWith(lastKnownPosition: message.position);
+            _participants[index] = _participants[index].copyWith(lastKnownPosition: message.position!);
             // Don't notify for position updates - too frequent
           }
         }
@@ -605,7 +606,7 @@ class WatchTogetherProvider with ChangeNotifier {
 
     if (message.controlMode != null) {
       appLogger.d('WatchTogether: Received session config, controlMode: ${message.controlMode}');
-      _session = _session!.copyWith(controlMode: message.controlMode);
+      _session = _session!.copyWith(controlMode: message.controlMode!);
       _syncManager?.updateSession(_session!); // Update sync manager if it exists
       notifyListeners();
     }

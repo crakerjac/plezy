@@ -1,12 +1,16 @@
-import 'dart:convert';
+import 'package:json_annotation/json_annotation.dart';
 
 import '../oauth_proxy_client.dart';
+import '../tracker_session_utils.dart';
+
+part 'mal_session.g.dart';
 
 /// Immutable MyAnimeList OAuth session.
 ///
 /// Access tokens expire in ~31 days. Refresh token rotates with each refresh
 /// (rare but documented in MAL's API contract).
-class MalSession {
+@JsonSerializable(fieldRename: FieldRename.snake)
+class MalSession with EncodedTrackerSession {
   final String accessToken;
   final String refreshToken;
   final int expiresAt;
@@ -21,8 +25,8 @@ class MalSession {
     this.username,
   });
 
-  bool get isExpired => DateTime.now().millisecondsSinceEpoch ~/ 1000 >= expiresAt;
-  bool get needsRefresh => DateTime.now().millisecondsSinceEpoch ~/ 1000 >= expiresAt - 300;
+  bool get isExpired => isTrackerTokenExpired(expiresAt);
+  bool get needsRefresh => trackerTokenNeedsRefresh(expiresAt);
 
   MalSession copyWith({String? accessToken, String? refreshToken, int? expiresAt, String? username, int? createdAt}) {
     return MalSession(
@@ -34,25 +38,14 @@ class MalSession {
     );
   }
 
-  Map<String, dynamic> toJson() => {
-    'access_token': accessToken,
-    'refresh_token': refreshToken,
-    'expires_at': expiresAt,
-    'username': username,
-    'created_at': createdAt,
-  };
+  @override
+  Map<String, dynamic> toJson() => _$MalSessionToJson(this);
 
-  factory MalSession.fromJson(Map<String, dynamic> json) => MalSession(
-    accessToken: json['access_token'] as String,
-    refreshToken: json['refresh_token'] as String,
-    expiresAt: (json['expires_at'] as num).toInt(),
-    username: json['username'] as String?,
-    createdAt: (json['created_at'] as num).toInt(),
-  );
+  factory MalSession.fromJson(Map<String, dynamic> json) => _$MalSessionFromJson(json);
 
   /// Build a session from MAL's `/oauth2/token` response.
   factory MalSession.fromTokenResponse(Map<String, dynamic> json) {
-    final createdAt = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    final createdAt = trackerSessionNowEpochSeconds();
     final expiresIn = (json['expires_in'] as num).toInt();
     return MalSession(
       accessToken: json['access_token'] as String,
@@ -65,7 +58,7 @@ class MalSession {
   /// Build a session from an OAuth-proxy result. MAL's refresh_token is
   /// required for the 31-day refresh loop.
   factory MalSession.fromProxyResult(OAuthProxyResult r) {
-    final createdAt = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    final createdAt = trackerSessionNowEpochSeconds();
     final expiresIn = r.expiresIn ?? 31 * 24 * 60 * 60;
     return MalSession(
       accessToken: r.accessToken,
@@ -75,6 +68,5 @@ class MalSession {
     );
   }
 
-  String encode() => json.encode(toJson());
-  static MalSession decode(String raw) => MalSession.fromJson(json.decode(raw) as Map<String, dynamic>);
+  static MalSession decode(String raw) => decodeTrackerSessionJson(raw, MalSession.fromJson);
 }

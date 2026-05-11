@@ -5,7 +5,6 @@ import '../mpv/mpv.dart';
 import '../services/pip_service.dart';
 import '../utils/app_logger.dart';
 
-/// Manages video Picture-in-Picture mode
 class VideoPIPManager {
   final Player player;
 
@@ -22,7 +21,6 @@ class VideoPIPManager {
     _playerSize = size;
   }
 
-  /// Access PiP state from the service
   ValueNotifier<bool> get isPipActive => PipService().isPipActive;
 
   /// Get current video dimensions (display or storage or fallback to viewport)
@@ -60,8 +58,6 @@ class VideoPIPManager {
     return (width, height);
   }
 
-  /// Toggle native PiP
-  /// Returns a tuple of (success, error message) for error handling
   Future<(bool success, String? error)> togglePIP() async {
     final supported = await PipService.isSupported();
     if (!supported) return (false, 'PiP not supported on this device');
@@ -72,9 +68,9 @@ class VideoPIPManager {
       return (true, null);
     }
 
-    // Reset video filter to contain mode BEFORE entering PiP (Android only —
-    // iOS switches VO entirely so the filter is irrelevant)
-    if (Platform.isAndroid) {
+    // Reset video filter to contain mode before entering PiP. Android, iOS,
+    // and macOS all reuse the inline video surface/layer for PiP.
+    if (Platform.isAndroid || Platform.isIOS || Platform.isMacOS) {
       onBeforeEnterPip?.call();
       // Wait a frame for the filter change to take effect
       await Future.delayed(const Duration(milliseconds: 50));
@@ -84,7 +80,6 @@ class VideoPIPManager {
     return await PipService.enter(width: dims.$1, height: dims.$2);
   }
 
-  /// Update auto-PiP readiness on the native side
   Future<void> updateAutoPipState({required bool isPlaying}) async {
     if (!isPlaying) {
       await PipService.setAutoPipReady(ready: false);

@@ -12,6 +12,7 @@ import '../models/external_player_models.dart';
 import 'base_shared_preferences_service.dart';
 export 'base_shared_preferences_service.dart'
     show Pref, BoolPref, IntPref, DoublePref, StringPref, NullableStringPref, StringListPref, EnumPref, JsonPref;
+import '../models/transcode_quality_preset.dart';
 import '../utils/platform_detector.dart';
 import 'trackers/tracker_constants.dart';
 
@@ -270,6 +271,7 @@ class SettingsService extends BaseSharedPreferencesService {
   static const sleepTimerDuration = IntPref('sleep_timer_duration', defaultValue: 30);
   static const audioSyncOffset = IntPref('audio_sync_offset');
   static const subtitleSyncOffset = IntPref('subtitle_sync_offset');
+  static const subtitleSearchLanguage = NullableStringPref('subtitle_search_language');
   static const volume = DoublePref('volume', defaultValue: 100.0);
   static const rotationLocked = BoolPref('rotation_locked', defaultValue: true);
   static const subtitleFontSize = IntPref('subtitle_font_size', defaultValue: 38);
@@ -286,9 +288,11 @@ class SettingsService extends BaseSharedPreferencesService {
   static const subtitleBold = BoolPref('subtitle_bold');
   static const subtitleItalic = BoolPref('subtitle_italic');
   static const rememberTrackSelections = BoolPref('remember_track_selections', defaultValue: true);
+  static const showChapterMarkersOnTimeline = BoolPref('show_chapter_markers_on_timeline', defaultValue: true);
   static const clickVideoTogglesPlayback = BoolPref('click_video_toggles_playback');
   static const autoSkipIntro = BoolPref('auto_skip_intro');
   static const autoSkipCredits = BoolPref('auto_skip_credits');
+  static const forceSkipMarkerFallback = BoolPref('force_skip_marker_fallback');
   static const autoSkipDelay = IntPref('auto_skip_delay', defaultValue: 5);
   static const introPattern = StringPref('intro_pattern', defaultValue: defaultIntroPattern);
   static const creditsPattern = StringPref('credits_pattern', defaultValue: defaultCreditsPattern);
@@ -306,7 +310,11 @@ class SettingsService extends BaseSharedPreferencesService {
   static const enableSimklScrobble = BoolPref('enable_simkl_scrobble', defaultValue: true);
   static const matchContentFrameRate = BoolPref('match_content_frame_rate');
   static const tunneledPlayback = BoolPref('tunneled_playback', defaultValue: true);
-  static const defaultQualityPreset = StringPref('default_quality_preset', defaultValue: 'original');
+  static const defaultQualityPreset = EnumPref<TranscodeQualityPreset>(
+    'default_quality_preset',
+    values: TranscodeQualityPreset.values,
+    defaultValue: TranscodeQualityPreset.original,
+  );
   static const autoPlayNextEpisode = BoolPref('auto_play_next_episode', defaultValue: true);
   static const useExoPlayer = BoolPref('use_exoplayer', defaultValue: true);
   static const alwaysKeepSidebarOpen = BoolPref('always_keep_sidebar_open');
@@ -318,7 +326,6 @@ class SettingsService extends BaseSharedPreferencesService {
   static const globalShaderPreset = StringPref('global_shader_preset', defaultValue: 'none');
   static const requireProfileSelectionOnOpen = BoolPref('require_profile_selection_on_open');
   static const useExternalPlayer = BoolPref('use_external_player');
-  static const confirmExitOnBack = BoolPref('confirm_exit_on_back', defaultValue: true);
   static const forceTvMode = BoolPref('force_tv_mode');
   static const ambientLighting = BoolPref('ambient_lighting');
   static const audioPassthrough = BoolPref('audio_passthrough');
@@ -635,89 +642,99 @@ class SettingsService extends BaseSharedPreferencesService {
   /// reset surface — notably excludes user-customized data (intro/credits regex
   /// patterns) and opt-in toggles prior versions didn't reset, so behavior
   /// stays identical for users.
-  static List<String> _resettableKeys() => [
-    enableDebugLogging.key,
-    bufferSize.key,
-    enableHardwareDecoding.key,
-    enableHDR.key,
-    preferredVideoCodec.key,
-    preferredAudioCodec.key,
-    viewMode.key,
-    showHeroSection.key,
-    seekTimeSmall.key,
-    seekTimeLarge.key,
-    sleepTimerDuration.key,
-    audioSyncOffset.key,
-    subtitleSyncOffset.key,
-    volume.key,
-    maxVolume.key,
-    subtitleFontSize.key,
-    subtitleTextColor.key,
-    subtitleBorderSize.key,
-    subtitleBorderColor.key,
-    subtitleBackgroundColor.key,
-    subtitleBackgroundOpacity.key,
-    subtitlePosition.key,
-    rememberTrackSelections.key,
-    customDownloadPathType.key,
-    downloadOnWifiOnly.key,
-    autoCheckUpdatesOnStartup.key,
-    showPerformanceOverlay.key,
-    autoHidePerformanceOverlay.key,
-    enableDiscordRPC.key,
-    enableTraktScrobble.key,
-    enableTraktWatchedSync.key,
-    enableMalScrobble.key,
-    enableAnilistScrobble.key,
-    enableSimklScrobble.key,
-    matchContentFrameRate.key,
-    tunneledPlayback.key,
-    defaultPlaybackSpeed.key,
-    defaultBoxFitMode.key,
-    autoPlayNextEpisode.key,
-    useExoPlayer.key,
-    alwaysKeepSidebarOpen.key,
-    showUnwatchedCount.key,
-    showEpisodeNumberOnCards.key,
-    showSeasonPostersOnTabs.key,
-    hideSpoilers.key,
-    showNavBarLabels.key,
-    globalShaderPreset.key,
-    requireProfileSelectionOnOpen.key,
-    useExternalPlayer.key,
-    confirmExitOnBack.key,
-    forceTvMode.key,
-    ambientLighting.key,
-    audioPassthrough.key,
-    audioNormalization.key,
-    themeMode.key,
-    keyboardShortcuts.key,
-    keyboardHotkeys.key,
-    libraryDensity.key,
-    _legacyUseSeasonPosterKey,
-    episodePosterMode.key,
-    mediaVersionPreferences.key,
-    appLocale.key,
-    customDownloadPath.key,
-    videoPlayerNavigationEnabled.key,
-    _legacyMpvConfigEntriesKey,
-    mpvConfigText.key,
-    mpvPresets.key,
-    autoPip.key,
-    customShaderPresets.key,
-    selectedExternalPlayer.key,
-    customExternalPlayers.key,
-    _bufferSizeMigratedKey,
-    customRelayUrl.key,
+  static List<Pref<Object?>> _resettablePrefs() => [
+    enableDebugLogging,
+    bufferSize,
+    enableHardwareDecoding,
+    enableHDR,
+    preferredVideoCodec,
+    preferredAudioCodec,
+    viewMode,
+    showHeroSection,
+    seekTimeSmall,
+    seekTimeLarge,
+    sleepTimerDuration,
+    audioSyncOffset,
+    subtitleSyncOffset,
+    subtitleSearchLanguage,
+    volume,
+    maxVolume,
+    subtitleFontSize,
+    subtitleTextColor,
+    subtitleBorderSize,
+    subtitleBorderColor,
+    subtitleBackgroundColor,
+    subtitleBackgroundOpacity,
+    subtitlePosition,
+    rememberTrackSelections,
+    customDownloadPathType,
+    downloadOnWifiOnly,
+    autoCheckUpdatesOnStartup,
+    showPerformanceOverlay,
+    autoHidePerformanceOverlay,
+    enableDiscordRPC,
+    enableTraktScrobble,
+    enableTraktWatchedSync,
+    enableMalScrobble,
+    enableAnilistScrobble,
+    enableSimklScrobble,
+    matchContentFrameRate,
+    tunneledPlayback,
+    defaultPlaybackSpeed,
+    defaultBoxFitMode,
+    autoPlayNextEpisode,
+    useExoPlayer,
+    alwaysKeepSidebarOpen,
+    showUnwatchedCount,
+    showEpisodeNumberOnCards,
+    showSeasonPostersOnTabs,
+    hideSpoilers,
+    showNavBarLabels,
+    globalShaderPreset,
+    requireProfileSelectionOnOpen,
+    useExternalPlayer,
+    forceTvMode,
+    ambientLighting,
+    audioPassthrough,
+    audioNormalization,
+    themeMode,
+    keyboardShortcuts,
+    keyboardHotkeys,
+    libraryDensity,
+    episodePosterMode,
+    mediaVersionPreferences,
+    appLocale,
+    customDownloadPath,
+    videoPlayerNavigationEnabled,
+    mpvConfigText,
+    mpvPresets,
+    autoPip,
+    customShaderPresets,
+    selectedExternalPlayer,
+    customExternalPlayers,
+    customRelayUrl,
   ];
 
   Future<void> resetAllSettings() async {
+    final resettable = _resettablePrefs();
     await Future.wait([
-      ..._resettableKeys().map((k) => prefs.remove(k)),
+      ...resettable.map((p) => prefs.remove(p.key)),
+      // Legacy migration sentinels — removed alongside the keys they guarded.
+      prefs.remove(_legacyUseSeasonPosterKey),
+      prefs.remove(_legacyMpvConfigEntriesKey),
+      prefs.remove(_bufferSizeMigratedKey),
       ...TrackerService.values.expand(
         (s) => [prefs.remove(trackerFilterModePref(s).key), prefs.remove(trackerFilterIdsPref(s).key)],
       ),
     ]);
+    refreshListenables();
+  }
+
+  /// Push current stored values into every active listenable. Use after bulk
+  /// operations that bypass [write] (e.g. import-from-file rewrites the
+  /// underlying SharedPreferences directly).
+  void refreshListenables() {
+    refreshActiveListenables();
   }
 
   Future<void> clearCache() async {

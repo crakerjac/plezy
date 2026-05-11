@@ -2,64 +2,85 @@ import Cocoa
 import FlutterMacOS
 
 class WindowDelegate: NSObject, NSWindowDelegate {
-    weak var channel: FlutterMethodChannel?
-    weak var window: NSWindow?
+  weak var channel: FlutterMethodChannel?
+  weak var window: NSWindow?
 
-    // Hardcoded presentation options for fullscreen mode
-    // Auto-hide toolbar, menu bar, and dock when in fullscreen
-    private let fullScreenPresentationOptions: NSApplication.PresentationOptions = [
-        .fullScreen,
-        .autoHideToolbar,
-        .autoHideMenuBar,
-        .autoHideDock
-    ]
+  // Hardcoded presentation options for fullscreen mode
+  // Auto-hide toolbar, menu bar, and dock when in fullscreen
+  private let fullScreenPresentationOptions: NSApplication.PresentationOptions = [
+    .fullScreen,
+    .autoHideToolbar,
+    .autoHideMenuBar,
+    .autoHideDock,
+  ]
 
-    // MARK: - Private Helpers
+  // MARK: - Private Helpers
 
-    private func emit(_ method: String) {
-        channel?.invokeMethod(method, arguments: nil)
+  private func emit(_ method: String) {
+    channel?.invokeMethod(method, arguments: nil)
+  }
+
+  func syncWindowChrome() {
+    guard let window = window else { return }
+    if window.styleMask.contains(.fullScreen) {
+      applyFullScreenChrome(to: window)
+    } else {
+      applyWindowedChrome(to: window)
+    }
+  }
+
+  private func applyFullScreenChrome(to window: NSWindow) {
+    window.toolbar = nil
+    window.titleVisibility = .visible
+    window.titlebarAppearsTransparent = false
+    WindowUtilsPlugin.setTrafficLightsVisible(true, window: window)
+    WindowUtilsPlugin.setTrafficLightPositions(custom: false, window: window)
+  }
+
+  private func applyWindowedChrome(to window: NSWindow) {
+    window.titleVisibility = .hidden
+    window.titlebarAppearsTransparent = true
+    window.styleMask.insert(.fullSizeContentView)
+
+    if window.toolbar == nil, let flutterVC = window.contentViewController {
+      window.toolbar = ForwardingToolbar(flutterViewController: flutterVC)
     }
 
-    // MARK: - NSWindowDelegate
+    WindowUtilsPlugin.setTrafficLightsVisible(true, window: window)
+    WindowUtilsPlugin.setTrafficLightPositions(custom: true, window: window)
+  }
 
-    func window(_ window: NSWindow, willUseFullScreenPresentationOptions proposedOptions: NSApplication.PresentationOptions) -> NSApplication.PresentationOptions {
-        return fullScreenPresentationOptions
-    }
+  // MARK: - NSWindowDelegate
 
-    func windowWillEnterFullScreen(_ notification: Notification) {
-        guard let window = window else { return }
-        // Remove toolbar before entering fullscreen
-        window.toolbar = nil
-        // Show title and make titlebar opaque for native fullscreen look
-        window.titleVisibility = .visible
-        window.titlebarAppearsTransparent = false
-        // Reset traffic light positions to default
-        WindowUtilsPlugin.setTrafficLightPositions(custom: false, window: window)
-        // Notify Dart for state management only
-        emit("windowWillEnterFullScreen")
-    }
+  func window(
+    _ window: NSWindow,
+    willUseFullScreenPresentationOptions proposedOptions: NSApplication.PresentationOptions
+  ) -> NSApplication.PresentationOptions {
+    return fullScreenPresentationOptions
+  }
 
-    func windowDidEnterFullScreen(_ notification: Notification) {
-        emit("windowDidEnterFullScreen")
-    }
+  func windowWillEnterFullScreen(_ notification: Notification) {
+    guard let window = window else { return }
+    applyFullScreenChrome(to: window)
+    // Notify Dart for state management only
+    emit("windowWillEnterFullScreen")
+  }
 
-    func windowWillExitFullScreen(_ notification: Notification) {
-        guard let window = window else { return }
-        // Hide title and make titlebar transparent BEFORE exiting
-        window.titleVisibility = .hidden
-        window.titlebarAppearsTransparent = true
-        emit("windowWillExitFullScreen")
-    }
+  func windowDidEnterFullScreen(_ notification: Notification) {
+    emit("windowDidEnterFullScreen")
+  }
 
-    func windowDidExitFullScreen(_ notification: Notification) {
-        guard let window = window else { return }
-        // Restore toolbar
-        if let flutterVC = window.contentViewController {
-            let toolbar = ForwardingToolbar(flutterViewController: flutterVC)
-            window.toolbar = toolbar
-        }
-        // Restore custom traffic light positions
-        WindowUtilsPlugin.setTrafficLightPositions(custom: true, window: window)
-        emit("windowDidExitFullScreen")
-    }
+  func windowWillExitFullScreen(_ notification: Notification) {
+    guard let window = window else { return }
+    // Hide title and make titlebar transparent BEFORE exiting
+    window.titleVisibility = .hidden
+    window.titlebarAppearsTransparent = true
+    emit("windowWillExitFullScreen")
+  }
+
+  func windowDidExitFullScreen(_ notification: Notification) {
+    guard let window = window else { return }
+    applyWindowedChrome(to: window)
+    emit("windowDidExitFullScreen")
+  }
 }

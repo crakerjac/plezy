@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:plezy/utils/formatters.dart';
 
-import '../../../models/plex_metadata.dart';
+import '../../../media/media_item.dart';
 import '../../../i18n/strings.g.dart';
 import '../../../watch_together/widgets/watch_together_overlay.dart';
 import '../../../watch_together/providers/watch_together_provider.dart';
@@ -22,7 +22,7 @@ enum VideoHeaderStyle {
 /// Displays the video title with optional series/episode information.
 /// Supports both single-line (macOS) and multi-line (other platforms) layouts.
 class VideoControlsHeader extends StatelessWidget {
-  final PlexMetadata metadata;
+  final MediaItem metadata;
   final VideoHeaderStyle style;
 
   /// Optional trailing widget (e.g., track/chapter controls)
@@ -63,7 +63,6 @@ class VideoControlsHeader extends StatelessWidget {
   }
 
   Widget _buildSingleLineTitle() {
-    // Build single-line title combining series and episode info
     final seriesName = metadata.grandparentTitle ?? metadata.title!;
     final hasEpisodeInfo = metadata.parentIndex != null && metadata.index != null;
 
@@ -91,8 +90,8 @@ class VideoControlsHeader extends StatelessWidget {
       secondLineParts.add(metadata.title!);
     }
 
-    if (metadata.duration != null) {
-      secondLineParts.add(formatDurationTextual(metadata.duration!));
+    if (metadata.durationMs != null) {
+      secondLineParts.add(formatDurationTextual(metadata.durationMs!));
     }
 
     return Column(

@@ -37,8 +37,7 @@ class MacOSWindowService {
   static bool _initialized = false;
   static bool _delegateEnabled = false;
   static final List<MacOSWindowDelegate> _delegates = [];
-
-  // MARK: - Private Helpers
+  static final MacOSWindowDelegate _fullscreenDelegate = _FullscreenWindowDelegate();
 
   static Future<void> _invoke(String method, [Map<String, dynamic>? args]) async {
     if (!Platform.isMacOS) return;
@@ -64,8 +63,6 @@ class MacOSWindowService {
     }
   }
 
-  // MARK: - Initialization
-
   /// Initialize the window service and set up the titlebar.
   ///
   /// Note: The initial window configuration (transparent titlebar, toolbar,
@@ -75,10 +72,18 @@ class MacOSWindowService {
   ///
   /// This method sets up the Dart-side callbacks for fullscreen state tracking.
   static Future<void> setupCustomTitlebar() async {
-    if (!Platform.isMacOS || _initialized) return;
+    if (!Platform.isMacOS) return;
+
+    if (_initialized && _delegateEnabled) {
+      await syncWindowChrome();
+      FullscreenStateManager().setFullscreen(await isFullscreen());
+      return;
+    }
 
     await initialize(enableWindowDelegate: true);
-    addWindowDelegate(_FullscreenWindowDelegate());
+    addWindowDelegate(_fullscreenDelegate);
+    await syncWindowChrome();
+    FullscreenStateManager().setFullscreen(await isFullscreen());
   }
 
   /// Initialize the window service.
@@ -87,7 +92,7 @@ class MacOSWindowService {
   static Future<void> initialize({bool enableWindowDelegate = false}) async {
     if (!Platform.isMacOS) return;
 
-    if (!_initialized) {
+    if (!_initialized || (enableWindowDelegate && !_delegateEnabled)) {
       await _channel.invokeMethod('initialize', {'enableWindowDelegate': enableWindowDelegate});
       _initialized = true;
     }
@@ -99,32 +104,24 @@ class MacOSWindowService {
     }
   }
 
-  /// Add a delegate to receive window events.
   static void addWindowDelegate(MacOSWindowDelegate delegate) {
     if (!_delegates.contains(delegate)) {
       _delegates.add(delegate);
     }
   }
 
-  /// Remove a previously added delegate.
   static void removeWindowDelegate(MacOSWindowDelegate delegate) {
     _delegates.remove(delegate);
   }
 
-  // MARK: - Traffic Light Buttons
-
-  /// Show or hide all traffic light buttons (close, miniaturize, zoom).
   static Future<void> setTrafficLightsVisible(bool visible) => _invoke('setTrafficLightsVisible', {'visible': visible});
 
-  // MARK: - Fullscreen
+  static Future<void> syncWindowChrome() => _invoke('syncWindowChrome');
 
-  /// Enter fullscreen mode.
   static Future<void> enterFullscreen() => _invoke('enterFullscreen');
 
-  /// Exit fullscreen mode.
   static Future<void> exitFullscreen() => _invoke('exitFullscreen');
 
-  /// Check if the window is in fullscreen mode.
   static Future<bool> isFullscreen() async {
     if (!Platform.isMacOS) return false;
     return await _channel.invokeMethod<bool>('isFullscreen') ?? false;

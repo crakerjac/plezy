@@ -1,10 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../connection/connection_registry.dart';
 import '../../i18n/strings.g.dart';
+import '../../mixins/mounted_set_state_mixin.dart';
+import '../../profiles/active_plex_identity.dart';
+import '../../profiles/active_profile_provider.dart';
+import '../../profiles/plex_home_service.dart';
+import '../../profiles/profile_connection_registry.dart';
 import '../../providers/companion_remote_provider.dart';
-import '../../providers/user_profile_provider.dart';
 import '../../focus/focusable_button.dart';
+import '../../focus/key_event_utils.dart';
 import '../../utils/app_logger.dart';
 
 class RemoteSessionDialog extends StatefulWidget {
@@ -22,7 +28,7 @@ class RemoteSessionDialog extends StatefulWidget {
   }
 }
 
-class _RemoteSessionDialogState extends State<RemoteSessionDialog> {
+class _RemoteSessionDialogState extends State<RemoteSessionDialog> with MountedSetStateMixin {
   bool _isStarting = false;
   String? _errorMessage;
 
@@ -34,7 +40,6 @@ class _RemoteSessionDialogState extends State<RemoteSessionDialog> {
 
   Future<void> _ensureServerRunning() async {
     final provider = context.read<CompanionRemoteProvider>();
-    if (provider.isHostServerRunning) return;
 
     setState(() {
       _isStarting = true;
@@ -42,12 +47,39 @@ class _RemoteSessionDialogState extends State<RemoteSessionDialog> {
     });
 
     try {
-      final home = context.read<UserProfileProvider>().home;
-      await provider.ensureCryptoReady(home);
+      final connections = context.read<ConnectionRegistry>();
+      final activeProfile = context.read<ActiveProfileProvider>();
+      final profileConnections = context.read<ProfileConnectionRegistry>();
+      final plexHome = context.read<PlexHomeService>();
+      final identity = await resolveActivePlexIdentity(
+        activeProfile: activeProfile,
+        connections: connections,
+        profileConnections: profileConnections,
+      );
       if (!mounted) return;
-      await provider.startHostServer();
+      final home = identity == null ? null : await plexHome.materializePlexHomeForConnection(identity.account.id);
+      if (!mounted) return;
+      final ok = await provider.ensureCryptoReady(
+        home,
+        connections: connections,
+        activeProfile: activeProfile,
+        profileConnections: profileConnections,
+        identity: identity,
+        plexHomeForConnection: plexHome.materializePlexHomeForConnection,
+      );
+      if (!mounted) return;
+      if (!ok) {
+        setState(() {
+          _isStarting = false;
+          _errorMessage = t.companionRemote.pairing.cryptoInitFailed;
+        });
+        return;
+      }
+      if (!provider.isHostServerRunning) {
+        await provider.startHostServer();
+      }
 
-      if (mounted) setState(() => _isStarting = false);
+      setStateIfMounted(() => _isStarting = false);
     } catch (e) {
       appLogger.e('Failed to start companion remote server', error: e);
       if (!mounted) return;
@@ -69,109 +101,111 @@ class _RemoteSessionDialogState extends State<RemoteSessionDialog> {
 
   @override
   Widget build(BuildContext context) {
-    return Consumer<CompanionRemoteProvider>(
-      builder: (context, provider, child) {
-        if (_isStarting) {
-          return Dialog(
-            child: Padding(
-              padding: const EdgeInsets.all(32.0),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const CircularProgressIndicator(),
-                  const SizedBox(height: 16),
-                  Text(t.companionRemote.session.startingServer, style: Theme.of(context).textTheme.titleMedium),
-                ],
-              ),
-            ),
-          );
-        }
-
-        if (_errorMessage != null) {
-          return AlertDialog(
-            title: Text(t.common.error),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(t.companionRemote.session.failedToCreate),
-                const SizedBox(height: 8),
-                Text(_errorMessage!, style: const TextStyle(fontFamily: 'monospace')),
-              ],
-            ),
-            actions: [
-              TextButton(onPressed: () => Navigator.of(context).pop(), child: Text(t.common.close)),
-              TextButton(onPressed: _ensureServerRunning, child: Text(t.common.retry)),
-            ],
-          );
-        }
-
-        return Dialog(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 500),
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.all(24.0),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Row(
-                    children: [
-                      const Icon(Icons.phone_android, size: 32),
-                      const SizedBox(width: 16),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(t.companionRemote.title, style: Theme.of(context).textTheme.headlineSmall),
-                            const SizedBox(height: 4),
-                            _buildStatusLine(context, provider),
-                          ],
-                        ),
-                      ),
-                      IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.of(context).pop()),
-                    ],
-                  ),
-                  const SizedBox(height: 24),
-
-                  // Server status card
-                  _buildServerStatus(context, provider),
-
-                  // Connected device info
-                  if (provider.connectedDevice != null) ...[
+    return Focus(
+      autofocus: true,
+      onKeyEvent: (node, event) => handleBackKeyNavigation(context, event),
+      child: Consumer<CompanionRemoteProvider>(
+        builder: (context, provider, child) {
+          if (_isStarting) {
+            return Dialog(
+              child: Padding(
+                padding: const EdgeInsets.all(32.0),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const CircularProgressIndicator(),
                     const SizedBox(height: 16),
-                    _buildConnectedDevice(context, provider),
+                    Text(t.companionRemote.session.startingServer, style: Theme.of(context).textTheme.titleMedium),
                   ],
+                ),
+              ),
+            );
+          }
 
-                  const SizedBox(height: 24),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.end,
-                    children: [
-                      TextButton.icon(
-                        onPressed: _toggleServer,
-                        icon: Icon(provider.isHostServerRunning ? Icons.stop : Icons.play_arrow),
-                        label: Text(
-                          provider.isHostServerRunning
-                              ? t.companionRemote.session.stopServer
-                              : t.companionRemote.session.startServer,
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      FocusableButton(
-                        onPressed: () => Navigator.of(context).pop(),
-                        child: FilledButton(
-                          onPressed: () => Navigator.of(context).pop(),
-                          child: Text(t.companionRemote.session.minimize),
-                        ),
-                      ),
-                    ],
-                  ),
+          if (_errorMessage != null) {
+            return AlertDialog(
+              title: Text(t.common.error),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(t.companionRemote.session.failedToCreate),
+                  const SizedBox(height: 8),
+                  Text(_errorMessage!, style: const TextStyle(fontFamily: 'monospace')),
                 ],
               ),
+              actions: [
+                TextButton(onPressed: () => Navigator.of(context).pop(), child: Text(t.common.close)),
+                TextButton(onPressed: _ensureServerRunning, child: Text(t.common.retry)),
+              ],
+            );
+          }
+
+          return Dialog(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 500),
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.all(24.0),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Row(
+                      children: [
+                        const Icon(Icons.phone_android, size: 32),
+                        const SizedBox(width: 16),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(t.companionRemote.title, style: Theme.of(context).textTheme.headlineSmall),
+                              const SizedBox(height: 4),
+                              _buildStatusLine(context, provider),
+                            ],
+                          ),
+                        ),
+                        IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.of(context).pop()),
+                      ],
+                    ),
+                    const SizedBox(height: 24),
+
+                    _buildServerStatus(context, provider),
+
+                    if (provider.connectedDevice != null) ...[
+                      const SizedBox(height: 16),
+                      _buildConnectedDevice(context, provider),
+                    ],
+
+                    const SizedBox(height: 24),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      children: [
+                        TextButton.icon(
+                          onPressed: _toggleServer,
+                          icon: Icon(provider.isHostServerRunning ? Icons.stop : Icons.play_arrow),
+                          label: Text(
+                            provider.isHostServerRunning
+                                ? t.companionRemote.session.stopServer
+                                : t.companionRemote.session.startServer,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        FocusableButton(
+                          onPressed: () => Navigator.of(context).pop(),
+                          child: FilledButton(
+                            onPressed: () => Navigator.of(context).pop(),
+                            child: Text(t.companionRemote.session.minimize),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
             ),
-          ),
-        );
-      },
+          );
+        },
+      ),
     );
   }
 

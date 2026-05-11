@@ -1,140 +1,43 @@
-/// Session role - whether this device is the host or a guest
+import 'package:freezed_annotation/freezed_annotation.dart';
+
+part 'watch_session.freezed.dart';
+
 enum SessionRole { host, guest }
 
-/// Control mode - who can control playback
-enum ControlMode {
-  /// Only the host can control playback
-  hostOnly,
+enum ControlMode { hostOnly, anyone }
 
-  /// Anyone in the session can control playback
-  anyone,
+enum SessionState { disconnected, connecting, connected, error }
+
+@freezed
+sealed class Participant with _$Participant {
+  const factory Participant({
+    required String peerId,
+    required String displayName,
+    required bool isHost,
+    @Default(Duration.zero) Duration lastKnownPosition,
+    @Default(false) bool isBuffering,
+  }) = _Participant;
 }
 
-/// Current state of the watch together session
-enum SessionState {
-  /// Not connected to any session
-  disconnected,
+@freezed
+sealed class WatchSession with _$WatchSession {
+  const WatchSession._();
 
-  /// Attempting to connect/create session
-  connecting,
-
-  /// Successfully connected to session
-  connected,
-
-  /// Connection error occurred
-  error,
-}
-
-/// Represents a participant in a watch together session
-class Participant {
-  final String peerId;
-  final String displayName;
-  final bool isHost;
-  final Duration lastKnownPosition;
-  final bool isBuffering;
-
-  const Participant({
-    required this.peerId,
-    required this.displayName,
-    required this.isHost,
-    this.lastKnownPosition = Duration.zero,
-    this.isBuffering = false,
-  });
-
-  Participant copyWith({
-    String? peerId,
-    String? displayName,
-    bool? isHost,
-    Duration? lastKnownPosition,
-    bool? isBuffering,
-  }) {
-    return Participant(
-      peerId: peerId ?? this.peerId,
-      displayName: displayName ?? this.displayName,
-      isHost: isHost ?? this.isHost,
-      lastKnownPosition: lastKnownPosition ?? this.lastKnownPosition,
-      isBuffering: isBuffering ?? this.isBuffering,
-    );
-  }
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) || other is Participant && runtimeType == other.runtimeType && peerId == other.peerId;
-
-  @override
-  int get hashCode => peerId.hashCode;
-}
-
-/// Represents a watch together session
-class WatchSession {
-  /// Unique identifier for this session (used for joining)
-  final String sessionId;
-
-  /// This device's role in the session
-  final SessionRole role;
-
-  /// Who can control playback
-  final ControlMode controlMode;
-
-  /// Current connection state
-  final SessionState state;
-
-  /// Error message if state is error
-  final String? errorMessage;
-
-  /// Rating key of the media being watched (for validation)
-  final String? mediaRatingKey;
-
-  /// Server ID of the media being watched (same-server requirement)
-  final String? mediaServerId;
-
-  /// Title of the media being watched
-  final String? mediaTitle;
-
-  /// The host's peer ID (used to identify host messages)
-  final String? hostPeerId;
-
-  const WatchSession({
-    required this.sessionId,
-    required this.role,
-    required this.controlMode,
-    required this.state,
-    this.errorMessage,
-    this.mediaRatingKey,
-    this.mediaServerId,
-    this.mediaTitle,
-    this.hostPeerId,
-  });
-
-  /// Whether this device is the host
-  bool get isHost => role == SessionRole.host;
-
-  /// Whether the session is currently connected
-  bool get isConnected => state == SessionState.connected;
-
-  WatchSession copyWith({
-    String? sessionId,
-    SessionRole? role,
-    ControlMode? controlMode,
-    SessionState? state,
+  const factory WatchSession({
+    required String sessionId,
+    required SessionRole role,
+    required ControlMode controlMode,
+    required SessionState state,
     String? errorMessage,
     String? mediaRatingKey,
     String? mediaServerId,
     String? mediaTitle,
     String? hostPeerId,
-  }) {
-    return WatchSession(
-      sessionId: sessionId ?? this.sessionId,
-      role: role ?? this.role,
-      controlMode: controlMode ?? this.controlMode,
-      state: state ?? this.state,
-      errorMessage: errorMessage ?? this.errorMessage,
-      mediaRatingKey: mediaRatingKey ?? this.mediaRatingKey,
-      mediaServerId: mediaServerId ?? this.mediaServerId,
-      mediaTitle: mediaTitle ?? this.mediaTitle,
-      hostPeerId: hostPeerId ?? this.hostPeerId,
-    );
-  }
+  }) = _WatchSession;
+
+  bool get isHost => role == SessionRole.host;
+
+  bool get isConnected => state == SessionState.connected;
 
   /// Create a new session as host
   factory WatchSession.createAsHost({
@@ -144,26 +47,22 @@ class WatchSession {
     String? mediaRatingKey,
     String? mediaServerId,
     String? mediaTitle,
-  }) {
-    return WatchSession(
-      sessionId: sessionId,
-      role: SessionRole.host,
-      controlMode: controlMode,
-      state: SessionState.connecting,
-      hostPeerId: hostPeerId,
-      mediaRatingKey: mediaRatingKey,
-      mediaServerId: mediaServerId,
-      mediaTitle: mediaTitle,
-    );
-  }
+  }) => WatchSession(
+    sessionId: sessionId,
+    role: SessionRole.host,
+    controlMode: controlMode,
+    state: SessionState.connecting,
+    hostPeerId: hostPeerId,
+    mediaRatingKey: mediaRatingKey,
+    mediaServerId: mediaServerId,
+    mediaTitle: mediaTitle,
+  );
 
   /// Create a session as guest (joining)
-  factory WatchSession.joinAsGuest({required String sessionId}) {
-    return WatchSession(
-      sessionId: sessionId,
-      role: SessionRole.guest,
-      controlMode: ControlMode.hostOnly, // Will be updated when connected
-      state: SessionState.connecting,
-    );
-  }
+  factory WatchSession.joinAsGuest({required String sessionId}) => WatchSession(
+    sessionId: sessionId,
+    role: SessionRole.guest,
+    controlMode: ControlMode.hostOnly, // Will be updated when connected
+    state: SessionState.connecting,
+  );
 }

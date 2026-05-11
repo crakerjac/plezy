@@ -1,4 +1,9 @@
-/// Shader preset types available in the app
+// ignore_for_file: invalid_annotation_target
+import 'package:freezed_annotation/freezed_annotation.dart';
+
+part 'shader_preset.freezed.dart';
+part 'shader_preset.g.dart';
+
 enum ShaderPresetType { none, nvscaler, artcnn, anime4k, custom }
 
 /// ArtCNN real-time model sizes.
@@ -52,82 +57,36 @@ enum Anime4KMode {
   modeCA,
 }
 
-/// Configuration for Anime4K preset
-class Anime4KConfig {
-  final Anime4KQuality quality;
-  final Anime4KMode mode;
+@freezed
+sealed class Anime4KConfig with _$Anime4KConfig {
+  const factory Anime4KConfig({
+    @JsonKey(unknownEnumValue: Anime4KQuality.fast) required Anime4KQuality quality,
+    @JsonKey(unknownEnumValue: Anime4KMode.modeA) required Anime4KMode mode,
+  }) = _Anime4KConfig;
 
-  const Anime4KConfig({required this.quality, required this.mode});
-
-  @override
-  bool operator ==(Object other) {
-    if (identical(this, other)) return true;
-    return other is Anime4KConfig && other.quality == quality && other.mode == mode;
-  }
-
-  @override
-  int get hashCode => quality.hashCode ^ mode.hashCode;
-
-  Map<String, dynamic> toJson() => {'quality': quality.name, 'mode': mode.name};
-
-  factory Anime4KConfig.fromJson(Map<String, dynamic> json) {
-    return Anime4KConfig(
-      quality: Anime4KQuality.values.asNameMap()[json['quality']] ?? Anime4KQuality.fast,
-      mode: Anime4KMode.values.asNameMap()[json['mode']] ?? Anime4KMode.modeA,
-    );
-  }
+  factory Anime4KConfig.fromJson(Map<String, dynamic> json) => _$Anime4KConfigFromJson(json);
 }
 
-/// Configuration for ArtCNN preset
-class ArtCNNConfig {
-  final ArtCNNModel model;
-  final ArtCNNVariant variant;
+@freezed
+sealed class ArtCNNConfig with _$ArtCNNConfig {
+  const factory ArtCNNConfig({
+    @JsonKey(unknownEnumValue: ArtCNNModel.c4f16) required ArtCNNModel model,
+    @JsonKey(unknownEnumValue: ArtCNNVariant.neutral) required ArtCNNVariant variant,
+  }) = _ArtCNNConfig;
 
-  const ArtCNNConfig({required this.model, required this.variant});
-
-  @override
-  bool operator ==(Object other) {
-    if (identical(this, other)) return true;
-    return other is ArtCNNConfig && other.model == model && other.variant == variant;
-  }
-
-  @override
-  int get hashCode => model.hashCode ^ variant.hashCode;
-
-  Map<String, dynamic> toJson() => {'model': model.name, 'variant': variant.name};
-
-  factory ArtCNNConfig.fromJson(Map<String, dynamic> json) {
-    return ArtCNNConfig(
-      model: ArtCNNModel.values.asNameMap()[json['model']] ?? ArtCNNModel.c4f16,
-      variant: ArtCNNVariant.values.asNameMap()[json['variant']] ?? ArtCNNVariant.neutral,
-    );
-  }
+  factory ArtCNNConfig.fromJson(Map<String, dynamic> json) => _$ArtCNNConfigFromJson(json);
 }
 
-/// Configuration for NVScaler preset
-class NVScalerConfig {
-  /// Whether to automatically skip NVScaler on HDR content
-  final bool autoHdrSkip;
+@freezed
+sealed class NVScalerConfig with _$NVScalerConfig {
+  const factory NVScalerConfig({
+    /// Whether to automatically skip NVScaler on HDR content
+    @Default(true) bool autoHdrSkip,
+  }) = _NVScalerConfig;
 
-  const NVScalerConfig({this.autoHdrSkip = true});
-
-  @override
-  bool operator ==(Object other) {
-    if (identical(this, other)) return true;
-    return other is NVScalerConfig && other.autoHdrSkip == autoHdrSkip;
-  }
-
-  @override
-  int get hashCode => autoHdrSkip.hashCode;
-
-  Map<String, dynamic> toJson() => {'autoHdrSkip': autoHdrSkip};
-
-  factory NVScalerConfig.fromJson(Map<String, dynamic> json) {
-    return NVScalerConfig(autoHdrSkip: json['autoHdrSkip'] as bool? ?? true);
-  }
+  factory NVScalerConfig.fromJson(Map<String, dynamic> json) => _$NVScalerConfigFromJson(json);
 }
 
-/// Represents a shader preset configuration
 class ShaderPreset {
   final String id;
   final String name;
@@ -235,7 +194,6 @@ class ShaderPreset {
     }
   }
 
-  /// Get display name for the mode
   String get modeDisplayName {
     if (anime4kConfig != null) {
       return _getModeName(anime4kConfig!.mode);
@@ -243,7 +201,6 @@ class ShaderPreset {
     return '';
   }
 
-  /// Get display name for the ArtCNN model
   String get artcnnModelDisplayName {
     if (artcnnConfig != null) {
       return _getArtCNNModelName(artcnnConfig!.model);
@@ -251,26 +208,22 @@ class ShaderPreset {
     return '';
   }
 
-  /// Get all available preset options
   static List<ShaderPreset> get allPresets {
     return [
       none,
       nvscalerDefault,
-      // ArtCNN presets
       artcnnPreset(ArtCNNModel.c4f16, ArtCNNVariant.neutral),
       artcnnPreset(ArtCNNModel.c4f16, ArtCNNVariant.denoise),
       artcnnPreset(ArtCNNModel.c4f16, ArtCNNVariant.denoiseSharpen),
       artcnnPreset(ArtCNNModel.c4f32, ArtCNNVariant.neutral),
       artcnnPreset(ArtCNNModel.c4f32, ArtCNNVariant.denoise),
       artcnnPreset(ArtCNNModel.c4f32, ArtCNNVariant.denoiseSharpen),
-      // Anime4K Fast presets
       anime4kPreset(Anime4KQuality.fast, Anime4KMode.modeA),
       anime4kPreset(Anime4KQuality.fast, Anime4KMode.modeB),
       anime4kPreset(Anime4KQuality.fast, Anime4KMode.modeC),
       anime4kPreset(Anime4KQuality.fast, Anime4KMode.modeAA),
       anime4kPreset(Anime4KQuality.fast, Anime4KMode.modeBB),
       anime4kPreset(Anime4KQuality.fast, Anime4KMode.modeCA),
-      // Anime4K HQ presets
       anime4kPreset(Anime4KQuality.hq, Anime4KMode.modeA),
       anime4kPreset(Anime4KQuality.hq, Anime4KMode.modeB),
       anime4kPreset(Anime4KQuality.hq, Anime4KMode.modeC),
@@ -280,7 +233,6 @@ class ShaderPreset {
     ];
   }
 
-  /// Find a preset by its ID
   static ShaderPreset? fromId(String id) {
     try {
       return allPresets.firstWhere((p) => p.id == id);

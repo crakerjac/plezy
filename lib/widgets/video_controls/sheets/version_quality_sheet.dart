@@ -3,21 +3,26 @@ import 'package:material_symbols_icons/symbols.dart';
 import 'package:plezy/widgets/app_icon.dart';
 
 import '../../../i18n/strings.g.dart';
-import '../../../models/plex_media_version.dart';
+import '../../../media/media_version.dart';
 import '../../../models/transcode_quality_preset.dart';
 import '../../../utils/quality_preset_labels.dart';
 import '../../../utils/scroll_utils.dart';
 import '../../../widgets/focusable_list_tile.dart';
 import '../../../widgets/overlay_sheet.dart';
-import 'base_video_control_sheet.dart';
+import 'sheet_column_header.dart';
 
-/// Combined sheet for selecting the media [version] (left) and transcode
+String versionQualityPickerTitle({required bool showVersions, required bool showQuality}) {
+  return showQuality
+      ? (showVersions ? t.videoControls.versionQualityButton : t.videoControls.qualityColumnHeader)
+      : t.videoControls.versionColumnHeader;
+}
+
+/// Combined picker for selecting the media [version] (left) and transcode
 /// [quality] preset (right). The version column is hidden when there is only
 /// one version so the quality list gets the full width. If the server doesn't
-/// support video transcoding, only [TranscodeQualityPreset.original] is
-/// enabled in the quality column.
-class VersionQualitySheet extends StatelessWidget {
-  final List<PlexMediaVersion> availableVersions;
+/// support video transcoding, the quality column is hidden entirely.
+class VersionQualityPicker extends StatelessWidget {
+  final List<MediaVersion> availableVersions;
   final int selectedMediaIndex;
   final TranscodeQualityPreset selectedQualityPreset;
   final bool serverSupportsTranscoding;
@@ -25,7 +30,7 @@ class VersionQualitySheet extends StatelessWidget {
   final ValueChanged<int> onVersionSelected;
   final ValueChanged<TranscodeQualityPreset> onQualitySelected;
 
-  const VersionQualitySheet({
+  const VersionQualityPicker({
     super.key,
     required this.availableVersions,
     required this.selectedMediaIndex,
@@ -39,7 +44,7 @@ class VersionQualitySheet extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final showVersions = availableVersions.length > 1;
-    final title = showVersions ? t.videoControls.versionQualityButton : t.videoControls.qualityColumnHeader;
+    final showQuality = serverSupportsTranscoding;
 
     final qualityColumn = FocusTraversalGroup(
       child: _QualityColumn(
@@ -47,6 +52,7 @@ class VersionQualitySheet extends StatelessWidget {
         enabledForTranscoding: serverSupportsTranscoding,
         sourceBitrateKbps: _sourceBitrateKbps(),
         sourceDurationMs: sourceDurationMs,
+        sourceSizeBytes: _sourceSizeBytes(),
         onSelected: (preset) {
           OverlaySheetController.of(context).close();
           onQualitySelected(preset);
@@ -55,33 +61,32 @@ class VersionQualitySheet extends StatelessWidget {
       ),
     );
 
-    final Widget body;
-    if (showVersions) {
-      body = Row(
+    final versionColumn = FocusTraversalGroup(
+      child: _VersionColumn(
+        versions: availableVersions,
+        selectedIndex: selectedMediaIndex,
+        onSelected: (index) {
+          OverlaySheetController.of(context).close();
+          onVersionSelected(index);
+        },
+        showHeader: showQuality,
+      ),
+    );
+
+    if (showVersions && showQuality) {
+      return Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Expanded(
-            child: FocusTraversalGroup(
-              child: _VersionColumn(
-                versions: availableVersions,
-                selectedIndex: selectedMediaIndex,
-                onSelected: (index) {
-                  OverlaySheetController.of(context).close();
-                  onVersionSelected(index);
-                },
-                showHeader: true,
-              ),
-            ),
-          ),
+          Expanded(child: versionColumn),
           VerticalDivider(width: 1, color: Theme.of(context).dividerColor),
           Expanded(child: qualityColumn),
         ],
       );
+    } else if (showVersions) {
+      return versionColumn;
     } else {
-      body = qualityColumn;
+      return qualityColumn;
     }
-
-    return BaseVideoControlSheet(title: title, icon: Symbols.high_quality_rounded, child: body);
   }
 
   int? _sourceBitrateKbps() {
@@ -92,10 +97,25 @@ class VersionQualitySheet extends StatelessWidget {
     if (b == null || b <= 0) return null;
     return b;
   }
+
+  int? _sourceSizeBytes() {
+    if (selectedMediaIndex < 0 || selectedMediaIndex >= availableVersions.length) {
+      return null;
+    }
+    final parts = availableVersions[selectedMediaIndex].parts;
+    if (parts.isEmpty) return null;
+    var total = 0;
+    for (final p in parts) {
+      final s = p.sizeBytes;
+      if (s == null || s <= 0) return null;
+      total += s;
+    }
+    return total > 0 ? total : null;
+  }
 }
 
 class _VersionColumn extends StatefulWidget {
-  final List<PlexMediaVersion> versions;
+  final List<MediaVersion> versions;
   final int selectedIndex;
   final ValueChanged<int> onSelected;
   final bool showHeader;
@@ -112,35 +132,30 @@ class _VersionColumn extends StatefulWidget {
 }
 
 class _VersionColumnState extends State<_VersionColumn> {
-  final _firstItemKey = GlobalKey();
-  final _scrollController = ScrollController();
-  bool _didInitialScroll = false;
+  final _initialScroll = InitialItemScrollController();
 
   @override
   void dispose() {
-    _scrollController.dispose();
+    _initialScroll.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    if (!_didInitialScroll && widget.selectedIndex > 0) {
-      _didInitialScroll = true;
-      scrollToCurrentItem(_scrollController, _firstItemKey, widget.selectedIndex);
-    }
+    _initialScroll.maybeScrollTo(widget.selectedIndex);
 
     return Column(
       children: [
-        if (widget.showHeader) _ColumnHeader(label: t.videoControls.versionColumnHeader),
+        if (widget.showHeader) SheetColumnHeader(label: t.videoControls.versionColumnHeader),
         Expanded(
           child: ListView.builder(
-            controller: _scrollController,
+            controller: _initialScroll.controller,
             itemCount: widget.versions.length,
             itemBuilder: (context, index) {
               final version = widget.versions[index];
               final isSelected = index == widget.selectedIndex;
               return _SelectionTile(
-                key: index == 0 ? _firstItemKey : null,
+                key: index == 0 ? _initialScroll.firstItemKey : null,
                 label: version.displayLabel,
                 isSelected: isSelected,
                 onTap: () => widget.onSelected(index),
@@ -158,6 +173,7 @@ class _QualityColumn extends StatefulWidget {
   final bool enabledForTranscoding;
   final int? sourceBitrateKbps;
   final int? sourceDurationMs;
+  final int? sourceSizeBytes;
   final ValueChanged<TranscodeQualityPreset> onSelected;
   final bool showHeader;
 
@@ -166,6 +182,7 @@ class _QualityColumn extends StatefulWidget {
     required this.enabledForTranscoding,
     required this.sourceBitrateKbps,
     required this.sourceDurationMs,
+    required this.sourceSizeBytes,
     required this.onSelected,
     required this.showHeader,
   });
@@ -175,13 +192,11 @@ class _QualityColumn extends StatefulWidget {
 }
 
 class _QualityColumnState extends State<_QualityColumn> {
-  final _firstItemKey = GlobalKey();
-  final _scrollController = ScrollController();
-  bool _didInitialScroll = false;
+  final _initialScroll = InitialItemScrollController();
 
   @override
   void dispose() {
-    _scrollController.dispose();
+    _initialScroll.dispose();
     super.dispose();
   }
 
@@ -190,17 +205,14 @@ class _QualityColumnState extends State<_QualityColumn> {
     final presets = TranscodeQualityPreset.displayOrder;
     final selectedIndex = presets.indexOf(widget.selected);
 
-    if (!_didInitialScroll && selectedIndex > 0) {
-      _didInitialScroll = true;
-      scrollToCurrentItem(_scrollController, _firstItemKey, selectedIndex);
-    }
+    _initialScroll.maybeScrollTo(selectedIndex);
 
     return Column(
       children: [
-        if (widget.showHeader) _ColumnHeader(label: t.videoControls.qualityColumnHeader),
+        if (widget.showHeader) SheetColumnHeader(label: t.videoControls.qualityColumnHeader),
         Expanded(
           child: ListView.builder(
-            controller: _scrollController,
+            controller: _initialScroll.controller,
             itemCount: presets.length,
             itemBuilder: (context, index) {
               final preset = presets[index];
@@ -212,10 +224,11 @@ class _QualityColumnState extends State<_QualityColumn> {
                 preset: preset,
                 sourceBitrateKbps: widget.sourceBitrateKbps,
                 sourceDurationMs: widget.sourceDurationMs,
+                sourceSizeBytes: widget.sourceSizeBytes,
               );
 
               return _SelectionTile(
-                key: index == 0 ? _firstItemKey : null,
+                key: index == 0 ? _initialScroll.firstItemKey : null,
                 label: qualityPresetLabel(preset),
                 trailingText: trailing,
                 isSelected: isSelected,
@@ -271,28 +284,6 @@ class _SelectionTile extends StatelessWidget {
       trailing: trailing,
       enabled: enabled,
       onTap: onTap,
-    );
-  }
-}
-
-class _ColumnHeader extends StatelessWidget {
-  final String label;
-
-  const _ColumnHeader({required this.label});
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-      child: Align(
-        alignment: Alignment.centerLeft,
-        child: Text(
-          label,
-          style: Theme.of(
-            context,
-          ).textTheme.titleSmall?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
-        ),
-      ),
     );
   }
 }

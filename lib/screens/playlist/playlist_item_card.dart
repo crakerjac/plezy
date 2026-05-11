@@ -1,24 +1,26 @@
 import 'package:flutter/material.dart';
 import 'package:plezy/widgets/app_icon.dart';
 import 'package:material_symbols_icons/symbols.dart';
+import 'package:provider/provider.dart';
+import '../../media/media_item.dart';
+import '../../media/media_kind.dart';
 import '../../mixins/context_menu_tap_mixin.dart';
-import '../../services/plex_client.dart';
-import '../../models/plex_metadata.dart';
+import '../../providers/watch_state_overlay_provider.dart';
 import '../../utils/formatters.dart';
 import '../../utils/provider_extensions.dart';
 import '../../i18n/strings.g.dart';
 import '../../widgets/media_context_menu.dart';
 import '../../widgets/media_progress_bar.dart';
-import '../../widgets/plex_optimized_image.dart';
+import '../../widgets/optimized_media_image.dart';
 
 /// Custom list item widget for playlist items
 /// Shows drag handle, poster, title/metadata, duration, and remove button
 class PlaylistItemCard extends StatefulWidget {
-  final PlexMetadata item;
+  final MediaItem item;
   final int index;
   final VoidCallback onRemove;
   final VoidCallback? onTap;
-  final void Function(String ratingKey)? onRefresh;
+  final void Function(String itemId)? onRefresh;
   final bool canReorder; // Whether drag handle should be shown
 
   // Focus state for keyboard/D-pad navigation
@@ -44,8 +46,20 @@ class PlaylistItemCard extends StatefulWidget {
 }
 
 class _PlaylistItemCardState extends State<PlaylistItemCard> with ContextMenuTapMixin<PlaylistItemCard> {
+  MediaItem _effectiveItem(BuildContext context) {
+    try {
+      final patch = context.select<WatchStateOverlayProvider, WatchStateOverlayPatch?>(
+        (provider) => provider.patchForGlobalKey(widget.item.globalKey),
+      );
+      return WatchStateOverlayProvider.applyPatch(widget.item, patch);
+    } on ProviderNotFoundException {
+      return widget.item;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    final item = _effectiveItem(context);
     final colorScheme = Theme.of(context).colorScheme;
 
     // Determine if row is focused (main content area)
@@ -71,7 +85,7 @@ class _PlaylistItemCardState extends State<PlaylistItemCard> with ContextMenuTap
 
     return MediaContextMenu(
       key: contextMenuKey,
-      item: widget.item,
+      item: item,
       onRefresh: widget.onRefresh,
       onTap: widget.onTap,
       child: Card(
@@ -88,8 +102,6 @@ class _PlaylistItemCardState extends State<PlaylistItemCard> with ContextMenuTap
             padding: const EdgeInsets.all(8.0),
             child: Row(
               children: [
-                // Drag handle (if reorderable)
-                // Wrapped in GestureDetector to consume long-press and prevent context menu
                 if (widget.canReorder)
                   GestureDetector(
                     // ignore: no-empty-block - consumes long-press to prevent context menu on drag
@@ -120,7 +132,7 @@ class _PlaylistItemCardState extends State<PlaylistItemCard> with ContextMenuTap
                   ),
 
                 // Poster thumbnail
-                _buildPosterImage(context),
+                _buildPosterImage(context, item),
 
                 const SizedBox(width: 12),
 
@@ -132,7 +144,7 @@ class _PlaylistItemCardState extends State<PlaylistItemCard> with ContextMenuTap
                     children: [
                       // Title
                       Text(
-                        widget.item.displayTitle,
+                        item.displayTitle,
                         style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w500),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
@@ -142,19 +154,19 @@ class _PlaylistItemCardState extends State<PlaylistItemCard> with ContextMenuTap
 
                       // Subtitle (episode info or type)
                       Text(
-                        _buildSubtitle(),
+                        _buildSubtitle(item),
                         style: TextStyle(fontSize: 13, color: Colors.grey[400]),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
 
                       // Progress indicator if partially watched
-                      if (widget.item.viewOffset != null && widget.item.duration != null)
+                      if (item.viewOffsetMs != null && item.durationMs != null)
                         Padding(
                           padding: const EdgeInsets.only(top: 6),
                           child: MediaProgressBar(
-                            viewOffset: widget.item.viewOffset!,
-                            duration: widget.item.duration!,
+                            viewOffset: item.viewOffsetMs!,
+                            duration: item.durationMs!,
                             minHeight: 3,
                           ),
                         ),
@@ -165,9 +177,9 @@ class _PlaylistItemCardState extends State<PlaylistItemCard> with ContextMenuTap
                 const SizedBox(width: 12),
 
                 // Duration
-                if (widget.item.duration != null)
+                if (item.durationMs != null)
                   Text(
-                    formatDurationTextual(widget.item.duration!),
+                    formatDurationTextual(item.durationMs!),
                     style: TextStyle(fontSize: 13, color: Colors.grey[400]),
                   ),
 
@@ -196,17 +208,14 @@ class _PlaylistItemCardState extends State<PlaylistItemCard> with ContextMenuTap
     );
   }
 
-  /// Get the correct PlexClient for this item's server
-  PlexClient _getClientForItem(BuildContext context) {
-    return context.getClientForServer(widget.item.serverId!);
-  }
-
-  Widget _buildPosterImage(BuildContext context) {
-    final posterUrl = widget.item.posterThumb();
+  Widget _buildPosterImage(BuildContext context, MediaItem item) {
+    final posterUrl = item.posterThumb();
     return ClipRRect(
       borderRadius: const BorderRadius.all(Radius.circular(6)),
-      child: PlexOptimizedImage.poster(
-        client: _getClientForItem(context),
+      child: OptimizedMediaImage.poster(
+        // Backend-neutral lookup so Jellyfin items render via their own
+        // image transcoder; null falls through to the placeholder below.
+        client: context.tryGetMediaClientWithFallback(item.serverId),
         imagePath: posterUrl,
         width: 60,
         height: 90,
@@ -226,27 +235,28 @@ class _PlaylistItemCardState extends State<PlaylistItemCard> with ContextMenuTap
     );
   }
 
-  String _buildSubtitle() {
-    final itemType = widget.item.mediaType;
+  String _buildSubtitle(MediaItem item) {
+    final kind = item.kind;
 
-    if (itemType == PlexMediaType.episode) {
+    if (kind == MediaKind.episode) {
       // For episodes, show "S#E# - Episode Title"
-      final season = widget.item.parentIndex;
-      final episode = widget.item.index;
+      final season = item.parentIndex;
+      final episode = item.index;
       if (season != null && episode != null) {
-        return 'S${season}E$episode${widget.item.displaySubtitle != null ? ' - ${widget.item.displaySubtitle}' : ''}';
+        return 'S${season}E$episode${item.displaySubtitle != null ? ' - ${item.displaySubtitle}' : ''}';
       }
-      return widget.item.displaySubtitle ?? t.discover.tvShow;
-    } else if (itemType == PlexMediaType.movie) {
-      // For movies, show year and edition
-      final year = widget.item.year?.toString();
-      if (year != null && widget.item.editionTitle != null) {
-        return '$year · ${widget.item.editionTitle}';
+      return item.displaySubtitle ?? t.discover.tvShow;
+    } else if (kind == MediaKind.movie) {
+      // For movies, show year and edition (edition is Plex-only; null elsewhere)
+      final year = item.year?.toString();
+      final edition = item.editionTitle;
+      if (year != null && edition != null) {
+        return '$year · $edition';
       }
       return year ?? t.discover.movie;
     }
 
     // Default to type
-    return widget.item.mediaType.name;
+    return kind.name;
   }
 }

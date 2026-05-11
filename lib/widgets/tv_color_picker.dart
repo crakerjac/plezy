@@ -3,8 +3,10 @@ import 'package:flutter/services.dart';
 
 import '../focus/dpad_navigator.dart';
 import '../focus/focus_theme.dart';
+import '../focus/focusable_text_field.dart';
 import '../focus/input_mode_tracker.dart';
 import '../focus/key_repeat_helper.dart';
+import '../mixins/controller_disposer_mixin.dart';
 import '../theme/mono_tokens.dart';
 import 'package:material_symbols_icons/symbols.dart';
 import 'app_icon.dart';
@@ -27,7 +29,7 @@ class TvColorPicker extends StatefulWidget {
   State<TvColorPicker> createState() => _TvColorPickerState();
 }
 
-class _TvColorPickerState extends State<TvColorPicker> {
+class _TvColorPickerState extends State<TvColorPicker> with ControllerDisposerMixin {
   late int _hue;
   late int _saturation;
   late int _value;
@@ -41,13 +43,12 @@ class _TvColorPickerState extends State<TvColorPicker> {
     _hue = hsv.hue.round();
     _saturation = (hsv.saturation * 100).round();
     _value = (hsv.value * 100).round();
-    _hexController = TextEditingController(text: _currentHex());
+    _hexController = createTextEditingController(text: _currentHex());
     _hexFocusNode = FocusNode(debugLabel: 'TvColorPicker_hex', onKeyEvent: _handleHexKeyEvent);
   }
 
   @override
   void dispose() {
-    _hexController.dispose();
     _hexFocusNode.dispose();
     super.dispose();
   }
@@ -111,7 +112,6 @@ class _TvColorPickerState extends State<TvColorPicker> {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        // Color preview
         Container(
           height: 64,
           width: double.infinity,
@@ -122,7 +122,6 @@ class _TvColorPickerState extends State<TvColorPicker> {
           ),
         ),
         const SizedBox(height: 16),
-        // Hue row
         _ColorChannelRow(
           label: 'H',
           value: _hue,
@@ -138,7 +137,6 @@ class _TvColorPickerState extends State<TvColorPicker> {
           },
         ),
         const SizedBox(height: 8),
-        // Saturation row
         _ColorChannelRow(
           label: 'S',
           value: _saturation,
@@ -153,7 +151,6 @@ class _TvColorPickerState extends State<TvColorPicker> {
           },
         ),
         const SizedBox(height: 8),
-        // Value row
         _ColorChannelRow(
           label: 'V',
           value: _value,
@@ -168,8 +165,7 @@ class _TvColorPickerState extends State<TvColorPicker> {
           },
         ),
         const SizedBox(height: 16),
-        // Hex input
-        TextField(
+        FocusableTextField(
           controller: _hexController,
           focusNode: _hexFocusNode,
           decoration: const InputDecoration(prefixText: '#', labelText: 'Hex', border: OutlineInputBorder()),
@@ -313,27 +309,23 @@ class _ColorChannelRowState extends State<_ColorChannelRow> with KeyRepeatHelper
         ),
         child: Row(
           children: [
-            // Label
             SizedBox(
               width: 24,
               child: Text(widget.label, style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
             ),
             const SizedBox(width: 8),
-            // Decrement button
             _ChannelButton(
               icon: Symbols.remove_rounded,
               onPressed: canDecrement ? _decrement : null,
               semanticLabel: 'Decrease ${widget.label}',
             ),
             const SizedBox(width: 8),
-            // Value display
             Container(
               constraints: const BoxConstraints(minWidth: 56),
               alignment: Alignment.center,
               child: Text('${widget.value}${widget.suffix}', style: theme.textTheme.titleMedium),
             ),
             const SizedBox(width: 8),
-            // Increment button
             _ChannelButton(
               icon: Symbols.add_rounded,
               onPressed: canIncrement ? _increment : null,
@@ -346,7 +338,6 @@ class _ColorChannelRowState extends State<_ColorChannelRow> with KeyRepeatHelper
   }
 }
 
-/// Small +/- button for a channel row.
 class _ChannelButton extends StatelessWidget {
   final IconData icon;
   final VoidCallback? onPressed;

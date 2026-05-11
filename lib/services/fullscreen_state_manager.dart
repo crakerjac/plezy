@@ -5,7 +5,6 @@ import '../utils/platform_detector.dart';
 import 'macos_window_service.dart';
 import 'native_window_service.dart';
 
-/// Global manager for tracking fullscreen state across the app
 class FullscreenStateManager extends ChangeNotifier with WindowListener {
   static final FullscreenStateManager _instance = FullscreenStateManager._internal();
 
@@ -30,7 +29,7 @@ class FullscreenStateManager extends ChangeNotifier with WindowListener {
   /// Toggle fullscreen state, handling maximized-to-fullscreen transition on Windows/Linux
   Future<void> toggleFullscreen() async {
     if (Platform.isMacOS) {
-      final isCurrentlyFullscreen = await windowManager.isFullScreen();
+      final isCurrentlyFullscreen = await MacOSWindowService.isFullscreen();
       if (isCurrentlyFullscreen) {
         await MacOSWindowService.exitFullscreen();
       } else {
@@ -91,7 +90,6 @@ class FullscreenStateManager extends ChangeNotifier with WindowListener {
     }
   }
 
-  /// Start monitoring fullscreen state
   void startMonitoring() {
     if (!_shouldMonitor() || _isListening) return;
 
@@ -103,7 +101,6 @@ class FullscreenStateManager extends ChangeNotifier with WindowListener {
     }
   }
 
-  /// Stop monitoring fullscreen state
   void stopMonitoring() {
     if (_isListening) {
       windowManager.removeListener(this);
@@ -115,7 +112,6 @@ class FullscreenStateManager extends ChangeNotifier with WindowListener {
     return PlatformDetector.isDesktopOS();
   }
 
-  // WindowListener callbacks for Windows/Linux
   @override
   void onWindowEnterFullScreen() {
     setFullscreen(true);

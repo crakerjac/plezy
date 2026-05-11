@@ -3,10 +3,21 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../connection/connection_registry.dart';
+import '../../focus/focusable_button.dart';
+import '../../focus/focusable_text_field.dart';
+import '../../focus/focusable_wrapper.dart';
 import '../../i18n/strings.g.dart';
+import '../../mixins/controller_disposer_mixin.dart';
+import '../../mixins/mounted_set_state_mixin.dart';
+import '../../models/plex/plex_home.dart';
+import '../../profiles/active_plex_identity.dart';
+import '../../profiles/active_profile_provider.dart';
+import '../../profiles/plex_home_service.dart';
+import '../../profiles/profile_connection_registry.dart';
 import '../../providers/companion_remote_provider.dart';
-import '../../providers/user_profile_provider.dart';
 import '../../utils/app_logger.dart';
+import '../loading_indicator_box.dart';
 
 /// Discovers LAN hosts and provides UI to connect to them.
 class DiscoveryView extends StatefulWidget {
@@ -16,8 +27,11 @@ class DiscoveryView extends StatefulWidget {
   State<DiscoveryView> createState() => _DiscoveryViewState();
 }
 
-class _DiscoveryViewState extends State<DiscoveryView> {
-  final _hostAddressController = TextEditingController();
+class _DiscoveryViewState extends State<DiscoveryView> with ControllerDisposerMixin, MountedSetStateMixin {
+  late final _hostAddressController = createTextEditingController();
+  final _manualToggleFocusNode = FocusNode(debugLabel: 'CompanionManualToggle');
+  final _hostAddressFocusNode = FocusNode(debugLabel: 'CompanionHostAddress');
+  final _connectFocusNode = FocusNode(debugLabel: 'CompanionConnect');
   final _formKey = GlobalKey<FormState>();
   bool _isConnecting = false;
   String? _errorMessage;
@@ -38,8 +52,26 @@ class _DiscoveryViewState extends State<DiscoveryView> {
   }
 
   Future<void> _initCryptoAndDiscover() async {
-    final home = context.read<UserProfileProvider>().home;
-    await _provider.ensureCryptoReady(home);
+    final connections = context.read<ConnectionRegistry>();
+    final activeProfile = context.read<ActiveProfileProvider>();
+    final profileConnections = context.read<ProfileConnectionRegistry>();
+    final plexHome = context.read<PlexHomeService>();
+    final identity = await resolveActivePlexIdentity(
+      activeProfile: activeProfile,
+      connections: connections,
+      profileConnections: profileConnections,
+    );
+    if (!mounted) return;
+    final home = await _resolveHome(identity?.account.id);
+    if (!mounted) return;
+    await _provider.ensureCryptoReady(
+      home,
+      connections: connections,
+      activeProfile: activeProfile,
+      profileConnections: profileConnections,
+      identity: identity,
+      plexHomeForConnection: plexHome.materializePlexHomeForConnection,
+    );
     if (!mounted) return;
 
     if (_provider.isCryptoReady) {
@@ -52,6 +84,11 @@ class _DiscoveryViewState extends State<DiscoveryView> {
         _errorMessage = t.companionRemote.pairing.cryptoInitFailed;
       });
     }
+  }
+
+  Future<PlexHome?> _resolveHome(String? connectionId) {
+    if (connectionId == null) return Future<PlexHome?>.value();
+    return context.read<PlexHomeService>().materializePlexHomeForConnection(connectionId);
   }
 
   void _startDiscovery() {
@@ -76,10 +113,12 @@ class _DiscoveryViewState extends State<DiscoveryView> {
 
   @override
   void dispose() {
-    _hostAddressController.dispose();
     _discoverySubscription?.cancel();
     _searchTimeout?.cancel();
     _provider.stopDiscovery();
+    _manualToggleFocusNode.dispose();
+    _hostAddressFocusNode.dispose();
+    _connectFocusNode.dispose();
     super.dispose();
   }
 
@@ -97,7 +136,7 @@ class _DiscoveryViewState extends State<DiscoveryView> {
       if (!mounted) return;
       setState(() => _errorMessage = _parseErrorMessage(e.toString()));
     } finally {
-      if (mounted) setState(() => _isConnecting = false);
+      setStateIfMounted(() => _isConnecting = false);
     }
   }
 
@@ -240,9 +279,7 @@ class _DiscoveryViewState extends State<DiscoveryView> {
               leading: Icon(_platformIcon(host.platform), size: 32),
               title: Text(host.name),
               subtitle: Text(host.platform),
-              trailing: _isConnecting
-                  ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2))
-                  : const Icon(Icons.arrow_forward),
+              trailing: _isConnecting ? const LoadingIndicatorBox(size: 24) : const Icon(Icons.arrow_forward),
               onTap: _isConnecting ? null : () => _connect(() => _provider.connectToDiscoveredHost(host)),
             ),
           ),
@@ -255,20 +292,35 @@ class _DiscoveryViewState extends State<DiscoveryView> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        InkWell(
-          onTap: () => setState(() => _showManualEntry = !_showManualEntry),
-          child: Row(
-            children: [
-              Icon(
-                _showManualEntry ? Icons.expand_less : Icons.expand_more,
-                color: Theme.of(context).colorScheme.primary,
+        FocusableWrapper(
+          focusNode: _manualToggleFocusNode,
+          useBackgroundFocus: true,
+          disableScale: true,
+          borderRadius: 8,
+          onSelect: () => setState(() => _showManualEntry = !_showManualEntry),
+          onNavigateDown: _showManualEntry ? _hostAddressFocusNode.requestFocus : null,
+          child: InkWell(
+            canRequestFocus: false,
+            borderRadius: const BorderRadius.all(Radius.circular(8)),
+            onTap: () => setState(() => _showManualEntry = !_showManualEntry),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              child: Row(
+                children: [
+                  Icon(
+                    _showManualEntry ? Icons.expand_less : Icons.expand_more,
+                    color: Theme.of(context).colorScheme.primary,
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    t.companionRemote.pairing.manualConnection,
+                    style: Theme.of(
+                      context,
+                    ).textTheme.titleMedium?.copyWith(color: Theme.of(context).colorScheme.primary),
+                  ),
+                ],
               ),
-              const SizedBox(width: 8),
-              Text(
-                t.companionRemote.pairing.manualConnection,
-                style: Theme.of(context).textTheme.titleMedium?.copyWith(color: Theme.of(context).colorScheme.primary),
-              ),
-            ],
+            ),
           ),
         ),
         if (_showManualEntry) ...[
@@ -278,8 +330,9 @@ class _DiscoveryViewState extends State<DiscoveryView> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                TextFormField(
+                FocusableTextFormField(
                   controller: _hostAddressController,
+                  focusNode: _hostAddressFocusNode,
                   decoration: InputDecoration(
                     labelText: t.companionRemote.session.hostAddress,
                     hintText: t.companionRemote.pairing.hostAddressHint,
@@ -296,19 +349,29 @@ class _DiscoveryViewState extends State<DiscoveryView> {
                     return null;
                   },
                   enabled: !_isConnecting,
+                  onNavigateUp: _manualToggleFocusNode.requestFocus,
+                  onNavigateDown: _connectFocusNode.requestFocus,
                 ),
                 const SizedBox(height: 16),
-                FilledButton.icon(
+                FocusableButton(
+                  focusNode: _connectFocusNode,
+                  onNavigateUp: _hostAddressFocusNode.requestFocus,
                   onPressed: _isConnecting
                       ? null
                       : () {
                           if (!_formKey.currentState!.validate()) return;
                           _connect(() => _provider.connectToManualHost(_hostAddressController.text.trim()));
                         },
-                  icon: _isConnecting
-                      ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
-                      : const Icon(Icons.link),
-                  label: Text(_isConnecting ? t.companionRemote.pairing.connecting : t.common.connect),
+                  child: FilledButton.icon(
+                    onPressed: _isConnecting
+                        ? null
+                        : () {
+                            if (!_formKey.currentState!.validate()) return;
+                            _connect(() => _provider.connectToManualHost(_hostAddressController.text.trim()));
+                          },
+                    icon: _isConnecting ? const LoadingIndicatorBox(size: 16) : const Icon(Icons.link),
+                    label: Text(_isConnecting ? t.companionRemote.pairing.connecting : t.common.connect),
+                  ),
                 ),
               ],
             ),

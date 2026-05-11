@@ -27,7 +27,7 @@ class AmbientLightingService {
   AmbientLightingService(this._player);
 
   bool get isEnabled => _enabled;
-  bool get isSupported => _player.playerType == 'mpv';
+  bool get isSupported => _player.playerType == 'mpv' && !Platform.isIOS;
 
   /// Enable ambient lighting effect.
   ///
@@ -37,7 +37,6 @@ class AmbientLightingService {
     if (!isSupported) return;
 
     try {
-      // Write static shader (only needs to happen once)
       _shaderPath ??= await _writeShaderToTemp(_generateShader());
 
       appLogger.d('AmbientLightingService: Shader path: $_shaderPath');
