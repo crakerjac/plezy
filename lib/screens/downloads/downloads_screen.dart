@@ -245,17 +245,17 @@ class DownloadsScreenState extends State<DownloadsScreen>
                 onNavigateLeft: () => getTabChipFocusNode(tabCount - 1).requestFocus(),
                 onNavigateDown: _focusCurrentTab,
                 actions: [
-                  // PlexSyncer: scan button
-                  FocusableAction(
-                    icon: Icons.drive_file_move_rtl_outlined,
-                    tooltip: 'Scan PlexSyncer folder',
-                    onPressed: _importFromManifest,
-                  ),
                   FocusableAction(
                     icon: Symbols.rule_settings,
                     tooltip: t.downloads.activeSyncRules,
                     onPressed: () =>
                         Navigator.push(context, MaterialPageRoute(builder: (_) => const SyncRulesScreen())),
+                  ),
+                  // PlexSyncer: scan button
+                  FocusableAction(
+                    icon: Icons.drive_file_move_rtl_outlined,
+                    tooltip: 'Scan PlexSyncer folder',
+                    onPressed: _importFromManifest,
                   ),
                 ],
               ),
