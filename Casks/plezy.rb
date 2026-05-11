@@ -1,10 +1,10 @@
 cask "plezy" do
-  version "1.35.0"
-  sha256 "60c7d6d47b9644f6a9b1c1c19d2e392c84e7840cd8f3b59ab9c5a6882f94e7aa"
+  version "2.0.0"
+  sha256 "ce472dc50220a54f5d1a1bfc49d572d92e1e15443b1a079a5b3c1212f16b5967"
 
   url "https://github.com/edde746/plezy/releases/download/#{version}/plezy-macos.dmg"
   name "Plezy"
-  desc "Modern Plex client built with Flutter"
+  desc "Modern Plex and Jellyfin client built with Flutter"
   homepage "https://github.com/edde746/plezy"
 
   livecheck do

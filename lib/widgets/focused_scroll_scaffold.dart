@@ -65,16 +65,16 @@ class _FocusedScrollScaffoldState extends State<FocusedScrollScaffold> {
   void _requestInitialFocus() {
     if (_focusRequested || !mounted || !InputModeTracker.isKeyboardMode(context)) return;
     _focusRequested = true;
-    _scopeNode.requestFocus();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      primaryFocus?.nextFocus();
+      if (_scopeNode.focusedChild != null) return;
+      _scopeNode.requestFocus();
+      _scopeNode.nextFocus();
     });
   }
 
   @override
   Widget build(BuildContext context) {
-    // Request focus after first build when in keyboard mode
     if (!_focusRequested && InputModeTracker.isKeyboardMode(context)) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _requestInitialFocus());
     }

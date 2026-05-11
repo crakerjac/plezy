@@ -30,15 +30,14 @@ jobs:
         with:
           channel: "stable"
           cache: true
+          pub-cache: false
 
       - name: Cache Pub dependencies
         uses: actions/cache@v4
         with:
           path: |
             ~/.pub-cache
-          key: ${{ runner.os }}-pub-${{ hashFiles('**/pubspec.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-pub-
+          key: ${{ runner.os }}-${{ runner.arch }}-pub-v2-${{ hashFiles('pubspec.yaml', 'pubspec.lock') }}
 
       - name: Cache Gradle
         uses: actions/cache@v4
@@ -51,7 +50,7 @@ jobs:
             ${{ runner.os }}-gradle-
 
       - name: Install dependencies
-        run: flutter pub get
+        run: flutter pub get --enforce-lockfile --no-example
 
       - name: Configure Android signing
         run: |
@@ -139,15 +138,14 @@ jobs:
         with:
           channel: "stable"
           cache: true
+          pub-cache: false
 
       - name: Cache Pub dependencies
         uses: actions/cache@v4
         with:
           path: |
             ~/.pub-cache
-          key: ${{ runner.os }}-pub-${{ hashFiles('**/pubspec.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-pub-
+          key: ${{ runner.os }}-${{ runner.arch }}-pub-v2-${{ hashFiles('pubspec.yaml', 'pubspec.lock') }}
 
       - name: Cache CocoaPods
         uses: actions/cache@v4
@@ -161,7 +159,7 @@ jobs:
             ${{ runner.os }}-pods-
 
       - name: Install dependencies
-        run: flutter pub get
+        run: flutter pub get --enforce-lockfile --no-example
 
       - name: Build iOS (no codesign)
         run: flutter build ios --release --no-codesign --dart-define=ENABLE_UPDATE_CHECK=true ${{ env.SENTRY_DART_DEFINE }} ${{ env.GIT_COMMIT_DART_DEFINE }} ${{ env.SENTRY_ENV_DART_DEFINE }} ${{ env.DONATIONS_DART_DEFINE }} --split-debug-info=debug-info/ios
@@ -229,15 +227,14 @@ jobs:
         with:
           channel: "stable"
           cache: true
+          pub-cache: false
 
       - name: Cache Pub dependencies
         uses: actions/cache@v4
         with:
           path: |
             ~/.pub-cache
-          key: ${{ runner.os }}-pub-${{ hashFiles('**/pubspec.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-pub-
+          key: ${{ runner.os }}-${{ runner.arch }}-pub-v2-${{ hashFiles('pubspec.yaml', 'pubspec.lock') }}
 
       - name: Cache CocoaPods
         uses: actions/cache@v4
@@ -251,7 +248,7 @@ jobs:
             ${{ runner.os }}-macos-pods-
 
       - name: Install dependencies
-        run: flutter pub get
+        run: flutter pub get --enforce-lockfile --no-example
 
       - name: Build macOS
         run: flutter build macos --release --dart-define=ENABLE_UPDATE_CHECK=true ${{ env.SENTRY_DART_DEFINE }} ${{ env.GIT_COMMIT_DART_DEFINE }} ${{ env.SENTRY_ENV_DART_DEFINE }} ${{ env.DONATIONS_DART_DEFINE }} --split-debug-info=debug-info/macos
@@ -423,18 +420,23 @@ jobs:
         with:
           channel: "stable"
           cache: true
+          pub-cache: false
 
       - name: Cache Pub dependencies
         uses: actions/cache@v4
         with:
           path: |
             ~\AppData\Local\Pub\Cache
-          key: ${{ runner.os }}-pub-${{ hashFiles('**/pubspec.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-pub-
+          key: ${{ runner.os }}-${{ runner.arch }}-pub-v2-${{ hashFiles('pubspec.yaml', 'pubspec.lock') }}
+
+      - name: Cache Windows native dependencies
+        uses: actions/cache@v4
+        with:
+          path: build/windows/x64/_deps
+          key: windows-native-x64-${{ hashFiles('windows/CMakeLists.txt') }}
 
       - name: Install dependencies
-        run: flutter pub get
+        run: flutter pub get --enforce-lockfile --no-example
 
       - name: Build Windows x64
         run: flutter build windows --release --dart-define=ENABLE_UPDATE_CHECK=true ${{ env.SENTRY_DART_DEFINE }} ${{ env.GIT_COMMIT_DART_DEFINE }} ${{ env.SENTRY_ENV_DART_DEFINE }} ${{ env.DONATIONS_DART_DEFINE }} --split-debug-info=debug-info/windows-x64
@@ -492,7 +494,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Cache Windows native dependencies
+        id: windows-native-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            build/windows/arm64/_deps
+            build/windows/arm64/mpv-dev-arm64
+          key: windows-native-arm64-${{ hashFiles('windows/CMakeLists.txt') }}
+
       - name: Install 7-Zip
+        if: steps.windows-native-cache.outputs.cache-hit != 'true'
         run: choco install 7zip -y
 
       - name: Setup Flutter
@@ -500,18 +512,17 @@ jobs:
         with:
           channel: "master"
           cache: true
+          pub-cache: false
 
       - name: Cache Pub dependencies
         uses: actions/cache@v4
         with:
           path: |
             ~\AppData\Local\Pub\Cache
-          key: ${{ runner.os }}-arm64-pub-${{ hashFiles('**/pubspec.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-arm64-pub-
+          key: ${{ runner.os }}-${{ runner.arch }}-pub-v2-${{ hashFiles('pubspec.yaml', 'pubspec.lock') }}
 
       - name: Install dependencies
-        run: flutter pub get
+        run: flutter pub get --no-example
 
       - name: Build Windows arm64
         run: flutter build windows --release --dart-define=ENABLE_UPDATE_CHECK=true ${{ env.SENTRY_DART_DEFINE }} ${{ env.GIT_COMMIT_DART_DEFINE }} ${{ env.SENTRY_ENV_DART_DEFINE }} ${{ env.DONATIONS_DART_DEFINE }} --split-debug-info=debug-info/windows-arm64
@@ -659,15 +670,14 @@ jobs:
         with:
           channel: "stable"
           cache: true
+          pub-cache: false
 
       - name: Cache Pub dependencies
         uses: actions/cache@v4
         with:
           path: |
             ~/.pub-cache
-          key: ${{ runner.os }}-pub-${{ hashFiles('**/pubspec.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-pub-
+          key: ${{ runner.os }}-${{ runner.arch }}-pub-v2-${{ hashFiles('pubspec.yaml', 'pubspec.lock') }}
 
       - name: Cache APT packages
         uses: awalsh128/cache-apt-pkgs-action@latest
@@ -695,7 +705,7 @@ jobs:
         run: sudo gem install fpm
 
       - name: Install dependencies
-        run: flutter pub get
+        run: flutter pub get --enforce-lockfile --no-example
 
       - name: Build Linux x64
         run: flutter build linux --release --dart-define=ENABLE_UPDATE_CHECK=true ${{ env.SENTRY_DART_DEFINE }} ${{ env.GIT_COMMIT_DART_DEFINE }} ${{ env.SENTRY_ENV_DART_DEFINE }} ${{ env.DONATIONS_DART_DEFINE }} --split-debug-info=debug-info/linux-x64
@@ -799,15 +809,14 @@ jobs:
         with:
           channel: "master"
           cache: true
+          pub-cache: false
 
       - name: Cache Pub dependencies
         uses: actions/cache@v4
         with:
           path: |
             ~/.pub-cache
-          key: ${{ runner.os }}-arm64-pub-${{ hashFiles('**/pubspec.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-arm64-pub-
+          key: ${{ runner.os }}-${{ runner.arch }}-pub-v2-${{ hashFiles('pubspec.yaml', 'pubspec.lock') }}
 
       - name: Cache APT packages
         uses: awalsh128/cache-apt-pkgs-action@latest
@@ -835,7 +844,7 @@ jobs:
         run: sudo gem install fpm
 
       - name: Install dependencies
-        run: flutter pub get
+        run: flutter pub get --no-example
 
       - name: Build Linux arm64
         run: flutter build linux --release --dart-define=ENABLE_UPDATE_CHECK=true ${{ env.SENTRY_DART_DEFINE }} ${{ env.GIT_COMMIT_DART_DEFINE }} ${{ env.SENTRY_ENV_DART_DEFINE }} ${{ env.DONATIONS_DART_DEFINE }} --split-debug-info=debug-info/linux-arm64

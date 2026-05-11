@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:ui' as ui;
 
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
@@ -153,7 +154,6 @@ class GamepadService with WindowListener {
   GamepadService._({GamepadDuplicateInputGuard? duplicateInputGuard})
     : _duplicateInputGuard = duplicateInputGuard ?? GamepadDuplicateInputGuard(enabled: () => Platform.isWindows);
 
-  /// Get the singleton instance.
   static GamepadService get instance {
     _instance ??= GamepadService._();
     return _instance!;
@@ -166,7 +166,6 @@ class GamepadService with WindowListener {
   void start() async {
     appLogger.i('GamepadService: Starting on ${Platform.operatingSystem}');
 
-    // List connected gamepads
     try {
       final gamepads = await Gamepad.instance.listGamepads();
       appLogger.i('GamepadService: Found ${gamepads.length} gamepad(s)');
@@ -193,7 +192,6 @@ class GamepadService with WindowListener {
     appLogger.i('GamepadService: Listening for gamepad events');
   }
 
-  /// Stop listening to gamepad events.
   void stop() {
     _stopDirectionRepeat();
     _unregisterNativeKeyHandler();
@@ -325,8 +323,8 @@ class GamepadService with WindowListener {
       _pressedButtons.remove(event.button);
       if (_suppressedButtons.remove(event.button)) return;
 
+      // D-pad release — stop repeat
       switch (event.button) {
-        // D-pad release — stop repeat
         case GamepadButton.dpadUp:
         case GamepadButton.dpadDown:
         case GamepadButton.dpadLeft:
@@ -433,6 +431,7 @@ class GamepadService with WindowListener {
         physicalKey: _getPhysicalKey(logicalKey),
         logicalKey: logicalKey,
         timeStamp: Duration(milliseconds: DateTime.now().millisecondsSinceEpoch),
+        deviceType: ui.KeyEventDeviceType.gamepad,
       ),
     );
   }
@@ -443,6 +442,7 @@ class GamepadService with WindowListener {
         physicalKey: _getPhysicalKey(logicalKey),
         logicalKey: logicalKey,
         timeStamp: Duration(milliseconds: DateTime.now().millisecondsSinceEpoch),
+        deviceType: ui.KeyEventDeviceType.gamepad,
       ),
     );
   }

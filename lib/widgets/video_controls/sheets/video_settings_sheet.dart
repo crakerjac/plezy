@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
@@ -11,6 +12,8 @@ import 'package:path/path.dart' as path;
 import 'package:provider/provider.dart';
 
 import '../../../models/shader_preset.dart';
+import '../../../models/transcode_quality_preset.dart';
+import '../../../media/media_version.dart';
 import '../../../mpv/mpv.dart';
 import '../../../providers/shader_provider.dart';
 import '../../../services/file_picker_service.dart';
@@ -21,6 +24,7 @@ import '../../../focus/focusable_wrapper.dart';
 import '../../../utils/dialogs.dart';
 import '../../../utils/formatters.dart';
 import '../../../utils/platform_detector.dart';
+import '../../../utils/quality_preset_labels.dart';
 import '../../../utils/snackbar_helper.dart';
 import '../../../theme/mono_tokens.dart';
 import '../../../widgets/focusable_list_tile.dart';
@@ -29,10 +33,10 @@ import '../widgets/sync_offset_control.dart';
 import '../widgets/sleep_timer_content.dart';
 import '../../../i18n/strings.g.dart';
 import 'base_video_control_sheet.dart';
+import 'version_quality_sheet.dart';
 
-enum _SettingsView { menu, speed, sleep, audioSync, subtitleSync, audioDevice, shader }
+enum _SettingsView { menu, speed, versionQuality, sleep, audioSync, subtitleSync, audioDevice, shader, dvConversion }
 
-/// Reusable menu item widget for settings sheet
 class _SettingsMenuItem extends StatelessWidget {
   final IconData icon;
   final String title;
@@ -75,6 +79,37 @@ class _SettingsMenuItem extends StatelessWidget {
   }
 }
 
+class _SettingsToggleItem extends StatelessWidget {
+  final Pref<bool> pref;
+  final IconData icon;
+  final String title;
+  final FutureOr<void> Function(bool value)? onAfterWrite;
+
+  const _SettingsToggleItem({required this.pref, required this.icon, required this.title, this.onAfterWrite});
+
+  @override
+  Widget build(BuildContext context) {
+    final settings = SettingsService.instanceOrNull!;
+    return ValueListenableBuilder<bool>(
+      valueListenable: settings.listenable(pref),
+      builder: (context, value, _) {
+        Future<void> write(bool next) async {
+          await settings.write(pref, next);
+          final callback = onAfterWrite;
+          if (callback != null) await callback(next);
+        }
+
+        return FocusableListTile(
+          leading: AppIcon(icon, fill: 1, color: value ? Colors.amber : tokens(context).textMuted),
+          title: Text(title),
+          trailing: Switch(value: value, onChanged: write, activeThumbColor: Colors.amber),
+          onTap: () => write(!value),
+        );
+      },
+    );
+  }
+}
+
 /// Unified settings sheet for playback adjustments with in-sheet navigation
 class VideoSettingsSheet extends StatefulWidget {
   final Player player;
@@ -86,6 +121,15 @@ class VideoSettingsSheet extends StatefulWidget {
 
   /// Whether this is a live TV stream (hides speed settings).
   final bool isLive;
+
+  /// Available media versions and quality controls shown inside playback settings.
+  final List<MediaVersion> availableVersions;
+  final int selectedMediaIndex;
+  final TranscodeQualityPreset selectedQualityPreset;
+  final bool serverSupportsTranscoding;
+  final int? sourceDurationMs;
+  final ValueChanged<int>? onVersionSelected;
+  final ValueChanged<TranscodeQualityPreset>? onQualitySelected;
 
   /// Optional shader service for MPV shader control
   final ShaderService? shaderService;
@@ -115,6 +159,13 @@ class VideoSettingsSheet extends StatefulWidget {
     required this.subtitleSyncOffset,
     this.canControl = true,
     this.isLive = false,
+    this.availableVersions = const [],
+    this.selectedMediaIndex = 0,
+    this.selectedQualityPreset = TranscodeQualityPreset.original,
+    this.serverSupportsTranscoding = false,
+    this.sourceDurationMs,
+    this.onVersionSelected,
+    this.onQualitySelected,
     this.shaderService,
     this.onShaderChanged,
     this.isAmbientLightingEnabled = false,
@@ -132,84 +183,32 @@ class _VideoSettingsSheetState extends State<VideoSettingsSheet> {
   _SettingsView _currentView = _SettingsView.menu;
   late int _audioSyncOffset;
   late int _subtitleSyncOffset;
-  bool _enableHDR = true;
-  bool _showPerformanceOverlay = false;
-  bool _autoPlayNextEpisode = true;
-  bool _audioPassthrough = false;
-  bool _audioNormalization = false;
+  String _dvConversionMode = 'auto';
 
   @override
   void initState() {
     super.initState();
     _audioSyncOffset = widget.audioSyncOffset;
     _subtitleSyncOffset = widget.subtitleSyncOffset;
-    _loadSettings();
+    _loadDebugDvConversionMode();
   }
 
-  Future<void> _loadSettings() async {
-    final settings = await SettingsService.getInstance();
+  Future<void> _loadDebugDvConversionMode() async {
+    if (!kDebugMode || !Platform.isAndroid || widget.player.playerType != 'exoplayer') return;
+    final dvConversionMode = await widget.player.getProperty('dv-conversion-mode');
     if (!mounted) return;
     setState(() {
-      _enableHDR = settings.read(SettingsService.enableHDR);
-      _showPerformanceOverlay = settings.read(SettingsService.showPerformanceOverlay);
-      _autoPlayNextEpisode = settings.read(SettingsService.autoPlayNextEpisode);
-      _audioPassthrough = settings.read(SettingsService.audioPassthrough);
-      _audioNormalization = settings.read(SettingsService.audioNormalization);
+      _dvConversionMode = _normalizeDvConversionMode(dvConversionMode);
     });
   }
 
-  Future<void> _toggleHDR() async {
-    final newValue = !_enableHDR;
-    final settings = await SettingsService.getInstance();
-    await settings.write(SettingsService.enableHDR, newValue);
+  Future<void> _setDebugDvConversionMode(String mode) async {
+    await widget.player.setProperty('dv-conversion-mode', mode);
     if (!mounted) return;
     setState(() {
-      _enableHDR = newValue;
+      _dvConversionMode = mode;
     });
-    // Apply to player immediately
-    await widget.player.setProperty('hdr-enabled', newValue ? 'yes' : 'no');
-  }
-
-  Future<void> _togglePerformanceOverlay() async {
-    final newValue = !_showPerformanceOverlay;
-    final settings = await SettingsService.getInstance();
-    await settings.write(SettingsService.showPerformanceOverlay, newValue);
-    if (!mounted) return;
-    setState(() {
-      _showPerformanceOverlay = newValue;
-    });
-  }
-
-  Future<void> _toggleAutoPlayNextEpisode() async {
-    final newValue = !_autoPlayNextEpisode;
-    final settings = await SettingsService.getInstance();
-    await settings.write(SettingsService.autoPlayNextEpisode, newValue);
-    if (!mounted) return;
-    setState(() {
-      _autoPlayNextEpisode = newValue;
-    });
-  }
-
-  Future<void> _toggleAudioPassthrough() async {
-    final newValue = !_audioPassthrough;
-    final settings = await SettingsService.getInstance();
-    await settings.write(SettingsService.audioPassthrough, newValue);
-    if (!mounted) return;
-    setState(() {
-      _audioPassthrough = newValue;
-    });
-    await widget.player.setAudioPassthrough(newValue);
-  }
-
-  Future<void> _toggleAudioNormalization() async {
-    final newValue = !_audioNormalization;
-    final settings = await SettingsService.getInstance();
-    await settings.write(SettingsService.audioNormalization, newValue);
-    if (!mounted) return;
-    setState(() {
-      _audioNormalization = newValue;
-    });
-    await widget.player.setProperty('af', newValue ? 'loudnorm=I=-14:TP=-3:LRA=4' : '');
+    OverlaySheetController.of(context).close();
   }
 
   void _navigateTo(_SettingsView view) {
@@ -254,7 +253,7 @@ class _VideoSettingsSheetState extends State<VideoSettingsSheet> {
             initialOffset: initialOffset,
             sliderFocusNode: sliderFocusNode,
             onOffsetChanged: (offset) async {
-              final settings = await SettingsService.getInstance();
+              final settings = SettingsService.instanceOrNull!;
               if (isSubtitle) {
                 await settings.write(SettingsService.subtitleSyncOffset, offset);
               } else {
@@ -287,6 +286,8 @@ class _VideoSettingsSheetState extends State<VideoSettingsSheet> {
         return t.videoSettings.playbackSettings;
       case _SettingsView.speed:
         return t.videoSettings.playbackSpeed;
+      case _SettingsView.versionQuality:
+        return _versionQualityTitle();
       case _SettingsView.sleep:
         return t.videoSettings.sleepTimer;
       case _SettingsView.audioSync:
@@ -297,6 +298,8 @@ class _VideoSettingsSheetState extends State<VideoSettingsSheet> {
         return t.videoSettings.audioOutput;
       case _SettingsView.shader:
         return t.shaders.title;
+      case _SettingsView.dvConversion:
+        return 'DV Conversion Mode';
     }
   }
 
@@ -306,6 +309,8 @@ class _VideoSettingsSheetState extends State<VideoSettingsSheet> {
         return Symbols.tune_rounded;
       case _SettingsView.speed:
         return Symbols.speed_rounded;
+      case _SettingsView.versionQuality:
+        return Symbols.art_track;
       case _SettingsView.sleep:
         return Symbols.bedtime_rounded;
       case _SettingsView.audioSync:
@@ -316,7 +321,27 @@ class _VideoSettingsSheetState extends State<VideoSettingsSheet> {
         return Symbols.speaker_rounded;
       case _SettingsView.shader:
         return Symbols.auto_fix_high_rounded;
+      case _SettingsView.dvConversion:
+        return Symbols.hdr_strong_rounded;
     }
+  }
+
+  String _normalizeDvConversionMode(String? mode) {
+    return switch (mode?.trim().toLowerCase()) {
+      'disabled' || 'native' => 'disabled',
+      'dv81' || 'p8' || 'p7_to_p8' || 'p7-to-p8' => 'dv81',
+      'hevc' || 'hevc_strip' || 'p7_to_hevc' || 'p7-to-hevc' => 'hevc_strip',
+      _ => 'auto',
+    };
+  }
+
+  String _formatDvConversionMode(String mode) {
+    return switch (_normalizeDvConversionMode(mode)) {
+      'disabled' => 'Native / Disabled',
+      'dv81' => 'P7 → P8.1',
+      'hevc_strip' => 'P7 → HEVC',
+      _ => 'Auto',
+    };
   }
 
   String _formatSleepTimer(SleepTimerService sleepTimer) {
@@ -324,6 +349,33 @@ class _VideoSettingsSheetState extends State<VideoSettingsSheet> {
     final remaining = sleepTimer.remainingTime;
     if (remaining == null) return 'Off';
     return 'Active (${formatDurationWithSeconds(remaining)})';
+  }
+
+  bool get _hasVersionQuality {
+    return (widget.availableVersions.length > 1 || widget.serverSupportsTranscoding) &&
+        (widget.onVersionSelected != null || widget.onQualitySelected != null);
+  }
+
+  String _versionQualityTitle() {
+    return versionQualityPickerTitle(
+      showVersions: widget.availableVersions.length > 1,
+      showQuality: widget.serverSupportsTranscoding,
+    );
+  }
+
+  String _versionQualityValueText() {
+    final values = <String>[];
+    if (widget.availableVersions.length > 1) values.add(_selectedVersionLabel());
+    if (widget.serverSupportsTranscoding) values.add(qualityPresetLabel(widget.selectedQualityPreset));
+    return values.join(' / ');
+  }
+
+  String _selectedVersionLabel() {
+    final index = widget.selectedMediaIndex;
+    if (index >= 0 && index < widget.availableVersions.length) {
+      return widget.availableVersions[index].displayLabel;
+    }
+    return t.videoControls.versionColumnHeader;
   }
 
   Widget _buildMenuView() {
@@ -346,6 +398,15 @@ class _VideoSettingsSheetState extends State<VideoSettingsSheet> {
                 onTap: () => _navigateTo(_SettingsView.speed),
               );
             },
+          ),
+
+        if (_hasVersionQuality)
+          _SettingsMenuItem(
+            icon: Symbols.art_track,
+            title: _versionQualityTitle(),
+            valueText: _versionQualityValueText(),
+            allowValueOverflow: true,
+            onTap: () => _navigateTo(_SettingsView.versionQuality),
           ),
 
         // Sleep Timer
@@ -383,31 +444,18 @@ class _VideoSettingsSheetState extends State<VideoSettingsSheet> {
 
         // HDR Toggle (iOS, macOS, and Windows)
         if (Platform.isIOS || Platform.isMacOS || Platform.isWindows)
-          FocusableListTile(
-            leading: AppIcon(
-              Symbols.hdr_strong_rounded,
-              fill: 1,
-              color: _enableHDR ? Colors.amber : tokens(context).textMuted,
-            ),
-            title: Text(t.videoSettings.hdr),
-            trailing: Switch(value: _enableHDR, onChanged: (_) => _toggleHDR(), activeThumbColor: Colors.amber),
-            onTap: _toggleHDR,
+          _SettingsToggleItem(
+            pref: SettingsService.enableHDR,
+            icon: Symbols.hdr_strong_rounded,
+            title: t.videoSettings.hdr,
+            onAfterWrite: (value) => widget.player.setProperty('hdr-enabled', value ? 'yes' : 'no'),
           ),
 
         // Auto-Play Next Episode Toggle
-        FocusableListTile(
-          leading: AppIcon(
-            Symbols.skip_next_rounded,
-            fill: 1,
-            color: _autoPlayNextEpisode ? Colors.amber : tokens(context).textMuted,
-          ),
-          title: Text(t.videoControls.autoPlayNext),
-          trailing: Switch(
-            value: _autoPlayNextEpisode,
-            onChanged: (_) => _toggleAutoPlayNextEpisode(),
-            activeThumbColor: Colors.amber,
-          ),
-          onTap: _toggleAutoPlayNextEpisode,
+        _SettingsToggleItem(
+          pref: SettingsService.autoPlayNextEpisode,
+          icon: Symbols.skip_next_rounded,
+          title: t.videoControls.autoPlayNext,
         ),
 
         // Audio Output Device (Desktop only)
@@ -431,36 +479,20 @@ class _VideoSettingsSheetState extends State<VideoSettingsSheet> {
 
         // Audio Passthrough (Desktop only)
         if (isDesktop)
-          FocusableListTile(
-            leading: AppIcon(
-              Symbols.surround_sound_rounded,
-              fill: 1,
-              color: _audioPassthrough ? Colors.amber : tokens(context).textMuted,
-            ),
-            title: Text(t.videoSettings.audioPassthrough),
-            trailing: Switch(
-              value: _audioPassthrough,
-              onChanged: (_) => _toggleAudioPassthrough(),
-              activeThumbColor: Colors.amber,
-            ),
-            onTap: _toggleAudioPassthrough,
+          _SettingsToggleItem(
+            pref: SettingsService.audioPassthrough,
+            icon: Symbols.surround_sound_rounded,
+            title: t.videoSettings.audioPassthrough,
+            onAfterWrite: widget.player.setAudioPassthrough,
           ),
 
         // Audio Normalization (MPV only)
         if (widget.player.playerType == 'mpv')
-          FocusableListTile(
-            leading: AppIcon(
-              Symbols.graphic_eq_rounded,
-              fill: 1,
-              color: _audioNormalization ? Colors.amber : tokens(context).textMuted,
-            ),
-            title: Text(t.videoSettings.audioNormalization),
-            trailing: Switch(
-              value: _audioNormalization,
-              onChanged: (_) => _toggleAudioNormalization(),
-              activeThumbColor: Colors.amber,
-            ),
-            onTap: _toggleAudioNormalization,
+          _SettingsToggleItem(
+            pref: SettingsService.audioNormalization,
+            icon: Symbols.graphic_eq_rounded,
+            title: t.videoSettings.audioNormalization,
+            onAfterWrite: (value) => widget.player.setProperty('af', value ? 'loudnorm=I=-14:TP=-3:LRA=4' : ''),
           ),
 
         // Shader Preset (MPV only)
@@ -497,20 +529,20 @@ class _VideoSettingsSheetState extends State<VideoSettingsSheet> {
           ),
 
         // Performance Overlay Toggle
-        FocusableListTile(
-          leading: AppIcon(
-            Symbols.analytics_rounded,
-            fill: 1,
-            color: _showPerformanceOverlay ? Colors.amber : tokens(context).textMuted,
-          ),
-          title: Text(t.videoSettings.performanceOverlay),
-          trailing: Switch(
-            value: _showPerformanceOverlay,
-            onChanged: (_) => _togglePerformanceOverlay(),
-            activeThumbColor: Colors.amber,
-          ),
-          onTap: _togglePerformanceOverlay,
+        _SettingsToggleItem(
+          pref: SettingsService.showPerformanceOverlay,
+          icon: Symbols.analytics_rounded,
+          title: t.videoSettings.performanceOverlay,
         ),
+
+        if (kDebugMode && Platform.isAndroid && widget.player.playerType == 'exoplayer')
+          _SettingsMenuItem(
+            icon: Symbols.hdr_strong_rounded,
+            title: 'DV Conversion Mode',
+            valueText: _formatDvConversionMode(_dvConversionMode),
+            isHighlighted: _dvConversionMode != 'auto',
+            onTap: () => _navigateTo(_SettingsView.dvConversion),
+          ),
 
         // Debug: Trigger MPV Fallback (Android ExoPlayer only)
         if (kDebugMode && Platform.isAndroid && widget.player.playerType == 'exoplayer')
@@ -539,6 +571,28 @@ class _VideoSettingsSheetState extends State<VideoSettingsSheet> {
     );
   }
 
+  Widget _buildDvConversionView() {
+    const modes = [
+      (value: 'auto', title: 'Auto', subtitle: 'Use device capability detection and normal fallback behavior'),
+      (value: 'disabled', title: 'Native / Disabled', subtitle: 'Force native DV7 and suppress DV conversion retry'),
+      (value: 'dv81', title: 'P7 → P8.1', subtitle: 'Force inline RPU conversion to Dolby Vision profile 8.1'),
+      (value: 'hevc_strip', title: 'P7 → HEVC', subtitle: 'Strip Dolby Vision RPU/EL layers and present plain HEVC'),
+    ];
+    final primary = Theme.of(context).colorScheme.primary;
+
+    return ListView(
+      children: [
+        for (final mode in modes)
+          FocusableListTile(
+            title: Text(mode.title, style: TextStyle(color: _dvConversionMode == mode.value ? primary : null)),
+            subtitle: Text(mode.subtitle, style: TextStyle(color: tokens(context).textMuted, fontSize: 12)),
+            trailing: _dvConversionMode == mode.value ? AppIcon(Symbols.check_rounded, fill: 1, color: primary) : null,
+            onTap: () => _setDebugDvConversionMode(mode.value),
+          ),
+      ],
+    );
+  }
+
   Widget _buildSpeedView() {
     return StreamBuilder<double>(
       stream: widget.player.streams.rate,
@@ -561,8 +615,7 @@ class _VideoSettingsSheetState extends State<VideoSettingsSheet> {
               onTap: () async {
                 await widget.player.setRate(speed);
                 // Save as default playback speed
-                final settings = await SettingsService.getInstance();
-                await settings.write(SettingsService.defaultPlaybackSpeed, speed);
+                await SettingsService.instanceOrNull!.write(SettingsService.defaultPlaybackSpeed, speed);
                 if (context.mounted) {
                   OverlaySheetController.of(context).close(); // Close sheet after selection
                 }
@@ -584,7 +637,17 @@ class _VideoSettingsSheetState extends State<VideoSettingsSheet> {
     );
   }
 
-  // Audio/subtitle sync views are now opened as compact top bars via _openSyncBar()
+  Widget _buildVersionQualityView() {
+    return VersionQualityPicker(
+      availableVersions: widget.availableVersions,
+      selectedMediaIndex: widget.selectedMediaIndex,
+      selectedQualityPreset: widget.selectedQualityPreset,
+      serverSupportsTranscoding: widget.serverSupportsTranscoding,
+      sourceDurationMs: widget.sourceDurationMs,
+      onVersionSelected: (index) => widget.onVersionSelected?.call(index),
+      onQualitySelected: (preset) => widget.onQualitySelected?.call(preset),
+    );
+  }
 
   /// Extract the audio backend name from a device name (e.g. "coreaudio" from "coreaudio/BuiltIn").
   static String _audioBackend(String name) {
@@ -632,7 +695,6 @@ class _VideoSettingsSheetState extends State<VideoSettingsSheet> {
               return _buildFlatDeviceList(devices, currentDevice);
             }
 
-            // Group devices by backend, keeping "auto" at the top ungrouped.
             final ungrouped = <AudioDevice>[];
             final groups = <String, List<AudioDevice>>{};
             for (final d in devices) {
@@ -699,7 +761,6 @@ class _VideoSettingsSheetState extends State<VideoSettingsSheet> {
         return ListView.builder(
           itemCount: presets.length + 1,
           itemBuilder: (context, index) {
-            // Import button at the end
             if (index == presets.length) {
               return FocusableListTile(
                 leading: AppIcon(Symbols.add_rounded, fill: 1, color: tokens(context).textMuted),
@@ -759,7 +820,6 @@ class _VideoSettingsSheetState extends State<VideoSettingsSheet> {
       final displayName = path.basenameWithoutExtension(filePath);
       final preset = await shaderProvider.importCustomShader(filePath, displayName);
 
-      // Apply the imported shader immediately
       if (widget.shaderService != null && mounted) {
         if (preset.type != ShaderPresetType.none && widget.isAmbientLightingEnabled) {
           widget.onToggleAmbientLighting?.call();
@@ -845,6 +905,8 @@ class _VideoSettingsSheetState extends State<VideoSettingsSheet> {
             return _buildMenuView();
           case _SettingsView.speed:
             return _buildSpeedView();
+          case _SettingsView.versionQuality:
+            return _buildVersionQualityView();
           case _SettingsView.sleep:
             return _buildSleepView();
           case _SettingsView.audioSync:
@@ -854,6 +916,8 @@ class _VideoSettingsSheetState extends State<VideoSettingsSheet> {
             return _buildAudioDeviceView();
           case _SettingsView.shader:
             return _buildShaderView();
+          case _SettingsView.dvConversion:
+            return _buildDvConversionView();
         }
       }(),
     );

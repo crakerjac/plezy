@@ -1,9 +1,8 @@
-import 'dart:typed_data';
-
 import 'package:flutter/material.dart';
 
 import '../../../mpv/mpv.dart';
-import '../../../models/plex_media_info.dart';
+import '../../../media/media_source_info.dart';
+import '../../../services/scrub_preview_source.dart';
 import '../../../utils/formatters.dart';
 import 'timeline_slider.dart';
 
@@ -14,8 +13,9 @@ import 'timeline_slider.dart';
 /// layout (timestamps beside slider) and vertical layout (timestamps below slider).
 class VideoTimelineBar extends StatelessWidget {
   final Player player;
-  final List<PlexChapter> chapters;
+  final List<MediaChapter> chapters;
   final bool chaptersLoaded;
+  final bool showChapterMarkersOnTimeline;
   final ValueChanged<Duration> onSeek;
   final ValueChanged<Duration> onSeekEnd;
 
@@ -39,7 +39,7 @@ class VideoTimelineBar extends StatelessWidget {
   final bool showFinishTime;
 
   /// Optional callback that returns thumbnail image bytes for a given timestamp.
-  final Uint8List? Function(Duration time)? thumbnailDataBuilder;
+  final ScrubFrame? Function(Duration time)? thumbnailDataBuilder;
 
   /// When true, show the preview thumbnail at the current playback position
   /// (used during sustained dpad/keyboard key-repeat seeking).
@@ -50,6 +50,7 @@ class VideoTimelineBar extends StatelessWidget {
     required this.player,
     required this.chapters,
     required this.chaptersLoaded,
+    this.showChapterMarkersOnTimeline = true,
     required this.onSeek,
     required this.onSeekEnd,
     this.horizontalLayout = true,
@@ -162,6 +163,7 @@ class VideoTimelineBar extends StatelessWidget {
       bufferRanges: bufferRanges,
       chapters: chapters,
       chaptersLoaded: chaptersLoaded,
+      showChapterMarkersOnTimeline: showChapterMarkersOnTimeline,
       onSeek: onSeek,
       onSeekEnd: onSeekEnd,
       focusNode: focusNode,

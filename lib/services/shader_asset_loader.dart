@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/services.dart';
 import 'package:path/path.dart' as path;
 import 'package:path_provider/path_provider.dart';
+import 'package:uuid/uuid.dart';
 
 import '../models/shader_preset.dart';
 import '../utils/app_logger.dart';
@@ -64,7 +65,6 @@ class ShaderAssetLoader {
       final fileName = path.basename(assetPath);
       final subDir = path.dirname(assetPath);
 
-      // Create subdirectory if needed
       final targetDir = Directory(path.join(shaderDir, subDir));
       if (!await targetDir.exists()) {
         await targetDir.create(recursive: true);
@@ -114,7 +114,6 @@ class ShaderAssetLoader {
     final quality = config.quality;
     final mode = config.mode;
 
-    // Get quality-specific shader variants
     String restoreVariant;
     String upscaleVariant;
 
@@ -213,7 +212,7 @@ class ShaderAssetLoader {
   static Future<String> importCustomShader(String sourcePath) async {
     final customDir = await _getCustomShaderDirectory();
     final ext = path.extension(sourcePath);
-    final uuid = DateTime.now().millisecondsSinceEpoch.toRadixString(36);
+    final uuid = const Uuid().v4();
     final storedName = '$uuid$ext';
     final targetFile = File(path.join(customDir, storedName));
 
@@ -262,15 +261,12 @@ class ShaderAssetLoader {
   /// Call this at startup to avoid extraction delay during playback.
   static Future<void> preloadShaders() async {
     try {
-      // Extract NVScaler
       await _extractShader(_nvscalerShader);
 
-      // Extract all ArtCNN shaders
       for (final shaderPath in _artcnnShaders.values) {
         await _extractShader(shaderPath);
       }
 
-      // Extract all Anime4K shaders
       for (final shaderPath in _anime4kShaders.values) {
         await _extractShader(shaderPath);
       }

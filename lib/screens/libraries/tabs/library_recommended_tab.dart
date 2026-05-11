@@ -1,18 +1,23 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
-import '../../../../services/plex_client.dart';
 import '../../../i18n/strings.g.dart';
+import '../../../media/media_hub.dart';
+import '../../../media/media_item.dart';
 import '../../../mixins/item_updatable.dart';
-import '../../../models/plex_hub.dart';
-import '../../../models/plex_metadata.dart';
+import '../../../mixins/watch_state_aware.dart';
+import '../../../utils/global_key_utils.dart';
+import '../../../utils/provider_extensions.dart';
+import '../../../utils/watch_state_notifier.dart';
 import '../../../widgets/hub_section.dart';
 import '../../main_screen.dart';
 import 'base_library_tab.dart';
 
 /// Recommended tab for library screen
 /// Shows library-specific hubs and recommendations, including dedicated Continue Watching
-class LibraryRecommendedTab extends BaseLibraryTab<PlexHub> {
+class LibraryRecommendedTab extends BaseLibraryTab<MediaHub> {
   const LibraryRecommendedTab({
     super.key,
     required super.library,
@@ -26,22 +31,95 @@ class LibraryRecommendedTab extends BaseLibraryTab<PlexHub> {
   State<LibraryRecommendedTab> createState() => _LibraryRecommendedTabState();
 }
 
-class _LibraryRecommendedTabState extends BaseLibraryTabState<PlexHub, LibraryRecommendedTab> with ItemUpdatable {
+class _LibraryRecommendedTabState extends BaseLibraryTabState<MediaHub, LibraryRecommendedTab>
+    with ItemUpdatable, WatchStateAware {
   /// GlobalKeys for each hub section to enable vertical navigation
   final List<GlobalKey<HubSectionState>> _hubKeys = [];
 
   @override
-  PlexClient get client => getClientForLibrary();
+  String? get itemServerId => widget.library.serverId;
 
   @override
-  void updateItemInLists(String ratingKey, PlexMetadata updatedMetadata) {
-    // Update the item in any hub that contains it
+  String? get watchStateServerId => widget.library.serverId;
+
+  @override
+  Set<String>? get watchedIds {
+    final keys = <String>{};
     for (final hub in items) {
-      final itemIndex = hub.items.indexWhere((item) => item.ratingKey == ratingKey);
-      if (itemIndex != -1) {
-        hub.items[itemIndex] = updatedMetadata;
+      for (final item in hub.items) {
+        keys.add(item.id);
+        if (item.parentId != null) keys.add(item.parentId!);
+        if (item.grandparentId != null) keys.add(item.grandparentId!);
       }
     }
+    return keys;
+  }
+
+  @override
+  Set<String>? get watchedGlobalKeys {
+    final keys = <String>{};
+    for (final hub in items) {
+      for (final item in hub.items) {
+        final serverId = item.serverId ?? widget.library.serverId;
+        if (serverId == null) return null;
+        keys.add(buildGlobalKey(serverId, item.id));
+        if (item.parentId != null) keys.add(buildGlobalKey(serverId, item.parentId!));
+        if (item.grandparentId != null) keys.add(buildGlobalKey(serverId, item.grandparentId!));
+      }
+    }
+    return keys;
+  }
+
+  @override
+  void updateItemInLists(String itemId, MediaItem updatedItem) {
+    // Update the item in any hub that contains it. MediaHub items are
+    // immutable lists; rebuild the affected hub in-place.
+    for (var i = 0; i < items.length; i++) {
+      final hub = items[i];
+      final itemIndex = hub.items.indexWhere((item) => item.id == itemId);
+      if (itemIndex != -1) {
+        final newItems = List<MediaItem>.from(hub.items);
+        newItems[itemIndex] = updatedItem;
+        items[i] = hub.copyWith(items: newItems);
+      }
+    }
+  }
+
+  @override
+  void onWatchStateChanged(WatchStateEvent event) {
+    if (event.changeType == WatchStateChangeType.progressUpdate) return;
+
+    if (event.changeType == WatchStateChangeType.removedFromContinueWatching) {
+      _removeContinueWatchingItem(event.itemId);
+      unawaited(loadItems());
+      return;
+    }
+
+    final affectedIds = {event.itemId, ...event.parentChain};
+    final refreshIds = <String>{};
+    for (final hub in items) {
+      for (final item in hub.items) {
+        if (affectedIds.contains(item.id)) {
+          refreshIds.add(item.id);
+        }
+      }
+    }
+    for (final itemId in refreshIds) {
+      unawaited(updateItem(itemId));
+    }
+  }
+
+  void _removeContinueWatchingItem(String itemId) {
+    setState(() {
+      for (var i = 0; i < items.length; i++) {
+        final hub = items[i];
+        if (!_isContinueWatchingHub(hub)) continue;
+        final newItems = hub.items.where((item) => item.id != itemId).toList();
+        if (newItems.length != hub.items.length) {
+          items[i] = hub.copyWith(items: newItems, size: newItems.length);
+        }
+      }
+    });
   }
 
   @override
@@ -53,20 +131,24 @@ class _LibraryRecommendedTabState extends BaseLibraryTabState<PlexHub, LibraryRe
   @override
   String get errorContext => t.libraries.tabs.recommended;
 
-  /// Detects Continue Watching hubs by hubIdentifier.
+  /// Detects Continue Watching hubs by hub identifier.
   /// Section-specific CW hubs use identifiers like "movie.inprogress.1".
-  static bool _isContinueWatchingHub(PlexHub hub) {
-    final hubId = hub.hubIdentifier?.toLowerCase() ?? '';
+  static bool _isContinueWatchingHub(MediaHub hub) {
+    final hubId = hub.identifier?.toLowerCase() ?? '';
     return hubId.contains('inprogress');
   }
 
   @override
-  Future<List<PlexHub>> loadData() async {
+  Future<List<MediaHub>> loadData() async {
     // Clear hub keys before loading new hubs to prevent stale references
     _hubKeys.clear();
 
-    final client = getClientForLibrary();
-    final hubs = await client.getLibraryHubs(widget.library.key, limit: 12);
+    // Backend-aware fetch: Plex hits /hubs/sections, Jellyfin synthesises
+    // Continue Watching + Next Up + Recently Added.
+    final client = context.tryGetMediaClientForServer(widget.library.serverId);
+    final hubs = client == null
+        ? <MediaHub>[]
+        : List.of(await client.fetchLibraryHubs(widget.library.id, libraryName: widget.library.title, limit: 12));
 
     // Move Continue Watching hub to the front if present
     final cwIndex = hubs.indexWhere(_isContinueWatchingHub);
@@ -127,31 +209,38 @@ class _LibraryRecommendedTabState extends BaseLibraryTabState<PlexHub, LibraryRe
   static const double _focusDecorationPadding = 8.0;
 
   @override
-  Widget buildContent(List<PlexHub> items) {
+  Widget buildContent(List<MediaHub> items) {
     _ensureHubKeys(items.length);
 
-    return ListView.builder(
-      padding: const EdgeInsets.fromLTRB(0, _focusDecorationPadding, 0, 8),
+    return CustomScrollView(
       // Allow focus decoration to render outside scroll bounds
       clipBehavior: Clip.none,
-      itemCount: items.length,
-      itemBuilder: (context, index) {
-        final hub = items[index];
-        final isContinueWatching = _isContinueWatchingHub(hub);
+      slivers: [
+        SliverOverlapInjector(handle: NestedScrollView.sliverOverlapAbsorberHandleFor(context)),
+        SliverPadding(
+          padding: const EdgeInsets.fromLTRB(0, _focusDecorationPadding, 0, 8),
+          sliver: SliverList.builder(
+            itemCount: items.length,
+            itemBuilder: (context, index) {
+              final hub = items[index];
+              final isContinueWatching = _isContinueWatchingHub(hub);
 
-        return HubSection(
-          key: index < _hubKeys.length ? _hubKeys[index] : null,
-          hub: hub,
-          icon: _getHubIcon(hub),
-          isInContinueWatching: isContinueWatching,
-          onRefresh: updateItem,
-          onRemoveFromContinueWatching: isContinueWatching ? _refreshContinueWatching : null,
-          onVerticalNavigation: (isUp) => _handleVerticalNavigation(index, isUp),
-          onBack: widget.onBack,
-          onNavigateUp: index == 0 ? widget.onBack : null,
-          onNavigateToSidebar: _navigateToSidebar,
-        );
-      },
+              return HubSection(
+                key: index < _hubKeys.length ? _hubKeys[index] : null,
+                hub: hub,
+                icon: _getHubIcon(hub),
+                isInContinueWatching: isContinueWatching,
+                onRefresh: updateItem,
+                onRemoveFromContinueWatching: isContinueWatching ? _refreshContinueWatching : null,
+                onVerticalNavigation: (isUp) => _handleVerticalNavigation(index, isUp),
+                onBack: widget.onBack,
+                onNavigateUp: index == 0 ? widget.onBack : null,
+                onNavigateToSidebar: _navigateToSidebar,
+              );
+            },
+          ),
+        ),
+      ],
     );
   }
 
@@ -161,7 +250,7 @@ class _LibraryRecommendedTabState extends BaseLibraryTabState<PlexHub, LibraryRe
     loadItems();
   }
 
-  IconData _getHubIcon(PlexHub hub) {
+  IconData _getHubIcon(MediaHub hub) {
     final title = hub.title.toLowerCase();
     if (title.contains('continue watching') || title.contains('on deck')) {
       return Symbols.play_circle_rounded;

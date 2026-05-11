@@ -1,10 +1,12 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:collection/collection.dart';
 import 'package:flutter/foundation.dart' show protected;
 import 'package:flutter/services.dart';
 
 import '../../utils/app_logger.dart';
+import '../../utils/track_label_builder.dart';
 import '../font_loader.dart';
 import '../models.dart';
 import 'player.dart';
@@ -46,22 +48,16 @@ abstract class PlayerBase with PlayerStreamControllersMixin implements Player {
   int _nextPropId = 0;
   final Map<int, String> _propIdToName = {};
 
-  /// Whether the player has been initialized.
-  /// Subclasses should set this to true after initialization.
   @protected
   bool initialized = false;
 
-  /// Whether the player has been disposed.
   @override
   bool get disposed => _disposed;
 
-  /// The method channel for platform communication.
   MethodChannel get methodChannel;
 
-  /// The event channel for receiving platform events.
   EventChannel get eventChannel;
 
-  /// The log prefix for this player (e.g., 'MPV', 'ExoPlayer').
   String get logPrefix;
 
   PlayerBase() {
@@ -99,8 +95,6 @@ abstract class PlayerBase with PlayerStreamControllersMixin implements Player {
     );
   }
 
-  /// Observes a property on the native player and assigns it a compact propId
-  /// for efficient event channel communication.
   @protected
   Future<void> observeProperty(String name, String format) async {
     final propId = _nextPropId++;
@@ -124,8 +118,6 @@ abstract class PlayerBase with PlayerStreamControllersMixin implements Player {
     }
   }
 
-  /// Handle a property change event from the platform.
-  /// Subclasses can override this to handle platform-specific properties.
   void handlePropertyChange(String name, dynamic value) {
     if (_disposed) return;
     switch (name) {
@@ -198,9 +190,7 @@ abstract class PlayerBase with PlayerStreamControllersMixin implements Player {
 
       case 'volume':
         if (value is num) {
-          final volume = value.toDouble();
-          _state = _state.copyWith(volume: volume);
-          volumeController.add(volume);
+          setVolumeState(value.toDouble());
         }
         break;
 
@@ -276,12 +266,7 @@ abstract class PlayerBase with PlayerStreamControllersMixin implements Player {
 
       case 'audio-device':
         if (value is String && value.isNotEmpty) {
-          final device =
-              _state.audioDevices.cast<AudioDevice?>().firstWhere(
-                (d) => d?.name == value,
-                orElse: () => AudioDevice(name: value),
-              ) ??
-              AudioDevice(name: value);
+          final device = _state.audioDevices.firstWhereOrNull((d) => d.name == value) ?? AudioDevice(name: value);
           _state = _state.copyWith(audioDevice: device);
           audioDeviceController.add(device);
         }
@@ -337,8 +322,6 @@ abstract class PlayerBase with PlayerStreamControllersMixin implements Player {
     }
   }
 
-  /// Handle a player event from the platform.
-  /// Subclasses can override this to handle platform-specific events.
   void handlePlayerEvent(String name, Map? data) {
     if (_disposed) return;
     switch (name) {
@@ -383,7 +366,6 @@ abstract class PlayerBase with PlayerStreamControllersMixin implements Player {
     }
   }
 
-  /// Parse a log level string to [PlayerLogLevel].
   PlayerLogLevel parseLogLevel(String level) {
     return switch (level) {
       'fatal' => PlayerLogLevel.fatal,
@@ -397,7 +379,6 @@ abstract class PlayerBase with PlayerStreamControllersMixin implements Player {
     };
   }
 
-  /// Parse a track list from the platform into [Tracks] and selected track IDs.
   ({Tracks tracks, String? selectedAudioId, String? selectedSubtitleId}) parseTrackList(List trackList) {
     final audioTracks = <AudioTrack>[];
     final subtitleTracks = <SubtitleTrack>[];
@@ -416,8 +397,8 @@ abstract class PlayerBase with PlayerStreamControllersMixin implements Player {
         audioTracks.add(
           AudioTrack(
             id: id,
-            title: track['title'] as String?,
-            language: track['lang'] as String?,
+            title: cleanTrackMetadataValue(track['title'] as String?),
+            language: cleanTrackMetadataValue(track['lang'] as String?),
             codec: track['codec'] as String?,
             channels: (track['demux-channel-count'] as num?)?.toInt(),
             sampleRate: (track['demux-samplerate'] as num?)?.toInt(),
@@ -426,12 +407,13 @@ abstract class PlayerBase with PlayerStreamControllersMixin implements Player {
         );
       } else if (type == 'sub') {
         if (selected) selectedSubtitleId = id;
+        final codec = track['codec'] as String?;
         subtitleTracks.add(
           SubtitleTrack(
             id: id,
-            title: track['title'] as String?,
-            language: track['lang'] as String?,
-            codec: track['codec'] as String?,
+            title: cleanSubtitleTitle(track['title'] as String?, codec: codec),
+            language: cleanTrackMetadataValue(track['lang'] as String?),
+            codec: codec,
             isDefault: track['default'] as bool? ?? false,
             isForced: track['forced'] as bool? ?? false,
             isExternal: track['external'] as bool? ?? false,
@@ -448,33 +430,30 @@ abstract class PlayerBase with PlayerStreamControllersMixin implements Player {
     );
   }
 
-  /// Update the selected audio track.
   void updateSelectedAudioTrack(dynamic trackId) {
     final id = trackId?.toString();
     AudioTrack? selectedTrack;
 
     if (id != null && id != 'no') {
-      selectedTrack = _state.tracks.audio.cast<AudioTrack?>().firstWhere((t) => t?.id == id, orElse: () => null);
+      selectedTrack = _state.tracks.audio.firstWhereOrNull((t) => t.id == id);
     }
 
+    if (selectedTrack == null) return;
     _state = _state.copyWith(track: _state.track.copyWith(audio: selectedTrack));
     trackController.add(_state.track);
   }
 
-  /// Update the selected subtitle track.
   void updateSelectedSubtitleTrack(dynamic trackId) {
     final id = trackId?.toString();
-    SubtitleTrack? selectedTrack;
-
-    selectedTrack = (id == null || id == 'no')
+    final selectedTrack = (id == null || id == 'no')
         ? SubtitleTrack.off
-        : _state.tracks.subtitle.cast<SubtitleTrack?>().firstWhere((t) => t?.id == id, orElse: () => null);
+        : _state.tracks.subtitle.firstWhereOrNull((t) => t.id == id);
 
+    if (selectedTrack == null) return;
     _state = _state.copyWith(track: _state.track.copyWith(subtitle: selectedTrack));
     trackController.add(_state.track);
   }
 
-  /// Update the selected secondary subtitle track.
   void updateSelectedSecondarySubtitleTrack(dynamic trackId) {
     final id = trackId?.toString();
     SubtitleTrack? selectedTrack;
@@ -482,7 +461,7 @@ abstract class PlayerBase with PlayerStreamControllersMixin implements Player {
     if (id == null || id == 'no') {
       selectedTrack = null;
     } else {
-      selectedTrack = _state.tracks.subtitle.cast<SubtitleTrack?>().firstWhere((t) => t?.id == id, orElse: () => null);
+      selectedTrack = _state.tracks.subtitle.firstWhereOrNull((t) => t.id == id);
     }
 
     _state = _state.copyWith(track: _state.track.copyWith(secondarySubtitle: selectedTrack));
@@ -497,22 +476,41 @@ abstract class PlayerBase with PlayerStreamControllersMixin implements Player {
   }
 
   @protected
+  void setVolumeState(double volume) {
+    if (_state.volume == volume) return;
+    _state = _state.copyWith(volume: volume);
+    volumeController.add(volume);
+  }
+
+  @protected
   void setSeekable(bool seekable) {
     if (_state.seekable == seekable) return;
     _state = _state.copyWith(seekable: seekable);
     seekableController.add(seekable);
   }
 
-  /// Safe method channel invocation — no-ops if player is disposed.
+  @protected
+  void resetPlaybackProgress(Duration position) {
+    _positionMs = position.inMilliseconds;
+    _state = _state.copyWith(
+      completed: false,
+      position: position,
+      duration: Duration.zero,
+      buffer: Duration.zero,
+      bufferRanges: const [],
+    );
+    completedController.add(false);
+    positionController.add(position);
+    durationController.add(Duration.zero);
+    bufferController.add(Duration.zero);
+    bufferRangesController.add(const []);
+  }
+
   @protected
   Future<T?> invoke<T>(String method, [dynamic args]) async {
     if (_disposed) return null;
     return methodChannel.invokeMethod<T>(method, args);
   }
-
-  // ============================================
-  // Default Implementations
-  // ============================================
 
   @override
   Future<void> playOrPause() async {
@@ -525,10 +523,10 @@ abstract class PlayerBase with PlayerStreamControllersMixin implements Player {
   }
 
   @override
-  Future<bool> setVisible(bool visible) async {
+  Future<bool> setVisible(bool visible, {bool restoreOnWindowVisible = false}) async {
     if (_disposed) return false;
     try {
-      await invoke('setVisible', {'visible': visible});
+      await invoke('setVisible', {'visible': visible, 'restoreOnWindowVisible': restoreOnWindowVisible});
       return true;
     } catch (e) {
       errorController.add(PlayerError('Failed to set visibility: $e'));
@@ -576,10 +574,6 @@ abstract class PlayerBase with PlayerStreamControllersMixin implements Player {
   // ignore: no-empty-block - base no-op, overridden by platform subclasses
   Future<void> setLogLevel(String level) async {}
 
-  // ============================================
-  // Subtitle Fonts
-  // ============================================
-
   @override
   Future<void> configureSubtitleFonts() async {
     try {
@@ -596,28 +590,44 @@ abstract class PlayerBase with PlayerStreamControllersMixin implements Player {
     }
   }
 
-  // ============================================
-  // Seek helpers
-  // ============================================
+  void _setPlaybackPosition(Duration position) {
+    _positionMs = position.inMilliseconds;
+    _state = _state.copyWith(position: position);
+    positionController.add(position);
+  }
 
   /// Run a backend-specific seek call, swallowing the common "not ready" errors
   /// the native channel throws when the engine was torn down mid-seek.
   @protected
-  Future<void> runSeek(Future<void> Function() seekFn) async {
+  Future<void> runSeek(Duration position, Future<void> Function() seekFn) async {
+    if (_disposed) return;
+
+    final previousPosition = Duration(milliseconds: _positionMs);
+    _setPlaybackPosition(position);
+
+    void rollbackPosition() {
+      // Avoid overwriting a newer native position update if one arrived while
+      // the platform seek was in flight.
+      if (_positionMs == position.inMilliseconds) {
+        _setPlaybackPosition(previousPosition);
+      }
+    }
+
     try {
       await seekFn();
     } on PlatformException catch (e) {
       if (e.code == 'COMMAND_FAILED' || e.code == 'NOT_INITIALIZED') {
+        rollbackPosition();
         appLogger.w('Seek failed (${e.code}), player not ready');
         return;
       }
+      rollbackPosition();
+      rethrow;
+    } catch (_) {
+      rollbackPosition();
       rethrow;
     }
   }
-
-  // ============================================
-  // Debug helpers
-  // ============================================
 
   /// Injects the log + error events that would fire when the server rejects the
   /// stream with HTTP 500 (shared-user bandwidth / transcoding limit). Used by
@@ -634,10 +644,6 @@ abstract class PlayerBase with PlayerStreamControllersMixin implements Player {
     );
     errorController.add(const PlayerError('HTTP 500', cause: PlayerError.serverHttp500));
   }
-
-  // ============================================
-  // Lifecycle
-  // ============================================
 
   @override
   Future<void> dispose() async {

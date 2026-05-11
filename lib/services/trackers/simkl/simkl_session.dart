@@ -1,10 +1,15 @@
-import 'dart:convert';
+import 'package:json_annotation/json_annotation.dart';
+
+import '../tracker_session_utils.dart';
+
+part 'simkl_session.g.dart';
 
 /// Immutable Simkl OAuth session.
 ///
 /// Simkl access tokens don't expire (per their docs), so there's no
 /// refresh_token — just the bearer and a display name for the settings UI.
-class SimklSession {
+@JsonSerializable(fieldRename: FieldRename.snake)
+class SimklSession with EncodedTrackerSession {
   final String accessToken;
   final String? username;
   final int createdAt;
@@ -17,21 +22,15 @@ class SimklSession {
     createdAt: createdAt ?? this.createdAt,
   );
 
-  Map<String, dynamic> toJson() => {'access_token': accessToken, 'username': username, 'created_at': createdAt};
+  @override
+  Map<String, dynamic> toJson() => _$SimklSessionToJson(this);
 
-  factory SimklSession.fromJson(Map<String, dynamic> json) => SimklSession(
-    accessToken: json['access_token'] as String,
-    username: json['username'] as String?,
-    createdAt: (json['created_at'] as num).toInt(),
-  );
+  factory SimklSession.fromJson(Map<String, dynamic> json) => _$SimklSessionFromJson(json);
 
   /// Build a session from Simkl's device-code `/oauth/pin/<code>` response.
   /// Simkl doesn't expose a creation timestamp so we stamp "now".
-  factory SimklSession.fromTokenResponse(Map<String, dynamic> json) => SimklSession(
-    accessToken: json['access_token'] as String,
-    createdAt: DateTime.now().millisecondsSinceEpoch ~/ 1000,
-  );
+  factory SimklSession.fromTokenResponse(Map<String, dynamic> json) =>
+      SimklSession(accessToken: json['access_token'] as String, createdAt: trackerSessionNowEpochSeconds());
 
-  String encode() => json.encode(toJson());
-  static SimklSession decode(String raw) => SimklSession.fromJson(json.decode(raw) as Map<String, dynamic>);
+  static SimklSession decode(String raw) => decodeTrackerSessionJson(raw, SimklSession.fromJson);
 }

@@ -18,6 +18,15 @@ bool flexibleBool(Object? v) => switch (v) {
   _ => false,
 };
 
+/// Parse a value that may be [bool], [int] (0/1), or [String] ('1') to [bool].
+/// Returns `null` for `null` or unrecognised values.
+bool? flexibleBoolNullable(Object? v) => switch (v) {
+  final bool b => b,
+  final int n => n == 1,
+  final String s => s == '1',
+  _ => null,
+};
+
 /// Parse a value that may be [double], [num], or [String] to [double].
 double? flexibleDouble(Object? v) => switch (v) {
   final num n => n.toDouble(),
@@ -39,3 +48,21 @@ List<dynamic>? flexibleList(Object? v) => switch (v) {
   final List l => l,
   _ => <dynamic>[v],
 };
+
+List<String>? stringListFromRaw(Object? raw, {String? mapKey, bool stringify = false, bool nullIfEmpty = false}) {
+  if (raw is! List) return null;
+  final result = <String>[];
+  for (final value in raw) {
+    final source = mapKey != null && value is Map ? value[mapKey] : value;
+    final string = stringify
+        ? source?.toString()
+        : source is String
+        ? source
+        : null;
+    if (string != null) result.add(string);
+  }
+  if (result.isEmpty && nullIfEmpty) return null;
+  return result;
+}
+
+List<T>? nullIfEmptyList<T>(List<T> values) => values.isEmpty ? null : values;

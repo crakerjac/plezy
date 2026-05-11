@@ -9,6 +9,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../utils/app_logger.dart';
+import '../utils/formatters.dart';
 import '../utils/platform_detector.dart';
 import 'file_picker_service.dart';
 import 'settings_service.dart';
@@ -69,9 +70,12 @@ class SettingsExportService {
     'current_user_uuid',
     'home_users_cache',
     'home_users_cache_expiry',
+    'active_app_profile_id',
     // Multi-server routing
     'servers_list',
     'server_order',
+    // CredentialVault encryption key for DB-stored connection tokens
+    'credential_vault_key_v1',
     // View state, not settings
     'selected_library_index',
     'selected_library_key',
@@ -82,7 +86,8 @@ class SettingsExportService {
   /// Prefix denylist. A key is excluded if it starts with any of these.
   /// The tracker prefixes (`trakt_`, `mal_`, `anilist_`, `simkl_`) cover
   /// OAuth session tokens and runtime sync queues. The `enable_*` feature
-  /// toggles use a different prefix and stay exportable.
+  /// toggles use a different prefix and stay exportable. Profile runtime
+  /// caches are also excluded because they belong to local connection state.
   static const List<String> _denyPrefixes = [
     'server_endpoint_',
     'episode_count_',
@@ -91,6 +96,8 @@ class SettingsExportService {
     'mal_',
     'anilist_',
     'simkl_',
+    'plex_home_users_',
+    'profile_last_used_',
   ];
 
   /// Literal prefix used by [StorageService._userPrefix] for any scoped key.
@@ -263,13 +270,11 @@ class SettingsExportService {
     return false;
   }
 
-  // --- File operations -----------------------------------------------------
-
   static Future<String> _defaultFileName() async {
     final now = DateTime.now();
-    final y = now.year.toString().padLeft(4, '0');
-    final m = now.month.toString().padLeft(2, '0');
-    final d = now.day.toString().padLeft(2, '0');
+    final y = padNumber(now.year, 4);
+    final m = padNumber(now.month, 2);
+    final d = padNumber(now.day, 2);
     return 'plezy-settings-$y$m$d.$fileExtension';
   }
 
@@ -289,7 +294,7 @@ class SettingsExportService {
       // best-effort; tolerate platforms without PackageInfo
     }
 
-    final exportMap = buildExportMap(prefs, currentUserUuid: storage.getCurrentUserUUID(), appVersion: appVersion);
+    final exportMap = buildExportMap(prefs, currentUserUuid: storage.activeUserScope(), appVersion: appVersion);
     final jsonString = const JsonEncoder.withIndent('  ').convert(exportMap);
     final bytes = Uint8List.fromList(utf8.encode(jsonString));
     final fileName = await _defaultFileName();
@@ -329,7 +334,7 @@ class SettingsExportService {
   /// malformed files or unsupported versions.
   static Future<ImportResult?> importFromFile() async {
     final storage = await StorageService.getInstance();
-    final uuid = storage.getCurrentUserUUID();
+    final uuid = storage.activeUserScope();
     if (uuid == null || uuid.isEmpty) {
       throw const NoUserSignedInException();
     }

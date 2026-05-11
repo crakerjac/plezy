@@ -33,10 +33,6 @@ class PlayerNative extends PlayerBase {
   /// but as JSON strings on Android/Windows.
   static final String _nodeFormat = (Platform.isAndroid || Platform.isWindows) ? 'string' : 'node';
 
-  // ============================================
-  // Initialization
-  // ============================================
-
   // Memoizes the in-flight init Future so concurrent callers (e.g. the
   // parallel `requestAudioFocus()` and `setProperty()` paths kicked off in
   // VideoPlayerScreen._initializePlayer) share one `invoke('initialize')`.
@@ -91,12 +87,6 @@ class PlayerNative extends PlayerBase {
     }
   }
 
-  // ============================================
-  // Playback Control
-  // ============================================
-
-  /// Opens a content:// URI via the platform channel and returns the raw FD number.
-  /// Returns null if the call fails.
   Future<int?> _openContentFd(String contentUri) async {
     try {
       return await invoke<int>('openContentFd', {'uri': contentUri});
@@ -114,28 +104,25 @@ class PlayerNative extends PlayerBase {
   }) async {
     if (disposed) return;
     await _ensureInitialized();
+    final startPosition = media.start ?? Duration.zero;
+    resetPlaybackProgress(startPosition);
     setSeekable(false);
 
-    // Show the video layer
     await setVisible(true);
 
-    // Set HTTP headers for Plex authentication and profile
     if (media.headers != null && media.headers!.isNotEmpty) {
       final headerList = media.headers!.entries.map((e) => '${e.key}: ${e.value}').toList();
       await setProperty('http-header-fields', headerList.join(','));
     }
 
-    // Set start position if provided (must be set before loading file)
-    if (media.start != null && media.start!.inSeconds > 0) {
-      await setProperty('start', media.start!.inSeconds.toString());
+    // 'start' must be set before loadfile.
+    if (startPosition.inSeconds > 0) {
+      await setProperty('start', (startPosition.inMilliseconds / 1000.0).toString());
     } else {
-      // Reset start position if not resuming
       await setProperty('start', 'none');
     }
 
-    // Set pause BEFORE loadfile to prevent decoder from starting immediately.
-    // This is important for adding external subtitles before playback begins,
-    // avoiding a race condition that can freeze the video decoder on Android (issue #226).
+    // Prevents race condition that can freeze the video decoder on Android (issue #226).
     if (!play) {
       await setProperty('pause', 'yes');
     }
@@ -171,12 +158,8 @@ class PlayerNative extends PlayerBase {
 
   @override
   Future<void> seek(Duration position) async {
-    await runSeek(() => command(['seek', (position.inMilliseconds / 1000.0).toString(), 'absolute']));
+    await runSeek(position, () => command(['seek', (position.inMilliseconds / 1000.0).toString(), 'absolute']));
   }
-
-  // ============================================
-  // Track Selection
-  // ============================================
 
   @override
   Future<void> selectAudioTrack(AudioTrack track) async {
@@ -201,13 +184,10 @@ class PlayerNative extends PlayerBase {
     await command(args);
   }
 
-  // ============================================
-  // Volume and Rate
-  // ============================================
-
   @override
   Future<void> setVolume(double volume) async {
     await setProperty('volume', volume.toString());
+    if (!disposed) setVolumeState(volume);
   }
 
   @override
@@ -219,10 +199,6 @@ class PlayerNative extends PlayerBase {
   Future<void> setAudioDevice(AudioDevice device) async {
     await setProperty('audio-device', device.name);
   }
-
-  // ============================================
-  // MPV Properties
-  // ============================================
 
   @override
   Future<void> setProperty(String name, String value) async {
@@ -245,20 +221,12 @@ class PlayerNative extends PlayerBase {
     await invoke('command', {'args': args});
   }
 
-  // ============================================
-  // Log Level
-  // ============================================
-
   @override
   Future<void> setLogLevel(String level) async {
     if (disposed) return;
     await _ensureInitialized();
     await invoke('setLogLevel', {'level': level});
   }
-
-  // ============================================
-  // Passthrough
-  // ============================================
 
   @override
   Future<void> setAudioPassthrough(bool enabled) async {
@@ -270,10 +238,6 @@ class PlayerNative extends PlayerBase {
       await setProperty('audio-exclusive', 'no');
     }
   }
-
-  // ============================================
-  // Platform-Specific Overrides
-  // ============================================
 
   @override
   Future<void> updateFrame() async {

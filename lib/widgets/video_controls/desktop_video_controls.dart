@@ -7,10 +7,11 @@ import 'package:material_symbols_icons/symbols.dart';
 import 'package:flutter/services.dart';
 
 import '../../focus/dpad_navigator.dart';
+import '../../media/media_item.dart';
 import '../../mpv/mpv.dart';
-import '../../models/plex_media_info.dart';
-import '../../models/plex_metadata.dart';
+import '../../media/media_source_info.dart';
 import '../../services/fullscreen_state_manager.dart';
+import '../../services/scrub_preview_source.dart';
 import '../../utils/desktop_window_padding.dart';
 import '../../utils/platform_detector.dart';
 import '../../utils/formatters.dart';
@@ -30,11 +31,12 @@ import 'widgets/track_chapter_controls.dart';
 /// Desktop-specific video controls layout with top bar and bottom controls
 class DesktopVideoControls extends StatefulWidget {
   final Player player;
-  final PlexMetadata metadata;
+  final MediaItem metadata;
   final VoidCallback? onNext;
   final VoidCallback? onPrevious;
-  final List<PlexChapter> chapters;
+  final List<MediaChapter> chapters;
   final bool chaptersLoaded;
+  final bool showChapterMarkersOnTimeline;
   final int seekTimeSmall;
   final VoidCallback onSeekToPreviousChapter;
   final VoidCallback onSeekToNextChapter;
@@ -61,7 +63,7 @@ class DesktopVideoControls extends StatefulWidget {
   final ValueNotifier<bool>? hasFirstFrame;
 
   /// Optional callback that returns thumbnail image bytes for a given timestamp.
-  final Uint8List? Function(Duration time)? thumbnailDataBuilder;
+  final ScrubFrame? Function(Duration time)? thumbnailDataBuilder;
 
   /// Channel name for live TV display
   final String? liveChannelName;
@@ -84,7 +86,7 @@ class DesktopVideoControls extends StatefulWidget {
   final bool showQueueTab;
 
   /// Called when a queue item is selected in the content strip
-  final Function(PlexMetadata)? onQueueItemSelected;
+  final Function(MediaItem)? onQueueItemSelected;
 
   /// Called to cancel auto-hide timer (e.g., when content strip is shown)
   final VoidCallback? onCancelAutoHide;
@@ -106,6 +108,7 @@ class DesktopVideoControls extends StatefulWidget {
     this.onPrevious,
     required this.chapters,
     required this.chaptersLoaded,
+    this.showChapterMarkersOnTimeline = true,
     required this.seekTimeSmall,
     required this.onSeekToPreviousChapter,
     required this.onSeekToNextChapter,
@@ -698,6 +701,7 @@ class DesktopVideoControlsState extends State<DesktopVideoControls> {
               player: widget.player,
               chapters: widget.chapters,
               chaptersLoaded: widget.chaptersLoaded,
+              showChapterMarkersOnTimeline: widget.showChapterMarkersOnTimeline,
               onSeek: widget.onSeek,
               onSeekEnd: widget.onSeekEnd,
               horizontalLayout: true,
@@ -845,7 +849,7 @@ class DesktopVideoControlsState extends State<DesktopVideoControls> {
                     ),
                   ),
                 ],
-                // Finish time (hidden for live TV and when too narrow to fit)
+                // Finish time (hidden for live TV, faded when too narrow)
                 if (_isLive)
                   const Spacer()
                 else
@@ -877,20 +881,15 @@ class DesktopVideoControlsState extends State<DesktopVideoControls> {
                                 );
                                 const style = TextStyle(color: Colors.white70, fontSize: 13);
 
-                                return LayoutBuilder(
-                                  builder: (context, constraints) {
-                                    final tp = TextPainter(
-                                      text: TextSpan(text: text, style: style),
-                                      textDirection: TextDirection.ltr,
-                                    )..layout();
-                                    final textWidth = tp.width + 8;
-                                    tp.dispose();
-                                    if (textWidth > constraints.maxWidth) return const SizedBox.shrink();
-                                    return Padding(
-                                      padding: const EdgeInsets.only(left: 8),
-                                      child: Text(text, style: style),
-                                    );
-                                  },
+                                return Padding(
+                                  padding: const EdgeInsets.only(left: 8),
+                                  child: Text(
+                                    text,
+                                    style: style,
+                                    maxLines: 1,
+                                    softWrap: false,
+                                    overflow: TextOverflow.fade,
+                                  ),
                                 );
                               },
                             );

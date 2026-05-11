@@ -1,12 +1,22 @@
+import 'dart:ui' as ui;
+
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
 /// Shared utility for simulating key press events through the focus tree.
 ///
-/// Used by both [CompanionRemoteReceiver] and [GamepadService] to translate
-/// external input (remote commands, gamepad buttons) into focus-tree key events.
+/// Used by companion remotes, Apple TV touch input, and gamepad services to
+/// translate external input into focus-tree key events.
 void simulateKeyPress(LogicalKeyboardKey logicalKey) {
+  // The dispatch below is deferred via addPostFrameCallback to ensure the
+  // focus tree is settled before we walk it. That post-frame callback only
+  // fires after a frame actually renders — and when Flutter is idle (no
+  // animations, no rebuilds), the engine will never schedule one on its
+  // own, so the callback hangs indefinitely. Force a frame so external
+  // input (gamepad, tvOS remote, companion remote) always advances focus
+  // immediately rather than batching until something else wakes the engine.
+  scheduleFrameIfIdle();
   SchedulerBinding.instance.addPostFrameCallback((_) {
     final focusNode = FocusManager.instance.primaryFocus;
     if (focusNode == null) return;
@@ -17,9 +27,9 @@ void simulateKeyPress(LogicalKeyboardKey logicalKey) {
       physicalKey: physicalKey,
       logicalKey: logicalKey,
       timeStamp: Duration(milliseconds: DateTime.now().millisecondsSinceEpoch),
+      deviceType: ui.KeyEventDeviceType.directionalPad,
     );
 
-    // Walk up the focus tree dispatching the key event
     FocusNode? node = focusNode;
     KeyEventResult result = KeyEventResult.ignored;
 
@@ -30,11 +40,11 @@ void simulateKeyPress(LogicalKeyboardKey logicalKey) {
       node = node.parent;
     }
 
-    // Send key up event
     final keyUpEvent = KeyUpEvent(
       physicalKey: physicalKey,
       logicalKey: logicalKey,
       timeStamp: Duration(milliseconds: DateTime.now().millisecondsSinceEpoch),
+      deviceType: ui.KeyEventDeviceType.directionalPad,
     );
 
     node = focusNode;
@@ -62,6 +72,7 @@ PhysicalKeyboardKey _getPhysicalKey(LogicalKeyboardKey logicalKey) {
   if (logicalKey == LogicalKeyboardKey.arrowLeft) return PhysicalKeyboardKey.arrowLeft;
   if (logicalKey == LogicalKeyboardKey.arrowRight) return PhysicalKeyboardKey.arrowRight;
   if (logicalKey == LogicalKeyboardKey.enter) return PhysicalKeyboardKey.enter;
+  if (logicalKey == LogicalKeyboardKey.select) return PhysicalKeyboardKey.select;
   if (logicalKey == LogicalKeyboardKey.escape) return PhysicalKeyboardKey.escape;
   if (logicalKey == LogicalKeyboardKey.space) return PhysicalKeyboardKey.space;
   if (logicalKey == LogicalKeyboardKey.contextMenu) return PhysicalKeyboardKey.contextMenu;

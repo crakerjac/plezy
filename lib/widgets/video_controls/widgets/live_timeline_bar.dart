@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
 
 import '../../../models/livetv_capture_buffer.dart';
 import '../../../mpv/mpv.dart';
 import '../../../focus/focusable_wrapper.dart';
+import '../../../utils/formatters.dart';
 
 /// Timeline bar for live TV time-shift.
 ///
@@ -51,9 +51,9 @@ class _LiveTimelineBarState extends State<LiveTimelineBar> {
 
   int _displayPosition(Duration playerPosition) => _isDragging ? _dragPositionEpoch : _currentEpoch(playerPosition);
 
-  String _formatEpochTime(int epochSeconds) {
+  String _formatEpochTime(BuildContext context, int epochSeconds) {
     final dt = DateTime.fromMillisecondsSinceEpoch(epochSeconds * 1000);
-    return DateFormat.jm().format(dt);
+    return formatClockTime(dt, is24Hour: MediaQuery.alwaysUse24HourFormatOf(context));
   }
 
   double _epochToFraction(int epoch) {
@@ -65,6 +65,11 @@ class _LiveTimelineBarState extends State<LiveTimelineBar> {
   int _fractionToEpoch(double fraction) {
     final range = _rangeEnd - _rangeStart;
     return (_rangeStart + (fraction * range).round()).clamp(_rangeStart, _rangeEnd);
+  }
+
+  double _widthOf(BuildContext context) {
+    final renderObject = context.findRenderObject();
+    return renderObject is RenderBox ? renderObject.size.width : 0.0;
   }
 
   @override
@@ -88,7 +93,7 @@ class _LiveTimelineBarState extends State<LiveTimelineBar> {
     return Row(
       children: [
         Text(
-          _formatEpochTime(displayPos),
+          _formatEpochTime(context, displayPos),
           style: const TextStyle(color: Colors.white70, fontSize: 13, fontFeatures: [FontFeature.tabularFigures()]),
         ),
         const SizedBox(width: 8),
@@ -107,7 +112,7 @@ class _LiveTimelineBarState extends State<LiveTimelineBar> {
           Align(
             alignment: Alignment.centerLeft,
             child: Text(
-              _formatEpochTime(displayPos),
+              _formatEpochTime(context, displayPos),
               style: const TextStyle(color: Colors.white70, fontSize: 12, fontFeatures: [FontFeature.tabularFigures()]),
             ),
           ),
@@ -127,20 +132,17 @@ class _LiveTimelineBarState extends State<LiveTimelineBar> {
       autoScroll: false,
       useBackgroundFocus: true,
       disableScale: true,
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final width = constraints.maxWidth;
+      child: Builder(
+        builder: (context) {
           return GestureDetector(
             onHorizontalDragStart: widget.enabled ? _onDragStart : null,
-            onHorizontalDragUpdate: widget.enabled ? (details) => _onDragUpdate(details, width) : null,
+            onHorizontalDragUpdate: widget.enabled ? (details) => _onDragUpdate(details, _widthOf(context)) : null,
             onHorizontalDragEnd: widget.enabled ? _onDragEnd : null,
-            onTapUp: widget.enabled ? (details) => _onTap(details, width) : null,
+            onTapUp: widget.enabled ? (details) => _onTap(details, _widthOf(context)) : null,
             child: SizedBox(
+              width: double.infinity,
               height: 24,
-              child: CustomPaint(
-                size: Size(width, 24),
-                painter: _LiveTimelinePainter(positionFraction: positionFraction),
-              ),
+              child: CustomPaint(painter: _LiveTimelinePainter(positionFraction: positionFraction)),
             ),
           );
         },
@@ -190,7 +192,6 @@ class _LiveTimelinePainter extends CustomPainter {
     final trackRadius = Radius.circular(trackHeight / 2);
     final posX = positionFraction * w;
 
-    // Background track
     canvas.drawRRect(
       RRect.fromRectAndRadius(
         Rect.fromCenter(center: Offset(w / 2, trackY), width: w, height: trackHeight),
@@ -199,7 +200,6 @@ class _LiveTimelinePainter extends CustomPainter {
       Paint()..color = Colors.white.withValues(alpha: 0.15),
     );
 
-    // Played region
     if (posX > 0) {
       canvas.drawRRect(
         RRect.fromRectAndRadius(

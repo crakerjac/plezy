@@ -1,16 +1,24 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
 import '../focus/focusable_action_bar.dart';
 import '../focus/input_mode_tracker.dart';
 import '../focus/key_event_utils.dart';
+import '../media/media_item.dart';
+import '../media/media_playlist.dart';
 import '../mixins/grid_focus_node_mixin.dart';
-import '../models/plex_metadata.dart';
-import '../providers/settings_provider.dart';
-import '../services/settings_service.dart' show ViewMode;
+import '../services/settings_service.dart';
+import '../widgets/settings_builder.dart';
 import '../utils/grid_size_calculator.dart';
 import '../widgets/focusable_media_card.dart';
 import '../widgets/media_grid_delegate.dart';
 import '../widgets/skeleton_media_card.dart';
+
+/// Extract the stable id from a [MediaItem]/[MediaPlaylist] for use as a
+/// Flutter widget Key.
+String _idForItem(Object item) {
+  if (item is MediaItem) return item.id;
+  if (item is MediaPlaylist) return item.id;
+  return identityHashCode(item).toString();
+}
 
 /// Mixin that provides common focus navigation functionality for detail screens.
 /// Handles app bar focus, back navigation, scroll-to-top, and grid item focus management.
@@ -150,13 +158,16 @@ mixin FocusableDetailScreenMixin<T extends StatefulWidget> on State<T>, GridFocu
   /// Used by collection and smart playlist detail screens.
   Widget buildFocusableGrid({
     required List<dynamic> items,
-    required void Function(String ratingKey) onRefresh,
+    required void Function(String itemId) onRefresh,
     String? collectionId,
     VoidCallback? onListRefresh,
   }) {
-    return Consumer<SettingsProvider>(
-      builder: (context, settingsProvider, child) {
-        final isListMode = settingsProvider.viewMode == ViewMode.list;
+    return SettingsBuilder(
+      prefs: const [SettingsService.viewMode, SettingsService.libraryDensity],
+      builder: (context) {
+        final svc = SettingsService.instanceOrNull!;
+        final isListMode = svc.read(SettingsService.viewMode) == ViewMode.list;
+        final libraryDensity = svc.read(SettingsService.libraryDensity);
 
         if (isListMode) {
           return SliverPadding(
@@ -168,7 +179,7 @@ mixin FocusableDetailScreenMixin<T extends StatefulWidget> on State<T>, GridFocu
                 final focusNode = _focusNodeForIndex(index);
 
                 return FocusableMediaCard(
-                  key: Key(item.ratingKey),
+                  key: Key(_idForItem(item)),
                   item: item,
                   focusNode: focusNode,
                   disableScale: true,
@@ -184,17 +195,14 @@ mixin FocusableDetailScreenMixin<T extends StatefulWidget> on State<T>, GridFocu
           );
         }
 
-        final maxExtent = GridSizeCalculator.getMaxCrossAxisExtent(context, settingsProvider.libraryDensity);
+        final maxExtent = GridSizeCalculator.getMaxCrossAxisExtent(context, libraryDensity);
         return SliverPadding(
           padding: const EdgeInsets.all(8),
           sliver: SliverLayoutBuilder(
             builder: (context, constraints) {
               final columnCount = GridSizeCalculator.getColumnCount(constraints.crossAxisExtent, maxExtent);
               return SliverGrid.builder(
-                gridDelegate: MediaGridDelegate.createDelegate(
-                  context: context,
-                  density: settingsProvider.libraryDensity,
-                ),
+                gridDelegate: MediaGridDelegate.createDelegate(context: context, density: libraryDensity),
                 itemCount: items.length,
                 itemBuilder: (context, index) {
                   final item = items[index];
@@ -202,7 +210,7 @@ mixin FocusableDetailScreenMixin<T extends StatefulWidget> on State<T>, GridFocu
                   final focusNode = _focusNodeForIndex(index);
 
                   return FocusableMediaCard(
-                    key: Key(item.ratingKey),
+                    key: Key(_idForItem(item)),
                     item: item,
                     focusNode: focusNode,
                     onRefresh: onRefresh,
@@ -227,15 +235,18 @@ mixin FocusableDetailScreenMixin<T extends StatefulWidget> on State<T>, GridFocu
   /// the caller can kick off a page fetch containing that index.
   Widget buildSparseFocusableGrid({
     required int totalItems,
-    required PlexMetadata? Function(int index) itemAt,
-    required void Function(String ratingKey) onRefresh,
+    required MediaItem? Function(int index) itemAt,
+    required void Function(String itemId) onRefresh,
     void Function(int index)? onSkeletonVisible,
     String? collectionId,
     VoidCallback? onListRefresh,
   }) {
-    return Consumer<SettingsProvider>(
-      builder: (context, settingsProvider, child) {
-        final isListMode = settingsProvider.viewMode == ViewMode.list;
+    return SettingsBuilder(
+      prefs: const [SettingsService.viewMode, SettingsService.libraryDensity],
+      builder: (context) {
+        final svc = SettingsService.instanceOrNull!;
+        final isListMode = svc.read(SettingsService.viewMode) == ViewMode.list;
+        final libraryDensity = svc.read(SettingsService.libraryDensity);
 
         Widget buildTile(int index, {required bool inFirstRow, required bool disableScale}) {
           final item = itemAt(index);
@@ -245,7 +256,7 @@ mixin FocusableDetailScreenMixin<T extends StatefulWidget> on State<T>, GridFocu
           }
           final focusNode = index == 0 ? firstItemFocusNode : getGridItemFocusNode(index, prefix: 'detail_grid_item');
           return FocusableMediaCard(
-            key: Key(item.ratingKey),
+            key: Key(item.id),
             item: item,
             focusNode: focusNode,
             disableScale: disableScale,
@@ -268,17 +279,14 @@ mixin FocusableDetailScreenMixin<T extends StatefulWidget> on State<T>, GridFocu
           );
         }
 
-        final maxExtent = GridSizeCalculator.getMaxCrossAxisExtent(context, settingsProvider.libraryDensity);
+        final maxExtent = GridSizeCalculator.getMaxCrossAxisExtent(context, libraryDensity);
         return SliverPadding(
           padding: const EdgeInsets.all(8),
           sliver: SliverLayoutBuilder(
             builder: (context, constraints) {
               final columnCount = GridSizeCalculator.getColumnCount(constraints.crossAxisExtent, maxExtent);
               return SliverGrid.builder(
-                gridDelegate: MediaGridDelegate.createDelegate(
-                  context: context,
-                  density: settingsProvider.libraryDensity,
-                ),
+                gridDelegate: MediaGridDelegate.createDelegate(context: context, density: libraryDensity),
                 itemCount: totalItems,
                 itemBuilder: (context, index) => buildTile(
                   index,

@@ -1,13 +1,29 @@
+import 'dart:ui' as ui;
+
 import 'package:flutter/services.dart';
 
-/// Extension on KeyEvent for common event type checks.
 extension KeyEventActionable on KeyEvent {
-  /// Whether this event should trigger an action (KeyDownEvent or KeyRepeatEvent).
-  /// Use this to filter out KeyUpEvents early in key handlers.
   bool get isActionable => this is KeyDownEvent || this is KeyRepeatEvent;
+  bool get isPhysicalKeyboardEvent => deviceType == ui.KeyEventDeviceType.keyboard;
+  // Only true keyboard submit keys belong here. LogicalKeyboardKey.select is
+  // a TV-remote / dpad-center key (Android DPAD_CENTER, tvOS UIPressTypeSelect)
+  // — USB keyboards never emit it. The custom Flutter tvOS engine reports its
+  // synthesized Siri Remote presses with deviceType=keyboard, so classifying
+  // select-with-keyboard-deviceType as a "keyboard enter" would route center
+  // dpad through TextField submit and skip the TV virtual keyboard.
+  bool get isPhysicalKeyboardEnter =>
+      deviceType == ui.KeyEventDeviceType.keyboard &&
+      (logicalKey == LogicalKeyboardKey.enter || logicalKey == LogicalKeyboardKey.numpadEnter);
+
+  bool get isTvSelectEvent {
+    // Dpad-center / gamepad-A are TV-remote-only — always treat as TV select,
+    // regardless of the deviceType claim from the engine.
+    if (logicalKey == LogicalKeyboardKey.select || logicalKey == LogicalKeyboardKey.gameButtonA) return true;
+    if (isPhysicalKeyboardEvent) return false;
+    return logicalKey == LogicalKeyboardKey.enter || logicalKey == LogicalKeyboardKey.numpadEnter;
+  }
 }
 
-/// Shared sets for keyboard key categories.
 final _dpadDirectionKeys = {
   LogicalKeyboardKey.arrowUp,
   LogicalKeyboardKey.arrowDown,
@@ -31,35 +47,18 @@ final _backKeys = {
 
 final _contextMenuKeys = {LogicalKeyboardKey.contextMenu, LogicalKeyboardKey.gameButtonX};
 
-/// Extension methods for checking D-pad related keys.
 extension DpadKeyExtension on LogicalKeyboardKey {
-  /// Whether this key is a D-pad directional key.
   bool get isDpadDirection => _dpadDirectionKeys.contains(this);
-
-  /// Whether this key is a select/activate key.
   bool get isSelectKey => _selectKeys.contains(this);
-
-  /// Whether this key is a back/cancel key.
   bool get isBackKey => _backKeys.contains(this);
-
-  /// Whether this key is a context menu key.
   bool get isContextMenuKey => _contextMenuKeys.contains(this);
 
-  /// Whether this key is a navigation key (dpad, select, back, context menu, tab).
-  /// Use this to distinguish navigation keys from typing/volume/media keys.
   bool get isNavigationKey =>
       isDpadDirection || isSelectKey || isBackKey || isContextMenuKey || this == LogicalKeyboardKey.tab;
 
-  /// Whether this key moves focus left.
   bool get isLeftKey => this == LogicalKeyboardKey.arrowLeft;
-
-  /// Whether this key moves focus right.
   bool get isRightKey => this == LogicalKeyboardKey.arrowRight;
-
-  /// Whether this key moves focus up.
   bool get isUpKey => this == LogicalKeyboardKey.arrowUp;
-
-  /// Whether this key moves focus down.
   bool get isDownKey => this == LogicalKeyboardKey.arrowDown;
 }
 

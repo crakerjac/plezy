@@ -3,20 +3,19 @@ import 'package:material_symbols_icons/symbols.dart';
 import 'package:flutter/services.dart';
 
 import '../../../focus/dpad_navigator.dart';
+import '../../../media/media_item.dart';
+import '../../../media/media_version.dart';
 import '../../../mpv/mpv.dart';
-import '../../../models/plex_media_info.dart';
-import '../../../models/plex_media_version.dart';
+import '../../../media/media_source_info.dart';
 import '../../../services/sleep_timer_service.dart';
 import '../../../utils/platform_detector.dart';
 import '../../../i18n/strings.g.dart';
 import '../../../widgets/overlay_sheet.dart';
-import '../../../models/plex_metadata.dart';
 import '../models/track_controls_state.dart';
 import '../../../models/transcode_quality_preset.dart';
 import '../sheets/chapter_sheet.dart';
 import '../sheets/queue_sheet.dart';
 import '../sheets/track_sheet.dart';
-import '../sheets/version_quality_sheet.dart';
 import '../sheets/video_settings_sheet.dart';
 import '../../../services/shader_service.dart';
 import '../helpers/track_filter_helper.dart';
@@ -25,7 +24,7 @@ import '../video_control_button.dart';
 /// Row of track and chapter control buttons for the video player
 class TrackChapterControls extends StatelessWidget {
   final Player player;
-  final List<PlexChapter> chapters;
+  final List<MediaChapter> chapters;
   final bool chaptersLoaded;
   final TrackControlsState trackControlsState;
   final Function(Duration position)? onSeekCompleted;
@@ -63,7 +62,7 @@ class TrackChapterControls extends StatelessWidget {
     this.hideChaptersAndQueue = false,
   });
 
-  List<PlexMediaVersion> get availableVersions => trackControlsState.availableVersions;
+  List<MediaVersion> get availableVersions => trackControlsState.availableVersions;
   int get selectedMediaIndex => trackControlsState.selectedMediaIndex;
   TranscodeQualityPreset get selectedQualityPreset => trackControlsState.selectedQualityPreset;
   bool get serverSupportsTranscoding => trackControlsState.serverSupportsTranscoding;
@@ -98,7 +97,7 @@ class TrackChapterControls extends StatelessWidget {
   bool get isLive => trackControlsState.isLive;
   bool get subtitlesVisible => trackControlsState.subtitlesVisible;
   bool get showQueueButton => trackControlsState.showQueueButton;
-  Function(PlexMetadata)? get onQueueItemSelected => trackControlsState.onQueueItemSelected;
+  Function(MediaItem)? get onQueueItemSelected => trackControlsState.onQueueItemSelected;
   String get ratingKey => trackControlsState.ratingKey;
   String? get mediaTitle => trackControlsState.mediaTitle;
   Future<void> Function()? get onSubtitleDownloaded => trackControlsState.onSubtitleDownloaded;
@@ -217,6 +216,13 @@ class TrackChapterControls extends StatelessWidget {
                           subtitleSyncOffset: subtitleSyncOffset,
                           canControl: canControl,
                           isLive: isLive,
+                          availableVersions: availableVersions,
+                          selectedMediaIndex: selectedMediaIndex,
+                          selectedQualityPreset: selectedQualityPreset,
+                          serverSupportsTranscoding: serverSupportsTranscoding,
+                          sourceDurationMs: trackControlsState.sourceDurationMs,
+                          onVersionSelected: onSwitchVersion == null ? null : (i) => onSwitchVersion!(i),
+                          onQualitySelected: onSwitchQualityPreset,
                           shaderService: shaderService,
                           onShaderChanged: onShaderChanged,
                           isAmbientLightingEnabled: isAmbientLightingEnabled,
@@ -273,6 +279,7 @@ class TrackChapterControls extends StatelessWidget {
                         sourceAudioTracks: trackControlsState.sourceAudioTracks,
                         selectedAudioStreamId: trackControlsState.selectedAudioStreamId,
                         onSwitchAudioStreamId: trackControlsState.onSwitchAudioStreamId,
+                        subtitleSearchSupported: trackControlsState.subtitleSearchSupported,
                       ),
                     )
                     .whenComplete(() => onStartAutoHide?.call());
@@ -329,42 +336,6 @@ class TrackChapterControls extends StatelessWidget {
                 onCancelAutoHide?.call();
                 OverlaySheetController.of(context)
                     .show(builder: (_) => QueueSheet(onItemSelected: onQueueItemSelected!))
-                    .whenComplete(() => onStartAutoHide?.call());
-              },
-            ),
-          );
-          buttonIndex++;
-        }
-
-        // Version & Quality button
-        final showVersionQuality =
-            (availableVersions.length > 1 || serverSupportsTranscoding) &&
-            (onSwitchVersion != null || onSwitchQualityPreset != null);
-        if (showVersionQuality) {
-          final currentIndex = buttonIndex;
-          buttons.add(
-            _buildTrackButton(
-              buttonIndex: currentIndex,
-              icon: Symbols.high_quality_rounded,
-              tooltip: t.videoControls.versionQualityButton,
-              semanticLabel: t.videoControls.versionQualityButton,
-              tracks: tracks,
-              isMobile: isMobile,
-              isDesktop: isDesktop,
-              onPressed: () {
-                onCancelAutoHide?.call();
-                OverlaySheetController.of(context)
-                    .show(
-                      builder: (_) => VersionQualitySheet(
-                        availableVersions: availableVersions,
-                        selectedMediaIndex: selectedMediaIndex,
-                        selectedQualityPreset: selectedQualityPreset,
-                        serverSupportsTranscoding: serverSupportsTranscoding,
-                        sourceDurationMs: trackControlsState.sourceDurationMs,
-                        onVersionSelected: (i) => onSwitchVersion?.call(i),
-                        onQualitySelected: (p) => onSwitchQualityPreset?.call(p),
-                      ),
-                    )
                     .whenComplete(() => onStartAutoHide?.call());
               },
             ),
@@ -493,10 +464,6 @@ class TrackChapterControls extends StatelessWidget {
     count++; // Audio & subtitles button always shown
     if (chapters.isNotEmpty && !hideChaptersAndQueue) count++;
     if (showQueueButton && onQueueItemSelected != null && !hideChaptersAndQueue) count++;
-    if ((availableVersions.length > 1 || serverSupportsTranscoding) &&
-        (onSwitchVersion != null || onSwitchQualityPreset != null)) {
-      count++;
-    }
     if (onTogglePIPMode != null) count++;
     if (onCycleBoxFitMode != null) count++;
     if (isMobile && !PlatformDetector.isTV()) count++; // Rotation lock (not on TV)

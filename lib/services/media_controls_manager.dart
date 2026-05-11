@@ -1,9 +1,9 @@
 import 'package:os_media_controls/os_media_controls.dart';
 import 'package:rate_limiter/rate_limiter.dart';
 
-import 'plex_client.dart';
-import '../models/plex_metadata.dart';
-import '../utils/content_utils.dart';
+import '../media/media_server_client.dart';
+import '../media/media_item.dart';
+import '../media/media_item_types.dart';
 import '../utils/app_logger.dart';
 
 /// Manages OS media controls integration for video playback.
@@ -24,6 +24,7 @@ class MediaControlsManager {
   bool? _lastCanGoNext;
   bool? _lastCanGoPrevious;
   bool? _lastCanSeek;
+  bool _updatesSuspended = false;
 
   MediaControlsManager() {
     _throttledUpdate = throttle(
@@ -36,24 +37,27 @@ class MediaControlsManager {
 
   /// Update media metadata displayed in OS media controls
   ///
-  /// This includes title, artist, artwork, and duration.
-  Future<void> updateMetadata({required PlexMetadata metadata, PlexClient? client, Duration? duration}) async {
+  /// This includes title, artist, artwork, and duration. Backend-neutral —
+  /// the [MediaServerClient.thumbnailUrl] adapter handles per-backend URL
+  /// shape (Plex's `/photo/:/transcode` proxy vs. Jellyfin's
+  /// self-authenticated image URL).
+  Future<void> updateMetadata({required MediaItem metadata, MediaServerClient? client, Duration? duration}) async {
+    if (_updatesSuspended) return;
+
     try {
-      // Build artwork URL if client is available
       String? artworkUrl;
-      if (client != null && metadata.thumb != null) {
+      if (client != null && metadata.thumbPath != null) {
         try {
-          artworkUrl = client.getThumbnailUrl(metadata.thumb!);
+          artworkUrl = client.thumbnailUrl(metadata.thumbPath!);
           appLogger.d('Artwork URL for media controls: $artworkUrl');
         } catch (e) {
           appLogger.w('Failed to build artwork URL', error: e);
         }
       }
 
-      // Update OS media controls
       await OsMediaControls.setMetadata(
         MediaMetadata(
-          title: metadata.title!,
+          title: metadata.title ?? '',
           artist: _buildArtist(metadata),
           artworkUrl: artworkUrl,
           duration: duration,
@@ -76,6 +80,8 @@ class MediaControlsManager {
     required double speed,
     bool force = false,
   }) async {
+    if (_updatesSuspended) return;
+
     final params = _PlaybackStateParams(isPlaying: isPlaying, position: position, speed: speed);
 
     if (force) {
@@ -83,12 +89,10 @@ class MediaControlsManager {
       _throttledUpdate.cancel();
       await _doUpdatePlaybackState(params);
     } else {
-      // Use throttled update
       _throttledUpdate([params]);
     }
   }
 
-  /// Internal method to actually perform the playback state update
   Future<void> _doUpdatePlaybackState(_PlaybackStateParams params) async {
     try {
       await OsMediaControls.setPlaybackState(
@@ -111,6 +115,8 @@ class MediaControlsManager {
   /// - Playlist items: Enable based on playlist position
   /// - Movies: Usually disabled
   Future<void> setControlsEnabled({bool canGoNext = false, bool canGoPrevious = false, bool canSeek = false}) async {
+    if (_updatesSuspended) return;
+
     try {
       final controlsToEnable = <MediaControl>[];
       final controlsToDisable = <MediaControl>[];
@@ -159,6 +165,19 @@ class MediaControlsManager {
     }
   }
 
+  void suspendUpdates() {
+    if (_updatesSuspended) return;
+    _updatesSuspended = true;
+    _throttledUpdate.cancel();
+    appLogger.d('Media controls updates suspended');
+  }
+
+  void resumeUpdates() {
+    if (!_updatesSuspended) return;
+    _updatesSuspended = false;
+    appLogger.d('Media controls updates resumed');
+  }
+
   /// Dispose resources
   void dispose() {
     _throttledUpdate.cancel();
@@ -169,16 +188,14 @@ class MediaControlsManager {
   /// For episodes: "Show Name - Season X Episode Y"
   /// For movies: Director or studio
   /// For other content: Fallback to year or empty
-  String _buildArtist(PlexMetadata metadata) {
+  String _buildArtist(MediaItem metadata) {
     if (metadata.isEpisode) {
       final parts = <String>[];
 
-      // Add show name
       if (metadata.grandparentTitle != null) {
         parts.add(metadata.grandparentTitle!);
       }
 
-      // Add season/episode info
       if (metadata.parentIndex != null && metadata.index != null) {
         parts.add('S${metadata.parentIndex} E${metadata.index}');
       } else if (metadata.parentTitle != null) {
@@ -187,8 +204,6 @@ class MediaControlsManager {
 
       return parts.join(' • ');
     } else if (metadata.isMovie) {
-      // For movies, use director or studio
-      // Note: These fields may need to be added to PlexMetadata model
       if (metadata.year != null) {
         return metadata.year.toString();
       }

@@ -13,17 +13,22 @@ import '../../focus/input_mode_tracker.dart';
 import '../../focus/key_event_utils.dart';
 import '../../mixins/tab_navigation_mixin.dart';
 import '../../../services/plex_client.dart';
-import '../../models/plex_library.dart';
-import '../../models/plex_metadata.dart';
+import '../../media/media_backend.dart';
+import '../../media/media_item.dart';
+import '../../media/media_library.dart';
+import '../../media/media_server_client.dart';
 import '../../providers/hidden_libraries_provider.dart';
 import '../../providers/libraries_provider.dart';
-import '../../providers/multi_server_provider.dart';
+import '../../services/settings_service.dart';
+import '../../widgets/settings_builder.dart';
 import '../../utils/app_logger.dart';
 import '../../utils/dialogs.dart';
+import '../../utils/library_grouping.dart';
 import '../../utils/platform_detector.dart';
 import '../../utils/provider_extensions.dart';
 import '../../utils/snackbar_helper.dart';
 import '../../utils/content_utils.dart';
+import '../../widgets/backend_badge.dart';
 import '../../widgets/desktop_app_bar.dart';
 import '../../widgets/overlay_sheet.dart';
 import '../../services/storage_service.dart';
@@ -38,7 +43,7 @@ import 'tabs/library_playlists_tab.dart';
 
 enum LibraryTabType { recommended, browse, collections, playlists }
 
-List<LibraryTabType> _getVisibleTabs(PlexLibrary library) {
+List<LibraryTabType> _getVisibleTabs(MediaLibrary library) {
   if (library.isShared) return [LibraryTabType.browse, LibraryTabType.playlists];
   return LibraryTabType.values;
 }
@@ -82,16 +87,6 @@ class _LibrariesScreenState extends State<LibrariesScreen>
         ItemUpdatable,
         TickerProviderStateMixin,
         TabNavigationMixin {
-  @override
-  PlexClient get client {
-    final multiServerProvider = Provider.of<MultiServerProvider>(context, listen: false);
-    final serverId = multiServerProvider.onlineServerIds.firstOrNull;
-    if (serverId == null) {
-      throw Exception(t.errors.noClientAvailable);
-    }
-    return context.getClientForServer(serverId);
-  }
-
   // GlobalKeys for tabs to enable refresh
   final _recommendedTabKey = GlobalKey();
   final _browseTabKey = GlobalKey();
@@ -126,6 +121,34 @@ class _LibrariesScreenState extends State<LibrariesScreen>
 
   // Scroll controller for the outer CustomScrollView
   final ScrollController _outerScrollController = ScrollController();
+
+  /// Reveal the floating header by jumping the outer NestedScrollView back
+  /// to offset 0. The outer position is preserved across content changes
+  /// (library switch, library reload, filter/sort change), so any time the
+  /// inner is reset to the top we must explicitly resync the outer — the
+  /// natural delta-surrender coordination only fires on user scroll gestures.
+  ///
+  /// Iterates `positions` rather than reading `offset` because the controller
+  /// is shared between the simple CustomScrollView (loading/empty/error) and
+  /// the NestedScrollView (selected library), and during the transition both
+  /// can briefly be attached — `offset` would throw on `_positions.single`.
+  void _resetOuterScroll() {
+    if (!_outerScrollController.hasClients) return;
+    for (final position in _outerScrollController.positions) {
+      if (position.pixels > 0) {
+        position.jumpTo(0);
+      }
+    }
+  }
+
+  /// Override the mixin's [focusTabBar] so we reveal the floating header
+  /// (which contains the tab chips) before requesting focus. Programmatic
+  /// requestFocus alone does not snap a floating SliverAppBar back into view.
+  @override
+  void focusTabBar() {
+    _resetOuterScroll();
+    super.focusTabBar();
+  }
 
   @override
   void initState() {
@@ -260,9 +283,7 @@ class _LibrariesScreenState extends State<LibrariesScreen>
     }
 
     // Scroll outer view to top to ensure tab content (including chips bar) is visible
-    if (_outerScrollController.hasClients && _outerScrollController.offset > 0) {
-      _outerScrollController.jumpTo(0);
-    }
+    _resetOuterScroll();
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
@@ -368,7 +389,7 @@ class _LibrariesScreenState extends State<LibrariesScreen>
 
   Widget _buildTabContent(
     LibraryTabType type, {
-    required PlexLibrary library,
+    required MediaLibrary library,
     required bool isActive,
     required int tabIndex,
   }) {
@@ -388,6 +409,7 @@ class _LibrariesScreenState extends State<LibrariesScreen>
         suppressAutoFocus: suppressAutoFocus,
         onDataLoaded: () => _handleTabDataLoaded(tabIndex),
         onBack: focusTabBar,
+        onResetScroll: _resetOuterScroll,
       ),
       LibraryTabType.collections => LibraryCollectionsTab(
         key: _collectionsTabKey,
@@ -409,7 +431,7 @@ class _LibrariesScreenState extends State<LibrariesScreen>
   }
 
   /// Check if libraries come from multiple servers
-  bool _hasMultipleServers(List<PlexLibrary> libraries) {
+  bool _hasMultipleServers(List<MediaLibrary> libraries) {
     final uniqueServerIds = libraries.where((lib) => lib.serverId != null).map((lib) => lib.serverId).toSet();
     return uniqueServerIds.length > 1;
   }
@@ -434,6 +456,8 @@ class _LibrariesScreenState extends State<LibrariesScreen>
     final selectedLibrary = allLibraries.where((lib) => lib.globalKey == libraryGlobalKey).firstOrNull;
     if (selectedLibrary == null) return;
 
+    final isLibraryChange = _selectedLibraryGlobalKey != libraryGlobalKey;
+
     // Update visible tabs and state in the same synchronous block so no
     // intermediate rebuild can see a mismatched controller/key pair.
     _updateVisibleTabs(_getVisibleTabs(selectedLibrary));
@@ -444,6 +468,17 @@ class _LibrariesScreenState extends State<LibrariesScreen>
       // Clear loaded tabs tracking for new library
       _loadedTabs.clear();
     });
+
+    // The new TabBarView mounts with fresh inner positions at offset 0;
+    // bring the floating header back too. Also covers the case where the
+    // newly-active tab is not browse (which would otherwise have no inner
+    // jumpTo to catch via the browse-tab callback).
+    if (isLibraryChange) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _resetOuterScroll();
+      });
+    }
 
     // Mark that initial load is complete
     if (_isInitialLoad) {
@@ -479,7 +514,7 @@ class _LibrariesScreenState extends State<LibrariesScreen>
   }
 
   @override
-  void updateItemInLists(String ratingKey, PlexMetadata updatedMetadata) {
+  void updateItemInLists(String itemId, MediaItem updatedItem) {
     // Delegate to the active tab — parent doesn't maintain its own item list
   }
 
@@ -515,7 +550,7 @@ class _LibrariesScreenState extends State<LibrariesScreen>
     _initializeWithLibraries();
   }
 
-  Future<void> _toggleLibraryVisibility(PlexLibrary library) async {
+  Future<void> _toggleLibraryVisibility(MediaLibrary library) async {
     if (!mounted) return;
     final librariesProvider = context.read<LibrariesProvider>();
     final hiddenLibrariesProvider = Provider.of<HiddenLibrariesProvider>(context, listen: false);
@@ -544,7 +579,24 @@ class _LibrariesScreenState extends State<LibrariesScreen>
     }
   }
 
-  List<ContextMenuItem> _getLibraryMenuItems(PlexLibrary library) {
+  List<ContextMenuItem> _getLibraryMenuItems(MediaLibrary library) {
+    // Refresh metadata is the only admin action both backends support — Plex
+    // hits `/library/sections/{id}/refresh?force=1`, Jellyfin posts to
+    // `/Items/{id}/Refresh` (the library view is itself an item).
+    final refresh = ContextMenuItem(
+      value: 'refresh',
+      icon: Symbols.sync_rounded,
+      label: t.libraries.refreshMetadata,
+      requiresConfirmation: true,
+      confirmationTitle: t.libraries.refreshMetadata,
+      confirmationMessage: t.libraries.refreshMetadataConfirm(title: library.title),
+      isDestructive: true,
+    );
+    // Scan / analyze / empty trash hit Plex-only endpoints. Gating them keeps
+    // [getPlexClientForLibrary] from falling back through `_resolveClient` to
+    // the first online Plex server and firing the action against the wrong
+    // backend.
+    if (library.backend != MediaBackend.plex) return [refresh];
     return [
       ContextMenuItem(
         value: 'scan',
@@ -562,15 +614,7 @@ class _LibrariesScreenState extends State<LibrariesScreen>
         confirmationTitle: t.libraries.analyzeLibrary,
         confirmationMessage: t.libraries.analyzeLibraryConfirm(title: library.title),
       ),
-      ContextMenuItem(
-        value: 'refresh',
-        icon: Symbols.sync_rounded,
-        label: t.libraries.refreshMetadata,
-        requiresConfirmation: true,
-        confirmationTitle: t.libraries.refreshMetadata,
-        confirmationMessage: t.libraries.refreshMetadataConfirm(title: library.title),
-        isDestructive: true,
-      ),
+      refresh,
       ContextMenuItem(
         value: 'empty_trash',
         icon: Symbols.delete_outline_rounded,
@@ -583,7 +627,7 @@ class _LibrariesScreenState extends State<LibrariesScreen>
     ];
   }
 
-  Future<void> _handleLibraryMenuAction(String action, PlexLibrary library) async {
+  Future<void> _handleLibraryMenuAction(String action, MediaLibrary library) async {
     // Find the menu item for confirmation details
     final menuItems = _getLibraryMenuItems(library);
     final item = menuItems.where((i) => i.value == action).firstOrNull;
@@ -639,6 +683,7 @@ class _LibrariesScreenState extends State<LibrariesScreen>
       );
     } else {
       OverlaySheetController.of(context).show(
+        showDragHandle: true,
         builder: (context) => _LibraryManagementSheet(
           allLibraries: List.from(allLibraries),
           hiddenLibraryKeys: hiddenLibrariesProvider.hiddenLibraryKeys,
@@ -655,14 +700,14 @@ class _LibrariesScreenState extends State<LibrariesScreen>
   }
 
   Future<void> _performLibraryAction({
-    required PlexLibrary library,
+    required MediaLibrary library,
     required Future<void> Function(PlexClient client) action,
     required String progressMessage,
     required String successMessage,
     required String Function(Object error) failureMessage,
   }) async {
     try {
-      final client = context.getClientForLibrary(library);
+      final client = context.getPlexClientForLibrary(library);
 
       if (mounted) {
         showAppSnackBar(context, progressMessage, duration: const Duration(seconds: 2));
@@ -681,40 +726,71 @@ class _LibrariesScreenState extends State<LibrariesScreen>
     }
   }
 
-  Future<void> _scanLibrary(PlexLibrary library) {
+  /// Backend-neutral counterpart to [_performLibraryAction] for ops that exist
+  /// on the [MediaServerClient] interface (currently just refresh metadata).
+  /// Resolves the client through `getMediaClientForLibrary` so a Jellyfin
+  /// library is routed to its own server, not a fallback Plex one.
+  Future<void> _performMediaLibraryAction({
+    required MediaLibrary library,
+    required Future<void> Function(MediaServerClient client) action,
+    required String progressMessage,
+    required String successMessage,
+    required String Function(Object error) failureMessage,
+  }) async {
+    try {
+      final client = context.getMediaClientForLibrary(library);
+
+      if (mounted) {
+        showAppSnackBar(context, progressMessage, duration: const Duration(seconds: 2));
+      }
+
+      await action(client);
+
+      if (mounted) {
+        showSuccessSnackBar(context, successMessage);
+      }
+    } catch (e) {
+      appLogger.e('Library action failed', error: e);
+      if (mounted) {
+        showErrorSnackBar(context, failureMessage(e));
+      }
+    }
+  }
+
+  Future<void> _scanLibrary(MediaLibrary library) {
     return _performLibraryAction(
       library: library,
-      action: (client) => client.scanLibrary(library.key),
+      action: (client) => client.scanLibrary(library.id),
       progressMessage: t.messages.libraryScanning(title: library.title),
       successMessage: t.messages.libraryScanStarted(title: library.title),
       failureMessage: (error) => t.messages.libraryScanFailed(error: error.toString()),
     );
   }
 
-  Future<void> _refreshLibraryMetadata(PlexLibrary library) {
-    return _performLibraryAction(
+  Future<void> _refreshLibraryMetadata(MediaLibrary library) {
+    return _performMediaLibraryAction(
       library: library,
-      action: (client) => client.refreshLibraryMetadata(library.key),
+      action: (client) => client.refreshLibraryMetadata(library.id),
       progressMessage: t.messages.metadataRefreshing(title: library.title),
       successMessage: t.messages.metadataRefreshStarted(title: library.title),
       failureMessage: (error) => t.messages.metadataRefreshFailed(error: error.toString()),
     );
   }
 
-  Future<void> _emptyLibraryTrash(PlexLibrary library) {
+  Future<void> _emptyLibraryTrash(MediaLibrary library) {
     return _performLibraryAction(
       library: library,
-      action: (client) => client.emptyLibraryTrash(library.key),
+      action: (client) => client.emptyLibraryTrash(library.id),
       progressMessage: t.libraries.emptyingTrash(title: library.title),
       successMessage: t.libraries.trashEmptied(title: library.title),
       failureMessage: (error) => t.libraries.failedToEmptyTrash(error: error),
     );
   }
 
-  Future<void> _analyzeLibrary(PlexLibrary library) {
+  Future<void> _analyzeLibrary(MediaLibrary library) {
     return _performLibraryAction(
       library: library,
-      action: (client) => client.analyzeLibrary(library.key),
+      action: (client) => client.analyzeLibrary(library.id),
       progressMessage: t.libraries.analyzing(title: library.title),
       successMessage: t.libraries.analysisStarted(title: library.title),
       failureMessage: (error) => t.libraries.failedToAnalyze(error: error),
@@ -722,7 +798,7 @@ class _LibrariesScreenState extends State<LibrariesScreen>
   }
 
   /// Get set of library names that appear more than once (not globally unique)
-  Set<String> _getNonUniqueLibraryNames(List<PlexLibrary> libraries) {
+  Set<String> _getNonUniqueLibraryNames(List<MediaLibrary> libraries) {
     final nameCounts = <String, int>{};
     for (final lib in libraries) {
       nameCounts[lib.title] = (nameCounts[lib.title] ?? 0) + 1;
@@ -730,57 +806,122 @@ class _LibrariesScreenState extends State<LibrariesScreen>
     return nameCounts.entries.where((e) => e.value > 1).map((e) => e.key).toSet();
   }
 
-  /// Build dropdown menu items with server subtitle for non-unique names
-  List<PopupMenuEntry<String>> _buildGroupedLibraryMenuItems(List<PlexLibrary> visibleLibraries) {
-    // Find which library names are not unique
-    final nonUniqueNames = _getNonUniqueLibraryNames(visibleLibraries);
+  Widget _buildLibraryServerLabel(
+    MediaLibrary library,
+    TextStyle? style, {
+    double badgeSize = 11,
+    bool constrainText = false,
+    String? fallbackServerName,
+  }) {
+    final serverName = library.serverName ?? fallbackServerName;
+    if (serverName == null || serverName.isEmpty) return const SizedBox.shrink();
 
-    return visibleLibraries.map((library) {
-      final isSelected = library.globalKey == _selectedLibraryGlobalKey;
-      final showServerName = nonUniqueNames.contains(library.title) && library.serverName != null;
+    final text = Text(serverName, style: style, overflow: TextOverflow.ellipsis);
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        BackendBadge(backend: library.backend, size: badgeSize, color: style?.color),
+        const SizedBox(width: 4),
+        if (constrainText) Flexible(child: text) else text,
+      ],
+    );
+  }
 
-      return PopupMenuItem<String>(
-        value: library.globalKey,
-        child: Row(
-          children: [
-            AppIcon(
-              ContentTypeHelper.getLibraryIcon(library.type),
-              fill: 1,
-              size: 20,
-              color: isSelected ? Theme.of(context).colorScheme.primary : null,
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    library.title,
-                    style: TextStyle(
-                      fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
-                      color: isSelected ? Theme.of(context).colorScheme.primary : null,
-                    ),
+  PopupMenuItem<String> _buildLibraryServerHeaderMenuItem(MediaLibrary library, String serverKey) {
+    final style = Theme.of(context).textTheme.labelSmall?.copyWith(
+      fontWeight: FontWeight.w600,
+      letterSpacing: 0.4,
+      color: Theme.of(context).textTheme.bodySmall?.color?.withValues(alpha: 0.65),
+    );
+    return PopupMenuItem<String>(
+      enabled: false,
+      height: 32,
+      child: _buildLibraryServerLabel(
+        library,
+        style,
+        badgeSize: 12,
+        constrainText: true,
+        fallbackServerName: serverKey,
+      ),
+    );
+  }
+
+  PopupMenuItem<String> _buildLibraryMenuItem(MediaLibrary library, {required bool showServerName}) {
+    final isSelected = library.globalKey == _selectedLibraryGlobalKey;
+    return PopupMenuItem<String>(
+      value: library.globalKey,
+      child: Row(
+        children: [
+          AppIcon(
+            ContentTypeHelper.getLibraryIcon(library.kind.id),
+            fill: 1,
+            size: 20,
+            color: isSelected ? Theme.of(context).colorScheme.primary : null,
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  library.title,
+                  style: TextStyle(
+                    fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
+                    color: isSelected ? Theme.of(context).colorScheme.primary : null,
                   ),
-                  if (showServerName)
-                    Text(
-                      library.serverName!,
-                      style: TextStyle(
-                        fontSize: 11,
-                        color: Theme.of(context).textTheme.bodySmall?.color?.withValues(alpha: 0.6),
-                      ),
+                ),
+                if (showServerName)
+                  _buildLibraryServerLabel(
+                    library,
+                    TextStyle(
+                      fontSize: 11,
+                      color: Theme.of(context).textTheme.bodySmall?.color?.withValues(alpha: 0.6),
                     ),
-                ],
-              ),
+                    badgeSize: 10,
+                    constrainText: true,
+                  ),
+              ],
             ),
-          ],
-        ),
-      );
-    }).toList();
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Build dropdown menu items with server subtitle when needed for clarity.
+  List<PopupMenuEntry<String>> _buildGroupedLibraryMenuItems(
+    List<MediaLibrary> visibleLibraries, {
+    required bool showServerHeaders,
+  }) {
+    if (!showServerHeaders) {
+      final nonUniqueNames = _getNonUniqueLibraryNames(visibleLibraries);
+      return visibleLibraries.map((library) {
+        final showServerName = library.serverName != null && nonUniqueNames.contains(library.title);
+        return _buildLibraryMenuItem(library, showServerName: showServerName);
+      }).toList();
+    }
+
+    final grouped = groupLibrariesByFirstAppearance(visibleLibraries);
+    final menuItems = <PopupMenuEntry<String>>[];
+    for (final serverKey in grouped.serverOrder) {
+      final bucket = grouped.byServer[serverKey]!;
+      if (serverKey.isNotEmpty) {
+        menuItems.add(_buildLibraryServerHeaderMenuItem(bucket.first, serverKey));
+      }
+      for (final library in bucket) {
+        menuItems.add(_buildLibraryMenuItem(library, showServerName: false));
+      }
+    }
+    return menuItems;
   }
 
   /// Build the app bar title - either dropdown on mobile or simple title on desktop
-  Widget _buildAppBarTitle(List<PlexLibrary> visibleLibraries, PlexLibrary? selectedLibrary) {
+  Widget _buildAppBarTitle(
+    List<MediaLibrary> visibleLibraries,
+    MediaLibrary? selectedLibrary, {
+    required bool groupByServer,
+  }) {
     // No selection at all, or visible list is empty AND we're not browsing a hidden library
     if (_selectedLibraryGlobalKey == null || (visibleLibraries.isEmpty && selectedLibrary == null)) {
       return Text(t.libraries.title);
@@ -806,14 +947,15 @@ class _LibrariesScreenState extends State<LibrariesScreen>
     }
 
     // On mobile, show the dropdown
-    return _buildLibraryDropdownTitle(visibleLibraries);
+    return _buildLibraryDropdownTitle(visibleLibraries, groupByServer: groupByServer);
   }
 
-  Widget _buildLibraryDropdownTitle(List<PlexLibrary> visibleLibraries) {
+  Widget _buildLibraryDropdownTitle(List<MediaLibrary> visibleLibraries, {required bool groupByServer}) {
     final selectedLibrary =
         visibleLibraries.where((lib) => lib.globalKey == _selectedLibraryGlobalKey).firstOrNull ??
         visibleLibraries.firstOrNull;
     if (selectedLibrary == null) return Text(t.libraries.title);
+    final showServerHeaders = _hasMultipleServers(visibleLibraries) && groupByServer;
 
     return PopupMenuButton<String>(
       key: _libraryDropdownKey,
@@ -822,13 +964,13 @@ class _LibrariesScreenState extends State<LibrariesScreen>
       onSelected: (libraryGlobalKey) {
         _loadLibraryContent(libraryGlobalKey);
       },
-      itemBuilder: (context) => _buildGroupedLibraryMenuItems(visibleLibraries),
+      itemBuilder: (context) => _buildGroupedLibraryMenuItems(visibleLibraries, showServerHeaders: showServerHeaders),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            AppIcon(ContentTypeHelper.getLibraryIcon(selectedLibrary.type), fill: 1, size: 20),
+            AppIcon(ContentTypeHelper.getLibraryIcon(selectedLibrary.kind.id), fill: 1, size: 20),
             const SizedBox(width: 8),
             if (_hasMultipleServers(visibleLibraries) && selectedLibrary.serverName != null)
               Column(
@@ -836,11 +978,12 @@ class _LibrariesScreenState extends State<LibrariesScreen>
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Text(selectedLibrary.title, style: Theme.of(context).textTheme.titleMedium),
-                  Text(
-                    selectedLibrary.serverName!,
-                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                  _buildLibraryServerLabel(
+                    selectedLibrary,
+                    Theme.of(context).textTheme.labelSmall?.copyWith(
                       color: Theme.of(context).textTheme.bodySmall?.color?.withValues(alpha: 0.6),
                     ),
+                    badgeSize: 10,
                   ),
                 ],
               )
@@ -856,6 +999,13 @@ class _LibrariesScreenState extends State<LibrariesScreen>
 
   @override
   Widget build(BuildContext context) {
+    return SettingValueBuilder<bool>(
+      pref: SettingsService.groupLibrariesByServer,
+      builder: (context, groupByServerSetting, _) => _buildContent(context, groupByServerSetting),
+    );
+  }
+
+  Widget _buildContent(BuildContext context, bool groupByServerSetting) {
     // Watch libraries provider for updates
     final librariesProvider = context.watch<LibrariesProvider>();
     final allLibraries = librariesProvider.libraries;
@@ -873,133 +1023,147 @@ class _LibrariesScreenState extends State<LibrariesScreen>
         ? allLibraries.where((lib) => lib.globalKey == _selectedLibraryGlobalKey).firstOrNull
         : null;
 
-    return Scaffold(
-      body: ScrollConfiguration(
-        behavior: ScrollConfiguration.of(context).copyWith(scrollbars: false),
-        child: CustomScrollView(
-          controller: _outerScrollController,
-          slivers: [
-            DesktopSliverAppBar(
-              title: _buildAppBarTitle(visibleLibraries, selectedLibrary),
-              pinned: true,
-              backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-              surfaceTintColor: Colors.transparent,
-              shadowColor: Colors.transparent,
-              scrolledUnderElevation: 0,
-              actions: [
-                FocusableActionBar(
-                  key: _actionBarKey,
-                  onNavigateLeft: () => getTabChipFocusNode(_visibleTabs.length - 1).requestFocus(),
-                  onNavigateDown: _focusCurrentTab,
-                  actions: [
-                    if (allLibraries.isNotEmpty)
-                      FocusableAction(
-                        icon: Symbols.edit_rounded,
-                        tooltip: t.libraries.manageLibraries,
-                        onPressed: _showLibraryManagementSheet,
-                      ),
-                    FocusableAction(
-                      icon: Symbols.refresh_rounded,
-                      tooltip: t.common.refresh,
-                      onPressed: _refreshCurrentTab,
-                    ),
-                  ],
-                ),
-              ],
-            ),
-            if (isLoadingLibraries)
-              const SliverFillRemaining(child: Center(child: CircularProgressIndicator()))
-            else if (_errorMessage != null && visibleLibraries.isEmpty && selectedLibrary == null)
-              SliverFillRemaining(
-                child: ErrorStateWidget(
-                  message: _errorMessage!,
-                  icon: Symbols.error_outline_rounded,
-                  onRetry: () {
-                    final librariesProvider = context.read<LibrariesProvider>();
-                    librariesProvider.refresh();
-                  },
-                ),
-              )
-            else if (visibleLibraries.isEmpty && selectedLibrary == null)
-              SliverFillRemaining(
-                child: allLibraries.isEmpty
-                    ? EmptyStateWidget(message: t.libraries.noLibrariesFound, icon: Symbols.video_library_rounded)
-                    : EmptyStateWidget(
-                        message: t.libraries.allLibrariesHidden,
-                        icon: Symbols.visibility_off_rounded,
-                        onAction: _showLibraryManagementSheet,
-                        actionLabel: t.libraries.manageLibraries,
-                        actionIcon: Symbols.edit_rounded,
-                      ),
-              )
-            else ...[
-              // Tab selector chips (only on mobile - desktop has them in app bar)
-              if (selectedLibrary != null && !PlatformDetector.shouldUseSideNavigation(context))
-                SliverToBoxAdapter(
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                    child: SingleChildScrollView(
-                      scrollDirection: Axis.horizontal,
-                      child: Row(
-                        children: [
-                          for (int i = 0; i < _visibleTabs.length; i++) ...[
-                            if (i > 0) const SizedBox(width: 8),
-                            buildTabChip(
-                              _getTabLabel(_visibleTabs[i]),
-                              i,
-                              onSelectWhenActive: _focusCurrentTab,
-                              onNavigateDown: _focusCurrentTabFromTabBar,
-                              onNavigateRightFromLast: () => _actionBarKey.currentState?.requestFocusOnFirst(),
-                            ),
-                          ],
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
+    final showMobileTabsRow = selectedLibrary != null && !PlatformDetector.shouldUseSideNavigation(context);
 
-              // Tab content
-              if (selectedLibrary != null)
-                SliverFillRemaining(
-                  child: TabBarView(
-                    key: ValueKey(_selectedLibraryGlobalKey),
-                    controller: tabController,
-                    // Disable swipe on desktop - trackpad scrolling triggers accidental tab switches
-                    // See: https://github.com/flutter/flutter/issues/11132
-                    physics: PlatformDetector.isDesktop(context) ? const NeverScrollableScrollPhysics() : null,
-                    // Wrap each tab in ClipRect so horizontal overflow (e.g. hub rows
-                    // with Clip.none) doesn't bleed into adjacent tabs during swipe transitions.
-                    // The TabBarView's own clipBehavior only clips at the viewport level,
-                    // not per-page, so we need per-child clipping.
+    Widget appBar({required bool floating}) => DesktopSliverAppBar(
+      title: _buildAppBarTitle(visibleLibraries, selectedLibrary, groupByServer: groupByServerSetting),
+      // When showing the tab content, let the app bar float away with the
+      // content. Otherwise (loading / empty / error states) keep it pinned so
+      // it stays visible over the centered state widget.
+      pinned: !floating,
+      floating: floating,
+      snap: floating,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+      surfaceTintColor: Colors.transparent,
+      shadowColor: Colors.transparent,
+      scrolledUnderElevation: 0,
+      actions: [
+        FocusableActionBar(
+          key: _actionBarKey,
+          onNavigateLeft: () => getTabChipFocusNode(_visibleTabs.length - 1).requestFocus(),
+          onNavigateDown: _focusCurrentTab,
+          actions: [
+            if (allLibraries.isNotEmpty)
+              FocusableAction(
+                icon: Symbols.edit_rounded,
+                tooltip: t.libraries.manageLibraries,
+                onPressed: _showLibraryManagementSheet,
+              ),
+            FocusableAction(icon: Symbols.refresh_rounded, tooltip: t.common.refresh, onPressed: _refreshCurrentTab),
+          ],
+        ),
+      ],
+    );
+
+    Widget buildSimpleScroll({required Widget body}) {
+      return CustomScrollView(
+        controller: _outerScrollController,
+        slivers: [
+          appBar(floating: false),
+          SliverFillRemaining(child: body),
+        ],
+      );
+    }
+
+    Widget body;
+    if (isLoadingLibraries) {
+      body = buildSimpleScroll(body: const Center(child: CircularProgressIndicator()));
+    } else if (_errorMessage != null && visibleLibraries.isEmpty && selectedLibrary == null) {
+      body = buildSimpleScroll(
+        body: ErrorStateWidget(
+          message: _errorMessage!,
+          icon: Symbols.error_outline_rounded,
+          onRetry: () {
+            final librariesProvider = context.read<LibrariesProvider>();
+            librariesProvider.refresh();
+          },
+        ),
+      );
+    } else if (visibleLibraries.isEmpty && selectedLibrary == null) {
+      body = buildSimpleScroll(
+        body: allLibraries.isEmpty
+            ? EmptyStateWidget(message: t.libraries.noLibrariesFound, icon: Symbols.video_library_rounded)
+            : EmptyStateWidget(
+                message: t.libraries.allLibrariesHidden,
+                icon: Symbols.visibility_off_rounded,
+                onAction: _showLibraryManagementSheet,
+                actionLabel: t.libraries.manageLibraries,
+                actionIcon: Symbols.edit_rounded,
+              ),
+      );
+    } else if (selectedLibrary != null) {
+      body = NestedScrollView(
+        controller: _outerScrollController,
+        floatHeaderSlivers: true,
+        headerSliverBuilder: (context, innerBoxIsScrolled) => [
+          SliverOverlapAbsorber(
+            handle: NestedScrollView.sliverOverlapAbsorberHandleFor(context),
+            sliver: appBar(floating: true),
+          ),
+          if (showMobileTabsRow)
+            SliverToBoxAdapter(
+              child: Container(
+                color: Theme.of(context).scaffoldBackgroundColor,
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                child: SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
                     children: [
-                      for (int i = 0; i < _visibleTabs.length; i++)
-                        ClipRect(
-                          child: _buildTabContent(
-                            _visibleTabs[i],
-                            library: selectedLibrary,
-                            isActive: tabController.index == i,
-                            tabIndex: i,
-                          ),
+                      for (int i = 0; i < _visibleTabs.length; i++) ...[
+                        if (i > 0) const SizedBox(width: 8),
+                        buildTabChip(
+                          _getTabLabel(_visibleTabs[i]),
+                          i,
+                          onSelectWhenActive: _focusCurrentTab,
+                          onNavigateDown: _focusCurrentTabFromTabBar,
+                          onNavigateRightFromLast: () => _actionBarKey.currentState?.requestFocusOnFirst(),
                         ),
+                      ],
                     ],
                   ),
                 ),
-            ],
+              ),
+            ),
+        ],
+        body: TabBarView(
+          key: ValueKey(_selectedLibraryGlobalKey),
+          controller: tabController,
+          // Disable swipe on desktop - trackpad scrolling triggers accidental tab switches
+          // See: https://github.com/flutter/flutter/issues/11132
+          physics: PlatformDetector.isDesktop(context) ? const NeverScrollableScrollPhysics() : null,
+          // Wrap each tab in ClipRect so horizontal overflow (e.g. hub rows
+          // with Clip.none) doesn't bleed into adjacent tabs during swipe transitions.
+          children: [
+            for (int i = 0; i < _visibleTabs.length; i++)
+              ClipRect(
+                child: _buildTabContent(
+                  _visibleTabs[i],
+                  library: selectedLibrary,
+                  isActive: tabController.index == i,
+                  tabIndex: i,
+                ),
+              ),
           ],
         ),
-      ),
+      );
+    } else {
+      body = buildSimpleScroll(body: const SizedBox.shrink());
+    }
+
+    return Scaffold(
+      body: ScrollConfiguration(behavior: ScrollConfiguration.of(context).copyWith(scrollbars: false), child: body),
     );
   }
 }
 
 class _LibraryManagementSheet extends StatefulWidget {
   final bool isDialog;
-  final List<PlexLibrary> allLibraries;
+  final List<MediaLibrary> allLibraries;
   final Set<String> hiddenLibraryKeys;
-  final Function(List<PlexLibrary>) onReorder;
-  final Function(PlexLibrary) onToggleVisibility;
-  final List<ContextMenuItem> Function(PlexLibrary) getLibraryMenuItems;
-  final void Function(String action, PlexLibrary library) onLibraryMenuAction;
+  final Function(List<MediaLibrary>) onReorder;
+  final Function(MediaLibrary) onToggleVisibility;
+  final List<ContextMenuItem> Function(MediaLibrary) getLibraryMenuItems;
+  final void Function(String action, MediaLibrary library) onLibraryMenuAction;
 
   const _LibraryManagementSheet({
     this.isDialog = false,
@@ -1016,14 +1180,14 @@ class _LibraryManagementSheet extends StatefulWidget {
 }
 
 class _LibraryManagementSheetState extends State<_LibraryManagementSheet> {
-  late List<PlexLibrary> _tempLibraries;
+  late List<MediaLibrary> _tempLibraries;
 
   // Keyboard navigation state
   int _focusedIndex = 0;
   int _focusedColumn = 0; // 0 = row, 1 = visibility button, 2 = options button
   int? _movingIndex; // Non-null when in move mode
   int? _originalIndex; // Original position before move (for cancel)
-  List<PlexLibrary>? _originalOrder; // Original order before move (for cancel)
+  List<MediaLibrary>? _originalOrder; // Original order before move (for cancel)
   final FocusNode _listFocusNode = FocusNode();
   final ScrollController _dialogScrollController = ScrollController();
   bool _backKeyDownSeen = false;
@@ -1204,11 +1368,12 @@ class _LibraryManagementSheetState extends State<_LibraryManagementSheet> {
     widget.onReorder(_tempLibraries);
   }
 
-  void _showLibraryMenuBottomSheet(BuildContext outerContext, PlexLibrary library) {
+  void _showLibraryMenuBottomSheet(BuildContext outerContext, MediaLibrary library) {
     final menuItems = widget.getLibraryMenuItems(library);
     OverlaySheetController.pushAdaptive<String>(
       outerContext,
       builder: (context) => SafeArea(
+        top: false,
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -1391,7 +1556,7 @@ class _LibraryManagementSheetState extends State<_LibraryManagementSheet> {
 
   /// Build a single library tile
   Widget _buildLibraryTile(
-    PlexLibrary library,
+    MediaLibrary library,
     int index,
     Set<String> hiddenLibraryKeys, {
     bool showServerName = false,
@@ -1433,7 +1598,7 @@ class _LibraryManagementSheetState extends State<_LibraryManagementSheet> {
                 ),
               ),
               const SizedBox(width: 8),
-              AppIcon(ContentTypeHelper.getLibraryIcon(library.type), fill: 1),
+              AppIcon(ContentTypeHelper.getLibraryIcon(library.kind.id), fill: 1),
             ],
           ),
           title: Text(library.title),

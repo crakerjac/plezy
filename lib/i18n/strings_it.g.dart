@@ -11,7 +11,7 @@ import 'package:slang/generated.dart';
 import 'strings.g.dart';
 
 // Path: <root>
-class TranslationsIt with BaseTranslations<AppLocale, Translations> implements Translations {
+class TranslationsIt extends Translations with BaseTranslations<AppLocale, Translations> {
 	/// You can call this constructor and build your own translation instance of this locale.
 	/// Constructing via the enum [AppLocale.build] is preferred.
 	TranslationsIt({Map<String, Node>? overrides, PluralResolver? cardinalResolver, PluralResolver? ordinalResolver, TranslationMetadata<AppLocale, Translations>? meta})
@@ -21,7 +21,9 @@ class TranslationsIt with BaseTranslations<AppLocale, Translations> implements T
 		    overrides: overrides ?? {},
 		    cardinalResolver: cardinalResolver,
 		    ordinalResolver: ordinalResolver,
-		  ) {
+		  ),
+		  super(cardinalResolver: cardinalResolver, ordinalResolver: ordinalResolver) {
+		super.$meta.setFlatMapFunction($meta.getTranslation); // copy base translations to super.$meta
 		$meta.setFlatMapFunction(_flatMapFunction);
 	}
 
@@ -29,7 +31,7 @@ class TranslationsIt with BaseTranslations<AppLocale, Translations> implements T
 	@override final TranslationMetadata<AppLocale, Translations> $meta;
 
 	/// Access flat map
-	@override dynamic operator[](String key) => $meta.getTranslation(key);
+	@override dynamic operator[](String key) => $meta.getTranslation(key) ?? super.$meta.getTranslation(key);
 
 	late final TranslationsIt _root = this; // ignore: unused_field
 
@@ -55,6 +57,8 @@ class TranslationsIt with BaseTranslations<AppLocale, Translations> implements T
 	@override late final _TranslationsSubtitlingStylingIt subtitlingStyling = _TranslationsSubtitlingStylingIt._(_root);
 	@override late final _TranslationsMpvConfigIt mpvConfig = _TranslationsMpvConfigIt._(_root);
 	@override late final _TranslationsDialogIt dialog = _TranslationsDialogIt._(_root);
+	@override late final _TranslationsProfilesIt profiles = _TranslationsProfilesIt._(_root);
+	@override late final _TranslationsConnectionsIt connections = _TranslationsConnectionsIt._(_root);
 	@override late final _TranslationsDiscoverIt discover = _TranslationsDiscoverIt._(_root);
 	@override late final _TranslationsErrorsIt errors = _TranslationsErrorsIt._(_root);
 	@override late final _TranslationsLibrariesIt libraries = _TranslationsLibrariesIt._(_root);
@@ -78,11 +82,12 @@ class TranslationsIt with BaseTranslations<AppLocale, Translations> implements T
 	@override late final _TranslationsServerTasksIt serverTasks = _TranslationsServerTasksIt._(_root);
 	@override late final _TranslationsTraktIt trakt = _TranslationsTraktIt._(_root);
 	@override late final _TranslationsTrackersIt trackers = _TranslationsTrackersIt._(_root);
+	@override late final _TranslationsAddServerIt addServer = _TranslationsAddServerIt._(_root);
 }
 
 // Path: app
-class _TranslationsAppIt implements TranslationsAppEn {
-	_TranslationsAppIt._(this._root);
+class _TranslationsAppIt extends TranslationsAppEn {
+	_TranslationsAppIt._(TranslationsIt root) : this._root = root, super.internal(root);
 
 	final TranslationsIt _root; // ignore: unused_field
 
@@ -91,24 +96,33 @@ class _TranslationsAppIt implements TranslationsAppEn {
 }
 
 // Path: auth
-class _TranslationsAuthIt implements TranslationsAuthEn {
-	_TranslationsAuthIt._(this._root);
+class _TranslationsAuthIt extends TranslationsAuthEn {
+	_TranslationsAuthIt._(TranslationsIt root) : this._root = root, super.internal(root);
 
 	final TranslationsIt _root; // ignore: unused_field
 
 	// Translations
+	@override String get signIn => 'Accedi';
 	@override String get signInWithPlex => 'Accedi con Plex';
 	@override String get showQRCode => 'Mostra QR Code';
 	@override String get authenticate => 'Autenticazione';
 	@override String get authenticationTimeout => 'Autenticazione scaduta. Riprova.';
 	@override String get scanQRToSignIn => 'Scansiona il QR code per accedere';
-	@override String get waitingForAuth => 'In attesa di autenticazione...\nCompleta l\'accesso dal tuo browser.';
+	@override String get waitingForAuth => 'In attesa di autenticazione...\nAccedi dal browser.';
 	@override String get useBrowser => 'Usa browser';
+	@override String get or => 'o';
+	@override String get connectToJellyfin => 'Connetti a Jellyfin';
+	@override String get useQuickConnect => 'Usa Quick Connect';
+	@override String get quickConnectCode => 'Codice Quick Connect';
+	@override String get quickConnectInstructions => 'Apri Quick Connect in Jellyfin e inserisci questo codice.';
+	@override String get quickConnectWaiting => 'In attesa di approvazione…';
+	@override String get quickConnectCancel => 'Annulla';
+	@override String get quickConnectExpired => 'Quick Connect scaduto. Riprova.';
 }
 
 // Path: common
-class _TranslationsCommonIt implements TranslationsCommonEn {
-	_TranslationsCommonIt._(this._root);
+class _TranslationsCommonIt extends TranslationsCommonEn {
+	_TranslationsCommonIt._(TranslationsIt root) : this._root = root, super.internal(root);
 
 	final TranslationsIt _root; // ignore: unused_field
 
@@ -144,9 +158,6 @@ class _TranslationsCommonIt implements TranslationsCommonEn {
 	@override String get mute => 'Muto';
 	@override String get ok => 'OK';
 	@override String get reconnect => 'Riconnetti';
-	@override String get exitConfirmTitle => 'Uscire dall\'app?';
-	@override String get exitConfirmMessage => 'Sei sicuro di voler uscire?';
-	@override String get dontAskAgain => 'Non chiedere più';
 	@override String get exit => 'Esci';
 	@override String get viewAll => 'Mostra tutto';
 	@override String get checkingNetwork => 'Verifica rete...';
@@ -157,11 +168,12 @@ class _TranslationsCommonIt implements TranslationsCommonEn {
 	@override String get loading => 'Caricamento...';
 	@override String get fullscreen => 'Schermo intero';
 	@override String get exitFullscreen => 'Esci da schermo intero';
+	@override String get pressBackAgainToExit => 'Premi di nuovo indietro per uscire';
 }
 
 // Path: screens
-class _TranslationsScreensIt implements TranslationsScreensEn {
-	_TranslationsScreensIt._(this._root);
+class _TranslationsScreensIt extends TranslationsScreensEn {
+	_TranslationsScreensIt._(TranslationsIt root) : this._root = root, super.internal(root);
 
 	final TranslationsIt _root; // ignore: unused_field
 
@@ -174,8 +186,8 @@ class _TranslationsScreensIt implements TranslationsScreensEn {
 }
 
 // Path: update
-class _TranslationsUpdateIt implements TranslationsUpdateEn {
-	_TranslationsUpdateIt._(this._root);
+class _TranslationsUpdateIt extends TranslationsUpdateEn {
+	_TranslationsUpdateIt._(TranslationsIt root) : this._root = root, super.internal(root);
 
 	final TranslationsIt _root; // ignore: unused_field
 
@@ -190,8 +202,8 @@ class _TranslationsUpdateIt implements TranslationsUpdateEn {
 }
 
 // Path: settings
-class _TranslationsSettingsIt implements TranslationsSettingsEn {
-	_TranslationsSettingsIt._(this._root);
+class _TranslationsSettingsIt extends TranslationsSettingsEn {
+	_TranslationsSettingsIt._(TranslationsIt root) : this._root = root, super.internal(root);
 
 	final TranslationsIt _root; // ignore: unused_field
 
@@ -226,22 +238,22 @@ class _TranslationsSettingsIt implements TranslationsSettingsEn {
 	@override String get gridView => 'Griglia';
 	@override String get listView => 'Elenco';
 	@override String get showHeroSection => 'Mostra sezione principale';
-	@override String get useGlobalHubs => 'Usa layout Home di Plex';
-	@override String get useGlobalHubsDescription => 'Mostra gli hub della home page come il client Plex ufficiale. Se disattivato, mostra invece i suggerimenti per libreria.';
+	@override String get useGlobalHubs => 'Usa layout home';
+	@override String get useGlobalHubsDescription => 'Mostra hub Home unificati. Altrimenti usa i consigli della libreria.';
 	@override String get showServerNameOnHubs => 'Mostra nome server sugli hub';
-	@override String get showServerNameOnHubsDescription => 'Mostra sempre il nome del server nei titoli degli hub. Se disattivato, solo per nomi hub duplicati.';
+	@override String get showServerNameOnHubsDescription => 'Mostra sempre i nomi dei server nei titoli degli hub.';
 	@override String get groupLibrariesByServer => 'Raggruppa librerie per server';
-	@override String get groupLibrariesByServerDescription => 'Mostra un\'intestazione per ogni server Plex nella barra laterale quando sei connesso a più server.';
+	@override String get groupLibrariesByServerDescription => 'Raggruppa le librerie laterali per server multimediale.';
 	@override String get alwaysKeepSidebarOpen => 'Mantieni sempre aperta la barra laterale';
 	@override String get alwaysKeepSidebarOpenDescription => 'La barra laterale rimane espansa e l\'area del contenuto si adatta';
 	@override String get showUnwatchedCount => 'Mostra conteggio non visti';
 	@override String get showUnwatchedCountDescription => 'Mostra il numero di episodi non visti per serie e stagioni';
 	@override String get showEpisodeNumberOnCards => 'Mostra numero episodio sulle schede';
-	@override String get showEpisodeNumberOnCardsDescription => 'Mostra il numero dell\'episodio accanto alla stagione (es. S2 E3) sulle schede degli episodi';
+	@override String get showEpisodeNumberOnCardsDescription => 'Mostra stagione ed episodio sulle schede episodio';
 	@override String get showSeasonPostersOnTabs => 'Mostra poster delle stagioni sulle schede';
-	@override String get showSeasonPostersOnTabsDescription => 'Mostra il poster della stagione sopra ogni scheda di stagione nella pagina di dettaglio di una serie';
+	@override String get showSeasonPostersOnTabsDescription => 'Mostra il poster di ogni stagione sopra la sua scheda';
 	@override String get hideSpoilers => 'Nascondi spoiler per episodi non visti';
-	@override String get hideSpoilersDescription => 'Sfoca le miniature e nascondi le descrizioni degli episodi che non hai ancora guardato';
+	@override String get hideSpoilersDescription => 'Sfoca miniature e descrizioni degli episodi non visti';
 	@override String get playerBackend => 'Motore di riproduzione';
 	@override String get exoPlayer => 'ExoPlayer (Consigliato)';
 	@override String get mpv => 'mpv';
@@ -250,7 +262,7 @@ class _TranslationsSettingsIt implements TranslationsSettingsEn {
 	@override String get bufferSize => 'Dimensione buffer';
 	@override String bufferSizeMB({required Object size}) => '${size}MB';
 	@override String get bufferSizeAuto => 'Auto (Consigliato)';
-	@override String bufferSizeWarning({required Object heap, required Object size}) => 'Il tuo dispositivo ha ${heap}MB di memoria. Un buffer di ${size}MB potrebbe causare problemi di riproduzione.';
+	@override String bufferSizeWarning({required Object heap, required Object size}) => '${heap}MB di memoria disponibile. Un buffer di ${size}MB può influire sulla riproduzione.';
 	@override String get defaultQualityTitle => 'Qualità predefinita';
 	@override String get defaultQualityDescription => 'Utilizzato all\'avvio della riproduzione. Valori più bassi riducono la larghezza di banda.';
 	@override String get subtitleStyling => 'Stile sottotitoli';
@@ -262,16 +274,18 @@ class _TranslationsSettingsIt implements TranslationsSettingsEn {
 	@override String get defaultSleepTimer => 'Timer spegnimento predefinito';
 	@override String minutesUnit({required Object minutes}) => '${minutes} minuti';
 	@override String get rememberTrackSelections => 'Ricorda selezioni tracce per serie/film';
-	@override String get rememberTrackSelectionsDescription => 'Salva automaticamente le preferenze delle lingue audio e sottotitoli quando cambi tracce durante la riproduzione';
+	@override String get rememberTrackSelectionsDescription => 'Ricorda scelte audio e sottotitoli per titolo';
+	@override String get showChapterMarkersOnTimeline => 'Mostra i marcatori dei capitoli sulla barra di avanzamento';
+	@override String get showChapterMarkersOnTimelineDescription => 'Segmenta la barra di avanzamento ai confini dei capitoli';
 	@override String get clickVideoTogglesPlayback => 'Fai clic sul video per avviare o mettere in pausa la riproduzione.';
-	@override String get clickVideoTogglesPlaybackDescription => 'Se questa opzione è abilitata, facendo clic sul lettore video la riproduzione verrà avviata o messa in pausa. In caso contrario, facendo clic verranno mostrati o nascosti i controlli di riproduzione.';
+	@override String get clickVideoTogglesPlaybackDescription => 'Clicca sul video per riprodurre/mettere in pausa invece di mostrare i controlli.';
 	@override String get videoPlayerControls => 'Controlli del lettore video';
 	@override String get keyboardShortcuts => 'Scorciatoie da tastiera';
 	@override String get keyboardShortcutsDescription => 'Personalizza le scorciatoie da tastiera';
 	@override String get videoPlayerNavigation => 'Navigazione del lettore video';
 	@override String get videoPlayerNavigationDescription => 'Usa i tasti freccia per navigare nei controlli del lettore video';
 	@override String get watchTogetherRelay => 'Relay Guarda Insieme';
-	@override String get watchTogetherRelayDescription => 'Imposta un server relay personalizzato per Guarda Insieme. Tutti i partecipanti devono utilizzare lo stesso server.';
+	@override String get watchTogetherRelayDescription => 'Imposta un relay personalizzato. Tutti devono usare lo stesso server.';
 	@override String get watchTogetherRelayHint => 'https://mio-relay.esempio.it';
 	@override String get crashReporting => 'Segnalazione errori';
 	@override String get crashReportingDescription => 'Invia segnalazioni di errori per migliorare l\'app';
@@ -280,10 +294,10 @@ class _TranslationsSettingsIt implements TranslationsSettingsEn {
 	@override String get viewLogs => 'Visualizza log';
 	@override String get viewLogsDescription => 'Visualizza i log dell\'applicazione';
 	@override String get clearCache => 'Svuota cache';
-	@override String get clearCacheDescription => 'Questa opzione cancellerà tutte le immagini e i dati memorizzati nella cache. Dopo aver cancellato la cache, l\'app potrebbe impiegare più tempo per caricare i contenuti.';
+	@override String get clearCacheDescription => 'Cancella immagini e dati in cache. Il contenuto può caricarsi più lentamente.';
 	@override String get clearCacheSuccess => 'Cache cancellata correttamente';
 	@override String get resetSettings => 'Ripristina impostazioni';
-	@override String get resetSettingsDescription => 'Questa opzione ripristinerà tutte le impostazioni ai valori predefiniti. Non può essere annullata.';
+	@override String get resetSettingsDescription => 'Ripristina impostazioni predefinite. Non si può annullare.';
 	@override String get resetSettingsSuccess => 'Impostazioni ripristinate correttamente';
 	@override String get backup => 'Backup';
 	@override String get exportSettings => 'Esporta impostazioni';
@@ -304,7 +318,7 @@ class _TranslationsSettingsIt implements TranslationsSettingsEn {
 	@override String get updateAvailable => 'Aggiornamento disponibile';
 	@override String get checkForUpdates => 'Controlla aggiornamenti';
 	@override String get autoCheckUpdatesOnStartup => 'Controlla automaticamente gli aggiornamenti all\'avvio';
-	@override String get autoCheckUpdatesOnStartupDescription => 'Mostra una notifica quando è disponibile una nuova versione all\'avvio';
+	@override String get autoCheckUpdatesOnStartupDescription => 'Avvisa all\'avvio quando è disponibile un aggiornamento';
 	@override String get validationErrorEnterNumber => 'Inserisci un numero valido';
 	@override String validationErrorDuration({required Object min, required Object max, required Object unit}) => 'la durata deve essere compresa tra ${min} e ${max} ${unit}';
 	@override String shortcutAlreadyAssigned({required Object action}) => 'Scorciatoia già assegnata a ${action}';
@@ -314,6 +328,8 @@ class _TranslationsSettingsIt implements TranslationsSettingsEn {
 	@override String get autoSkipIntroDescription => 'Salta automaticamente i marcatori dell\'intro dopo alcuni secondi';
 	@override String get autoSkipCredits => 'Salta Crediti Automaticamente';
 	@override String get autoSkipCreditsDescription => 'Salta automaticamente i crediti e riproduci l\'episodio successivo';
+	@override String get forceSkipMarkerFallback => 'Forza marcatori fallback';
+	@override String get forceSkipMarkerFallbackDescription => 'Usa pattern dei titoli dei capitoli anche se Plex ha marcatori';
 	@override String get autoSkipDelay => 'Ritardo Salto Automatico';
 	@override String autoSkipDelayDescription({required Object seconds}) => 'Aspetta ${seconds} secondi prima del salto automatico';
 	@override String get introPattern => 'Pattern marcatore intro';
@@ -335,8 +351,8 @@ class _TranslationsSettingsIt implements TranslationsSettingsEn {
 	@override String get downloadOnWifiOnly => 'Scarica solo con WiFi';
 	@override String get downloadOnWifiOnlyDescription => 'Impedisci i download quando si utilizza la rete dati cellulare';
 	@override String get autoRemoveWatchedDownloads => 'Rimuovi automaticamente i download visti';
-	@override String get autoRemoveWatchedDownloadsDescription => 'Elimina automaticamente episodi e film scaricati quando vengono segnati come visti';
-	@override String get cellularDownloadBlocked => 'I download sono disabilitati sulla rete dati cellulare. Connettiti al WiFi o modifica l\'impostazione.';
+	@override String get autoRemoveWatchedDownloadsDescription => 'Elimina automaticamente i download già visti';
+	@override String get cellularDownloadBlocked => 'I download sono bloccati su rete mobile. Usa WiFi o cambia impostazione.';
 	@override String get maxVolume => 'Volume massimo';
 	@override String get maxVolumeDescription => 'Consenti volume superiore al 100% per contenuti audio bassi';
 	@override String maxVolumePercent({required Object percent}) => '${percent}%';
@@ -349,22 +365,20 @@ class _TranslationsSettingsIt implements TranslationsSettingsEn {
 	@override String get companionRemoteServer => 'Server telecomando';
 	@override String get companionRemoteServerDescription => 'Consenti ai dispositivi mobili nella tua rete di controllare questa app';
 	@override String get autoPip => 'Picture-in-Picture automatico';
-	@override String get autoPipDescription => 'Attiva automaticamente il picture-in-picture quando si esce dall\'app durante la riproduzione';
+	@override String get autoPipDescription => 'Entra in picture-in-picture uscendo durante la riproduzione';
 	@override String get matchContentFrameRate => 'Adatta frequenza fotogrammi';
-	@override String get matchContentFrameRateDescription => 'Regola la frequenza di aggiornamento del display in base al contenuto video, riducendo i tremolii e risparmiando batteria';
+	@override String get matchContentFrameRateDescription => 'Adatta la frequenza del display al contenuto video';
 	@override String get matchRefreshRate => 'Adatta frequenza di aggiornamento';
-	@override String get matchRefreshRateDescription => 'Cambia la frequenza di aggiornamento del display per adattarla al contenuto video a schermo intero';
+	@override String get matchRefreshRateDescription => 'Adatta la frequenza del display a schermo intero';
 	@override String get matchDynamicRange => 'Adatta gamma dinamica';
-	@override String get matchDynamicRangeDescription => 'Attiva automaticamente l\'HDR per i contenuti HDR e torna in SDR all\'uscita dal lettore';
+	@override String get matchDynamicRangeDescription => 'Attiva HDR per contenuti HDR, poi torna a SDR';
 	@override String get displaySwitchDelay => 'Ritardo cambio display';
 	@override String get tunneledPlayback => 'Riproduzione tunnelizzata';
-	@override String get tunneledPlaybackDescription => 'Usa il tunneling video accelerato dall\'hardware. Disattiva se vedi uno schermo nero con audio su contenuti HDR';
+	@override String get tunneledPlaybackDescription => 'Usa tunneling video. Disattiva se la riproduzione HDR mostra video nero.';
 	@override String get requireProfileSelectionOnOpen => 'Chiedi profilo all\'apertura';
 	@override String get requireProfileSelectionOnOpenDescription => 'Mostra la selezione del profilo ogni volta che l\'app viene aperta';
-	@override String get confirmExitOnBack => 'Conferma prima di uscire';
-	@override String get confirmExitOnBackDescription => 'Mostra una finestra di conferma quando si preme indietro per uscire dall\'app';
 	@override String get forceTvMode => 'Forza modalità TV';
-	@override String get forceTvModeDescription => 'Usa il layout TV indipendentemente dal rilevamento automatico. Utile sui dispositivi Android TV che non segnalano la funzionalità leanback. Riavvia l\'app al cambiamento.';
+	@override String get forceTvModeDescription => 'Forza layout TV. Per dispositivi non rilevati automaticamente. Richiede riavvio.';
 	@override String get startInFullscreen => 'Avvia a schermo intero';
 	@override String get startInFullscreenDescription => 'Apri Plezy a schermo intero all\'avvio';
 	@override String get autoHidePerformanceOverlay => 'Nascondi automaticamente overlay prestazioni';
@@ -373,20 +387,20 @@ class _TranslationsSettingsIt implements TranslationsSettingsEn {
 	@override String get showNavBarLabelsDescription => 'Mostra le etichette sotto le icone della barra di navigazione';
 	@override String get liveTvDefaultFavorites => 'Canali preferiti predefiniti';
 	@override String get liveTvDefaultFavoritesDescription => 'Mostra solo i canali preferiti all\'apertura della TV dal vivo';
-	@override String get display => 'Display';
-	@override String get homeScreen => 'Home Screen';
-	@override String get navigation => 'Navigation';
-	@override String get window => 'Window';
-	@override String get content => 'Content';
-	@override String get player => 'Player';
-	@override String get subtitlesAndConfig => 'Subtitles & Configuration';
-	@override String get seekAndTiming => 'Seek & Timing';
-	@override String get behavior => 'Behavior';
+	@override String get display => 'Schermo';
+	@override String get homeScreen => 'Schermata Home';
+	@override String get navigation => 'Navigazione';
+	@override String get window => 'Finestra';
+	@override String get content => 'Contenuti';
+	@override String get player => 'Lettore';
+	@override String get subtitlesAndConfig => 'Sottotitoli e configurazione';
+	@override String get seekAndTiming => 'Ricerca e tempistica';
+	@override String get behavior => 'Comportamento';
 }
 
 // Path: search
-class _TranslationsSearchIt implements TranslationsSearchEn {
-	_TranslationsSearchIt._(this._root);
+class _TranslationsSearchIt extends TranslationsSearchEn {
+	_TranslationsSearchIt._(TranslationsIt root) : this._root = root, super.internal(root);
 
 	final TranslationsIt _root; // ignore: unused_field
 
@@ -398,8 +412,8 @@ class _TranslationsSearchIt implements TranslationsSearchEn {
 }
 
 // Path: hotkeys
-class _TranslationsHotkeysIt implements TranslationsHotkeysEn {
-	_TranslationsHotkeysIt._(this._root);
+class _TranslationsHotkeysIt extends TranslationsHotkeysEn {
+	_TranslationsHotkeysIt._(TranslationsIt root) : this._root = root, super.internal(root);
 
 	final TranslationsIt _root; // ignore: unused_field
 
@@ -410,8 +424,8 @@ class _TranslationsHotkeysIt implements TranslationsHotkeysEn {
 }
 
 // Path: fileInfo
-class _TranslationsFileInfoIt implements TranslationsFileInfoEn {
-	_TranslationsFileInfoIt._(this._root);
+class _TranslationsFileInfoIt extends TranslationsFileInfoEn {
+	_TranslationsFileInfoIt._(TranslationsIt root) : this._root = root, super.internal(root);
 
 	final TranslationsIt _root; // ignore: unused_field
 
@@ -444,8 +458,8 @@ class _TranslationsFileInfoIt implements TranslationsFileInfoEn {
 }
 
 // Path: mediaMenu
-class _TranslationsMediaMenuIt implements TranslationsMediaMenuEn {
-	_TranslationsMediaMenuIt._(this._root);
+class _TranslationsMediaMenuIt extends TranslationsMediaMenuEn {
+	_TranslationsMediaMenuIt._(TranslationsIt root) : this._root = root, super.internal(root);
 
 	final TranslationsIt _root; // ignore: unused_field
 
@@ -458,7 +472,7 @@ class _TranslationsMediaMenuIt implements TranslationsMediaMenuEn {
 	@override String get shufflePlay => 'Riproduzione casuale';
 	@override String get fileInfo => 'Info sul file';
 	@override String get deleteFromServer => 'Elimina dal server';
-	@override String get confirmDelete => 'Questo eliminerà permanentemente questo contenuto e i suoi file dal tuo server. Questa azione non può essere annullata.';
+	@override String get confirmDelete => 'Eliminare questo media e i suoi file dal server?';
 	@override String get deleteMultipleWarning => 'Questo include tutti gli episodi e i loro file.';
 	@override String get mediaDeletedSuccessfully => 'Elemento multimediale eliminato con successo';
 	@override String get mediaFailedToDelete => 'Impossibile eliminare l\'elemento multimediale';
@@ -468,8 +482,8 @@ class _TranslationsMediaMenuIt implements TranslationsMediaMenuEn {
 }
 
 // Path: accessibility
-class _TranslationsAccessibilityIt implements TranslationsAccessibilityEn {
-	_TranslationsAccessibilityIt._(this._root);
+class _TranslationsAccessibilityIt extends TranslationsAccessibilityEn {
+	_TranslationsAccessibilityIt._(TranslationsIt root) : this._root = root, super.internal(root);
 
 	final TranslationsIt _root; // ignore: unused_field
 
@@ -485,8 +499,8 @@ class _TranslationsAccessibilityIt implements TranslationsAccessibilityEn {
 }
 
 // Path: tooltips
-class _TranslationsTooltipsIt implements TranslationsTooltipsEn {
-	_TranslationsTooltipsIt._(this._root);
+class _TranslationsTooltipsIt extends TranslationsTooltipsEn {
+	_TranslationsTooltipsIt._(TranslationsIt root) : this._root = root, super.internal(root);
 
 	final TranslationsIt _root; // ignore: unused_field
 
@@ -498,8 +512,8 @@ class _TranslationsTooltipsIt implements TranslationsTooltipsEn {
 }
 
 // Path: videoControls
-class _TranslationsVideoControlsIt implements TranslationsVideoControlsEn {
-	_TranslationsVideoControlsIt._(this._root);
+class _TranslationsVideoControlsIt extends TranslationsVideoControlsEn {
+	_TranslationsVideoControlsIt._(TranslationsIt root) : this._root = root, super.internal(root);
 
 	final TranslationsIt _root; // ignore: unused_field
 
@@ -574,8 +588,8 @@ class _TranslationsVideoControlsIt implements TranslationsVideoControlsEn {
 }
 
 // Path: userStatus
-class _TranslationsUserStatusIt implements TranslationsUserStatusEn {
-	_TranslationsUserStatusIt._(this._root);
+class _TranslationsUserStatusIt extends TranslationsUserStatusEn {
+	_TranslationsUserStatusIt._(TranslationsIt root) : this._root = root, super.internal(root);
 
 	final TranslationsIt _root; // ignore: unused_field
 
@@ -587,8 +601,8 @@ class _TranslationsUserStatusIt implements TranslationsUserStatusEn {
 }
 
 // Path: messages
-class _TranslationsMessagesIt implements TranslationsMessagesEn {
-	_TranslationsMessagesIt._(this._root);
+class _TranslationsMessagesIt extends TranslationsMessagesEn {
+	_TranslationsMessagesIt._(TranslationsIt root) : this._root = root, super.internal(root);
 
 	final TranslationsIt _root; // ignore: unused_field
 
@@ -607,7 +621,7 @@ class _TranslationsMessagesIt implements TranslationsMessagesEn {
 	@override String get musicNotSupported => 'La riproduzione musicale non è ancora supportata';
 	@override String get noDescriptionAvailable => 'Nessuna descrizione disponibile';
 	@override String get noProfilesAvailable => 'Nessun profilo disponibile';
-	@override String get contactAdminForProfiles => 'Contatta il tuo amministratore Plex per aggiungere profili';
+	@override String get contactAdminForProfiles => 'Contatta l\'amministratore del server per aggiungere profili';
 	@override String get unableToDetermineLibrarySection => 'Impossibile determinare la sezione della libreria per questo elemento';
 	@override String get logsCleared => 'Log eliminati';
 	@override String get logsCopied => 'Log copiati negli appunti';
@@ -629,15 +643,15 @@ class _TranslationsMessagesIt implements TranslationsMessagesEn {
 	@override String failedPlayback({required Object action, required Object error}) => 'Impossibile ${action}: ${error}';
 	@override String get switchingToCompatiblePlayer => 'Passaggio al lettore compatibile...';
 	@override String get serverLimitTitle => 'Riproduzione non riuscita';
-	@override String get serverLimitBody => 'Il server ha restituito un errore (HTTP 500). Di solito significa che il proprietario del server ha impostato un limite di banda o di transcodifica che sta rifiutando la tua sessione. Non c\'è nulla da fare dal client — il proprietario del server deve modificare le sue impostazioni.';
+	@override String get serverLimitBody => 'Errore server (HTTP 500). Un limite di banda/transcodifica probabilmente ha rifiutato questa sessione. Chiedi al proprietario di modificarlo.';
 	@override String get logsUploaded => 'Log caricati';
 	@override String get logsUploadFailed => 'Caricamento log fallito';
 	@override String get logId => 'ID log';
 }
 
 // Path: subtitlingStyling
-class _TranslationsSubtitlingStylingIt implements TranslationsSubtitlingStylingEn {
-	_TranslationsSubtitlingStylingIt._(this._root);
+class _TranslationsSubtitlingStylingIt extends TranslationsSubtitlingStylingEn {
+	_TranslationsSubtitlingStylingIt._(TranslationsIt root) : this._root = root, super.internal(root);
 
 	final TranslationsIt _root; // ignore: unused_field
 
@@ -658,8 +672,8 @@ class _TranslationsSubtitlingStylingIt implements TranslationsSubtitlingStylingE
 }
 
 // Path: mpvConfig
-class _TranslationsMpvConfigIt implements TranslationsMpvConfigEn {
-	_TranslationsMpvConfigIt._(this._root);
+class _TranslationsMpvConfigIt extends TranslationsMpvConfigEn {
+	_TranslationsMpvConfigIt._(TranslationsIt root) : this._root = root, super.internal(root);
 
 	final TranslationsIt _root; // ignore: unused_field
 
@@ -681,8 +695,8 @@ class _TranslationsMpvConfigIt implements TranslationsMpvConfigEn {
 }
 
 // Path: dialog
-class _TranslationsDialogIt implements TranslationsDialogEn {
-	_TranslationsDialogIt._(this._root);
+class _TranslationsDialogIt extends TranslationsDialogEn {
+	_TranslationsDialogIt._(TranslationsIt root) : this._root = root, super.internal(root);
 
 	final TranslationsIt _root; // ignore: unused_field
 
@@ -690,9 +704,91 @@ class _TranslationsDialogIt implements TranslationsDialogEn {
 	@override String get confirmAction => 'Conferma azione';
 }
 
+// Path: profiles
+class _TranslationsProfilesIt extends TranslationsProfilesEn {
+	_TranslationsProfilesIt._(TranslationsIt root) : this._root = root, super.internal(root);
+
+	final TranslationsIt _root; // ignore: unused_field
+
+	// Translations
+	@override String get addPlezyProfile => 'Aggiungi profilo Plezy';
+	@override String get switchingProfile => 'Cambio profilo…';
+	@override String get deleteThisProfileTitle => 'Eliminare questo profilo?';
+	@override String deleteThisProfileMessage({required Object displayName}) => 'Rimuovi ${displayName}. Le connessioni non sono interessate.';
+	@override String get active => 'Attivo';
+	@override String get manage => 'Gestisci';
+	@override String get delete => 'Elimina';
+	@override String get signOut => 'Esci';
+	@override String get signOutPlexTitle => 'Uscire da Plex?';
+	@override String signOutPlexMessage({required Object displayName}) => 'Rimuovere ${displayName} e tutti gli utenti Plex Home? Puoi accedere di nuovo quando vuoi.';
+	@override String get signedOutPlex => 'Uscito da Plex.';
+	@override String get signOutFailed => 'Uscita non riuscita.';
+	@override String get sectionTitle => 'Profili';
+	@override String get summarySingle => 'Aggiungi profili per combinare utenti gestiti e identità locali';
+	@override String summaryMultipleWithActive({required Object count, required Object activeName}) => '${count} profili · attivo: ${activeName}';
+	@override String summaryMultiple({required Object count}) => '${count} profili';
+	@override String get removeConnectionTitle => 'Rimuovere la connessione?';
+	@override String removeConnectionMessage({required Object displayName, required Object connectionLabel}) => 'Rimuovi l\'accesso di ${displayName} a ${connectionLabel}. Gli altri profili lo mantengono.';
+	@override String get deleteProfileTitle => 'Eliminare il profilo?';
+	@override String deleteProfileMessage({required Object displayName}) => 'Rimuovi ${displayName} e le sue connessioni. I server restano disponibili.';
+	@override String get profileNameLabel => 'Nome profilo';
+	@override String get pinProtectionLabel => 'Protezione PIN';
+	@override String get pinManagedByPlex => 'PIN gestito da Plex. Modifica su plex.tv.';
+	@override String get noPinSetEditOnPlex => 'Nessun PIN impostato. Per richiederne uno, modifica l\'utente Home su plex.tv.';
+	@override String get setPin => 'Imposta PIN';
+	@override String get setPinTitle => 'Imposta PIN';
+	@override String get confirmPinTitle => 'Conferma PIN';
+	@override String get pinSet => 'PIN impostato';
+	@override String get changePin => 'Cambia';
+	@override String get removePin => 'Rimuovi';
+	@override String get connectionsLabel => 'Connessioni';
+	@override String get add => 'Aggiungi';
+	@override String get deleteProfileButton => 'Elimina profilo';
+	@override String get noConnectionsHint => 'Nessuna connessione — aggiungine una per usare questo profilo.';
+	@override String get noConnections => 'Nessuna connessione';
+	@override String get plexHomeAccount => 'Account Plex Home';
+	@override String get connectionDefault => 'Predefinita';
+	@override String connectionAs({required Object displayName}) => 'come ${displayName}';
+	@override String get makeDefault => 'Imposta come predefinita';
+	@override String get removeConnection => 'Rimuovi';
+	@override String get profileRenamed => 'Profilo rinominato.';
+	@override String borrowAddTo({required Object displayName}) => 'Aggiungi a ${displayName}';
+	@override String get borrowExplain => 'Prendi in prestito la connessione di un altro profilo. I profili protetti da PIN richiedono un PIN.';
+	@override String get borrowEmpty => 'Nulla da prendere in prestito al momento.';
+	@override String get borrowEmptySubtitle => 'Collega prima Plex o Jellyfin a un altro profilo.';
+	@override String borrowFromProfile({required Object displayName}) => 'Da ${displayName}';
+	@override String get borrowConnectionBorrowed => 'Connessione presa in prestito.';
+	@override String get borrowFailed => 'Impossibile prendere in prestito la connessione.';
+	@override String get incorrectPin => 'PIN errato.';
+	@override String get sourceProfileMissingParentAccount => 'Al profilo di origine manca l\'account principale.';
+	@override String get failedToVerifyPin => 'Impossibile verificare il PIN.';
+	@override String get newProfile => 'Nuovo profilo';
+	@override String get profileNameHint => 'es. Ospiti, Bambini, Soggiorno';
+	@override String get pinProtectionOptional => 'Protezione PIN (opzionale)';
+	@override String get pinExplain => 'PIN a 4 cifre richiesto per cambiare profilo.';
+	@override String get continueButton => 'Continua';
+	@override String get pinsDontMatch => 'I PIN non corrispondono';
+}
+
+// Path: connections
+class _TranslationsConnectionsIt extends TranslationsConnectionsEn {
+	_TranslationsConnectionsIt._(TranslationsIt root) : this._root = root, super.internal(root);
+
+	final TranslationsIt _root; // ignore: unused_field
+
+	// Translations
+	@override String get sectionTitle => 'Connessioni';
+	@override String get addConnection => 'Aggiungi connessione';
+	@override String get addConnectionSubtitleNoProfile => 'Accedi con Plex o collega un server Jellyfin';
+	@override String addConnectionSubtitleScoped({required Object displayName}) => 'Aggiungi a ${displayName}: Plex, Jellyfin o un\'altra connessione profilo';
+	@override String sessionExpiredOne({required Object name}) => 'Sessione scaduta per ${name}';
+	@override String sessionExpiredMany({required Object count}) => 'Sessione scaduta per ${count} server';
+	@override String get signInAgain => 'Accedi di nuovo';
+}
+
 // Path: discover
-class _TranslationsDiscoverIt implements TranslationsDiscoverEn {
-	_TranslationsDiscoverIt._(this._root);
+class _TranslationsDiscoverIt extends TranslationsDiscoverEn {
+	_TranslationsDiscoverIt._(TranslationsIt root) : this._root = root, super.internal(root);
 
 	final TranslationsIt _root; // ignore: unused_field
 
@@ -702,6 +798,11 @@ class _TranslationsDiscoverIt implements TranslationsDiscoverEn {
 	@override String get noContentAvailable => 'Nessun contenuto disponibile';
 	@override String get addMediaToLibraries => 'Aggiungi alcuni file multimediali alle tue librerie';
 	@override String get continueWatching => 'Continua a guardare';
+	@override String continueWatchingIn({required Object library}) => 'Continua a guardare in ${library}';
+	@override String get nextUp => 'Prossimi';
+	@override String nextUpIn({required Object library}) => 'Prossimi in ${library}';
+	@override String get recentlyAdded => 'Aggiunti di recente';
+	@override String recentlyAddedIn({required Object library}) => 'Aggiunti di recente in ${library}';
 	@override String playEpisode({required Object season, required Object episode}) => 'S${season}E${episode}';
 	@override String get overview => 'Panoramica';
 	@override String get cast => 'Attori';
@@ -714,15 +815,15 @@ class _TranslationsDiscoverIt implements TranslationsDiscoverEn {
 }
 
 // Path: errors
-class _TranslationsErrorsIt implements TranslationsErrorsEn {
-	_TranslationsErrorsIt._(this._root);
+class _TranslationsErrorsIt extends TranslationsErrorsEn {
+	_TranslationsErrorsIt._(TranslationsIt root) : this._root = root, super.internal(root);
 
 	final TranslationsIt _root; // ignore: unused_field
 
 	// Translations
 	@override String searchFailed({required Object error}) => 'Ricerca fallita: ${error}';
 	@override String connectionTimeout({required Object context}) => 'Timeout connessione durante caricamento di ${context}';
-	@override String get connectionFailed => 'Impossibile connettersi al server Plex.';
+	@override String get connectionFailed => 'Impossibile connettersi al server multimediale';
 	@override String failedToLoad({required Object context, required Object error}) => 'Impossibile caricare ${context}: ${error}';
 	@override String get noClientAvailable => 'Nessun client disponibile';
 	@override String authenticationFailed({required Object error}) => 'Autenticazione fallita: ${error}';
@@ -731,11 +832,13 @@ class _TranslationsErrorsIt implements TranslationsErrorsEn {
 	@override String get invalidToken => 'Token non valido';
 	@override String failedToVerifyToken({required Object error}) => 'Verifica token fallita: ${error}';
 	@override String failedToSwitchProfile({required Object displayName}) => 'Impossibile passare a ${displayName}';
+	@override String failedToDeleteProfile({required Object displayName}) => 'Impossibile eliminare ${displayName}';
+	@override String get failedToRate => 'Impossibile aggiornare la valutazione';
 }
 
 // Path: libraries
-class _TranslationsLibrariesIt implements TranslationsLibrariesEn {
-	_TranslationsLibrariesIt._(this._root);
+class _TranslationsLibrariesIt extends TranslationsLibrariesEn {
+	_TranslationsLibrariesIt._(TranslationsIt root) : this._root = root, super.internal(root);
 
 	final TranslationsIt _root; // ignore: unused_field
 
@@ -780,11 +883,13 @@ class _TranslationsLibrariesIt implements TranslationsLibrariesEn {
 	@override String get folders => 'cartelle';
 	@override late final _TranslationsLibrariesTabsIt tabs = _TranslationsLibrariesTabsIt._(_root);
 	@override late final _TranslationsLibrariesGroupingsIt groupings = _TranslationsLibrariesGroupingsIt._(_root);
+	@override late final _TranslationsLibrariesFilterCategoriesIt filterCategories = _TranslationsLibrariesFilterCategoriesIt._(_root);
+	@override late final _TranslationsLibrariesSortLabelsIt sortLabels = _TranslationsLibrariesSortLabelsIt._(_root);
 }
 
 // Path: about
-class _TranslationsAboutIt implements TranslationsAboutEn {
-	_TranslationsAboutIt._(this._root);
+class _TranslationsAboutIt extends TranslationsAboutEn {
+	_TranslationsAboutIt._(TranslationsIt root) : this._root = root, super.internal(root);
 
 	final TranslationsIt _root; // ignore: unused_field
 
@@ -792,25 +897,25 @@ class _TranslationsAboutIt implements TranslationsAboutEn {
 	@override String get title => 'Informazioni';
 	@override String get openSourceLicenses => 'Licenze Open Source';
 	@override String versionLabel({required Object version}) => 'Versione ${version}';
-	@override String get appDescription => 'Un bellissimo client Plex per Flutter';
+	@override String get appDescription => 'Un bellissimo client Plex e Jellyfin per Flutter';
 	@override String get viewLicensesDescription => 'Visualizza le licenze delle librerie di terze parti';
 }
 
 // Path: serverSelection
-class _TranslationsServerSelectionIt implements TranslationsServerSelectionEn {
-	_TranslationsServerSelectionIt._(this._root);
+class _TranslationsServerSelectionIt extends TranslationsServerSelectionEn {
+	_TranslationsServerSelectionIt._(TranslationsIt root) : this._root = root, super.internal(root);
 
 	final TranslationsIt _root; // ignore: unused_field
 
 	// Translations
-	@override String get allServerConnectionsFailed => 'Impossibile connettersi a nessun server. Controlla la tua rete e riprova.';
+	@override String get allServerConnectionsFailed => 'Impossibile connettersi ai server. Controlla la rete.';
 	@override String noServersFoundForAccount({required Object username, required Object email}) => 'Nessun server trovato per ${username} (${email})';
 	@override String failedToLoadServers({required Object error}) => 'Impossibile caricare i server: ${error}';
 }
 
 // Path: hubDetail
-class _TranslationsHubDetailIt implements TranslationsHubDetailEn {
-	_TranslationsHubDetailIt._(this._root);
+class _TranslationsHubDetailIt extends TranslationsHubDetailEn {
+	_TranslationsHubDetailIt._(TranslationsIt root) : this._root = root, super.internal(root);
 
 	final TranslationsIt _root; // ignore: unused_field
 
@@ -823,8 +928,8 @@ class _TranslationsHubDetailIt implements TranslationsHubDetailEn {
 }
 
 // Path: logs
-class _TranslationsLogsIt implements TranslationsLogsEn {
-	_TranslationsLogsIt._(this._root);
+class _TranslationsLogsIt extends TranslationsLogsEn {
+	_TranslationsLogsIt._(TranslationsIt root) : this._root = root, super.internal(root);
 
 	final TranslationsIt _root; // ignore: unused_field
 
@@ -835,8 +940,8 @@ class _TranslationsLogsIt implements TranslationsLogsEn {
 }
 
 // Path: licenses
-class _TranslationsLicensesIt implements TranslationsLicensesEn {
-	_TranslationsLicensesIt._(this._root);
+class _TranslationsLicensesIt extends TranslationsLicensesEn {
+	_TranslationsLicensesIt._(TranslationsIt root) : this._root = root, super.internal(root);
 
 	final TranslationsIt _root; // ignore: unused_field
 
@@ -848,8 +953,8 @@ class _TranslationsLicensesIt implements TranslationsLicensesEn {
 }
 
 // Path: navigation
-class _TranslationsNavigationIt implements TranslationsNavigationEn {
-	_TranslationsNavigationIt._(this._root);
+class _TranslationsNavigationIt extends TranslationsNavigationEn {
+	_TranslationsNavigationIt._(TranslationsIt root) : this._root = root, super.internal(root);
 
 	final TranslationsIt _root; // ignore: unused_field
 
@@ -860,8 +965,8 @@ class _TranslationsNavigationIt implements TranslationsNavigationEn {
 }
 
 // Path: liveTv
-class _TranslationsLiveTvIt implements TranslationsLiveTvEn {
-	_TranslationsLiveTvIt._(this._root);
+class _TranslationsLiveTvIt extends TranslationsLiveTvEn {
+	_TranslationsLiveTvIt._(TranslationsIt root) : this._root = root, super.internal(root);
 
 	final TranslationsIt _root; // ignore: unused_field
 
@@ -875,6 +980,7 @@ class _TranslationsLiveTvIt implements TranslationsLiveTvEn {
 	@override String get reloadGuide => 'Ricarica guida';
 	@override String get now => 'Ora';
 	@override String get today => 'Oggi';
+	@override String get tomorrow => 'Domani';
 	@override String get midnight => 'Mezzanotte';
 	@override String get overnight => 'Notte';
 	@override String get morning => 'Mattina';
@@ -889,11 +995,45 @@ class _TranslationsLiveTvIt implements TranslationsLiveTvEn {
 	@override String watchFromStart({required Object minutes}) => 'Guarda dall\'inizio (${minutes} min fa)';
 	@override String get watchLive => 'Guarda in diretta';
 	@override String get goToLive => 'Vai al live';
+	@override String get record => 'Registra';
+	@override String get recordEpisode => 'Registra episodio';
+	@override String get recordSeries => 'Registra serie';
+	@override String get recordOptions => 'Opzioni di registrazione';
+	@override String get recordings => 'Registrazioni';
+	@override String get scheduledRecordings => 'Programmate';
+	@override String get recordingRules => 'Regole di registrazione';
+	@override String get noScheduledRecordings => 'Nessuna registrazione programmata';
+	@override String get noRecordingRules => 'Nessuna regola di registrazione';
+	@override String get manageRecording => 'Gestisci registrazione';
+	@override String get cancelRecording => 'Annulla registrazione';
+	@override String get cancelRecordingTitle => 'Annullare questa registrazione?';
+	@override String cancelRecordingMessage({required Object title}) => '${title} non sarà più registrato.';
+	@override String get deleteRule => 'Elimina regola';
+	@override String get deleteRuleTitle => 'Eliminare la regola di registrazione?';
+	@override String deleteRuleMessage({required Object title}) => 'I prossimi episodi di ${title} non saranno registrati.';
+	@override String get recordingScheduled => 'Registrazione programmata';
+	@override String get alreadyScheduled => 'Questo programma è già programmato';
+	@override String get dvrAdminRequired => 'Le impostazioni DVR richiedono un account amministratore';
+	@override String get recordingFailed => 'Impossibile programmare la registrazione';
+	@override String get recordingTargetMissing => 'Impossibile determinare la libreria di registrazione';
+	@override String get recordNotAvailable => 'Registrazione non disponibile per questo programma';
+	@override String get recordingCancelled => 'Registrazione annullata';
+	@override String get recordingRuleDeleted => 'Regola di registrazione eliminata';
+	@override String get processRecordingRules => 'Rivaluta regole';
+	@override String get loadingRecordings => 'Caricamento registrazioni...';
+	@override String get recordingInProgress => 'Registrazione in corso';
+	@override String recordingsCount({required Object count}) => '${count} programmate';
+	@override String get editRule => 'Modifica regola';
+	@override String get editRuleAction => 'Modifica';
+	@override String get recordingRuleUpdated => 'Regola di registrazione aggiornata';
+	@override String get guideReloadRequested => 'Aggiornamento guida richiesto';
+	@override String get rulesProcessRequested => 'Rivalutazione regole richiesta';
+	@override String get recordShow => 'Registra programma';
 }
 
 // Path: collections
-class _TranslationsCollectionsIt implements TranslationsCollectionsEn {
-	_TranslationsCollectionsIt._(this._root);
+class _TranslationsCollectionsIt extends TranslationsCollectionsEn {
+	_TranslationsCollectionsIt._(TranslationsIt root) : this._root = root, super.internal(root);
 
 	final TranslationsIt _root; // ignore: unused_field
 
@@ -903,7 +1043,7 @@ class _TranslationsCollectionsIt implements TranslationsCollectionsEn {
 	@override String get empty => 'La raccolta è vuota';
 	@override String get unknownLibrarySection => 'Impossibile eliminare: sezione libreria sconosciuta';
 	@override String get deleteCollection => 'Elimina raccolta';
-	@override String deleteConfirm({required Object title}) => 'Sei sicuro di voler eliminare "${title}"? Questa azione non può essere annullata.';
+	@override String deleteConfirm({required Object title}) => 'Eliminare "${title}"? Non si può annullare.';
 	@override String get deleted => 'Raccolta eliminata';
 	@override String get deleteFailed => 'Impossibile eliminare la raccolta';
 	@override String deleteFailedWithError({required Object error}) => 'Impossibile eliminare la raccolta: ${error}';
@@ -923,8 +1063,8 @@ class _TranslationsCollectionsIt implements TranslationsCollectionsEn {
 }
 
 // Path: playlists
-class _TranslationsPlaylistsIt implements TranslationsPlaylistsEn {
-	_TranslationsPlaylistsIt._(this._root);
+class _TranslationsPlaylistsIt extends TranslationsPlaylistsEn {
+	_TranslationsPlaylistsIt._(TranslationsIt root) : this._root = root, super.internal(root);
 
 	final TranslationsIt _root; // ignore: unused_field
 
@@ -957,8 +1097,8 @@ class _TranslationsPlaylistsIt implements TranslationsPlaylistsEn {
 }
 
 // Path: watchTogether
-class _TranslationsWatchTogetherIt implements TranslationsWatchTogetherEn {
-	_TranslationsWatchTogetherIt._(this._root);
+class _TranslationsWatchTogetherIt extends TranslationsWatchTogetherEn {
+	_TranslationsWatchTogetherIt._(TranslationsIt root) : this._root = root, super.internal(root);
 
 	final TranslationsIt _root; // ignore: unused_field
 
@@ -1001,11 +1141,11 @@ class _TranslationsWatchTogetherIt implements TranslationsWatchTogetherEn {
 	@override String get pasteFromClipboard => 'Incolla dagli appunti';
 	@override String get pleaseEnterCode => 'Inserisci un codice sessione';
 	@override String get codeMustBe5Chars => 'Il codice sessione deve essere di 5 caratteri';
-	@override String get joinInstructions => 'Inserisci il codice sessione condiviso dall\'host per unirti alla loro sessione di visione.';
+	@override String get joinInstructions => 'Inserisci il codice sessione dell\'host per partecipare.';
 	@override String get failedToCreate => 'Impossibile creare la sessione';
 	@override String get failedToJoin => 'Impossibile unirsi alla sessione';
 	@override String get sessionCodeCopied => 'Codice sessione copiato negli appunti';
-	@override String get relayUnreachable => 'Il server di inoltro non è raggiungibile. Questo potrebbe essere causato dal blocco della connessione da parte del tuo provider. Puoi comunque provare, ma Watch Together potrebbe non funzionare.';
+	@override String get relayUnreachable => 'Server relay non raggiungibile. Il blocco ISP può impedire Watch Together.';
 	@override String get reconnectingToHost => 'Riconnessione all\'host...';
 	@override String get currentPlayback => 'Riproduzione corrente';
 	@override String get joinCurrentPlayback => 'Unisciti alla riproduzione corrente';
@@ -1021,11 +1161,13 @@ class _TranslationsWatchTogetherIt implements TranslationsWatchTogetherEn {
 	@override String get recentRooms => 'Stanze recenti';
 	@override String get renameRoom => 'Rinomina stanza';
 	@override String get removeRoom => 'Rimuovi';
+	@override String get guestSwitchUnavailable => 'Impossibile cambiare — server non disponibile per la sincronizzazione';
+	@override String get guestSwitchFailed => 'Impossibile cambiare — contenuto non trovato su questo server';
 }
 
 // Path: downloads
-class _TranslationsDownloadsIt implements TranslationsDownloadsEn {
-	_TranslationsDownloadsIt._(this._root);
+class _TranslationsDownloadsIt extends TranslationsDownloadsEn {
+	_TranslationsDownloadsIt._(TranslationsIt root) : this._root = root, super.internal(root);
 
 	final TranslationsIt _root; // ignore: unused_field
 
@@ -1040,10 +1182,10 @@ class _TranslationsDownloadsIt implements TranslationsDownloadsEn {
 	@override String get deleteDownload => 'Elimina download';
 	@override String get retryDownload => 'Riprova download';
 	@override String get downloadQueued => 'Download in coda';
-	@override String get serverErrorBitrate => 'Errore del server — il file potrebbe superare il limite di bitrate dello streaming remoto';
+	@override String get serverErrorBitrate => 'Errore server: il file può superare il limite di bitrate remoto';
 	@override String episodesQueued({required Object count}) => '${count} episodi in coda per il download';
 	@override String get downloadDeleted => 'Download eliminato';
-	@override String deleteConfirm({required Object title}) => 'Sei sicuro di voler eliminare "${title}"? Il file scaricato verrà rimosso dal tuo dispositivo.';
+	@override String deleteConfirm({required Object title}) => 'Eliminare "${title}" da questo dispositivo?';
 	@override String deletingWithProgress({required Object title, required Object current, required Object total}) => 'Eliminazione di ${title}... (${current} di ${total})';
 	@override String get deleting => 'Eliminazione...';
 	@override String get queuedTooltip => 'In coda';
@@ -1078,12 +1220,18 @@ class _TranslationsDownloadsIt implements TranslationsDownloadsEn {
 	@override String get editSyncFilter => 'Filtro di sincronizzazione';
 	@override String get syncAllItems => 'Sincronizzazione di tutti gli elementi';
 	@override String get syncUnwatchedItems => 'Sincronizzazione degli elementi non visti';
+	@override String syncRuleServerContext({required Object server, required Object status}) => 'Server: ${server} • ${status}';
+	@override String get syncRuleAvailable => 'Disponibile';
+	@override String get syncRuleOffline => 'Offline';
+	@override String get syncRuleSignInRequired => 'Accesso richiesto';
+	@override String get syncRuleNotAvailableForProfile => 'Non disponibile per il profilo attuale';
+	@override String get syncRuleUnknownServer => 'Server sconosciuto';
 	@override String get syncRuleListCreated => 'Regola di sincronizzazione creata';
 }
 
 // Path: shaders
-class _TranslationsShadersIt implements TranslationsShadersEn {
-	_TranslationsShadersIt._(this._root);
+class _TranslationsShadersIt extends TranslationsShadersEn {
+	_TranslationsShadersIt._(TranslationsIt root) : this._root = root, super.internal(root);
 
 	final TranslationsIt _root; // ignore: unused_field
 
@@ -1106,8 +1254,8 @@ class _TranslationsShadersIt implements TranslationsShadersEn {
 }
 
 // Path: companionRemote
-class _TranslationsCompanionRemoteIt implements TranslationsCompanionRemoteEn {
-	_TranslationsCompanionRemoteIt._(this._root);
+class _TranslationsCompanionRemoteIt extends TranslationsCompanionRemoteEn {
+	_TranslationsCompanionRemoteIt._(TranslationsIt root) : this._root = root, super.internal(root);
 
 	final TranslationsIt _root; // ignore: unused_field
 
@@ -1120,8 +1268,8 @@ class _TranslationsCompanionRemoteIt implements TranslationsCompanionRemoteEn {
 }
 
 // Path: videoSettings
-class _TranslationsVideoSettingsIt implements TranslationsVideoSettingsEn {
-	_TranslationsVideoSettingsIt._(this._root);
+class _TranslationsVideoSettingsIt extends TranslationsVideoSettingsEn {
+	_TranslationsVideoSettingsIt._(TranslationsIt root) : this._root = root, super.internal(root);
 
 	final TranslationsIt _root; // ignore: unused_field
 
@@ -1139,15 +1287,15 @@ class _TranslationsVideoSettingsIt implements TranslationsVideoSettingsEn {
 }
 
 // Path: externalPlayer
-class _TranslationsExternalPlayerIt implements TranslationsExternalPlayerEn {
-	_TranslationsExternalPlayerIt._(this._root);
+class _TranslationsExternalPlayerIt extends TranslationsExternalPlayerEn {
+	_TranslationsExternalPlayerIt._(TranslationsIt root) : this._root = root, super.internal(root);
 
 	final TranslationsIt _root; // ignore: unused_field
 
 	// Translations
 	@override String get title => 'Lettore esterno';
 	@override String get useExternalPlayer => 'Usa lettore esterno';
-	@override String get useExternalPlayerDescription => 'Apri i video in un\'app esterna invece del lettore integrato';
+	@override String get useExternalPlayerDescription => 'Apri video in un\'altra app';
 	@override String get selectPlayer => 'Seleziona lettore';
 	@override String get customPlayers => 'Lettori personalizzati';
 	@override String get systemDefault => 'Predefinito di sistema';
@@ -1163,8 +1311,8 @@ class _TranslationsExternalPlayerIt implements TranslationsExternalPlayerEn {
 }
 
 // Path: metadataEdit
-class _TranslationsMetadataEditIt implements TranslationsMetadataEditEn {
-	_TranslationsMetadataEditIt._(this._root);
+class _TranslationsMetadataEditIt extends TranslationsMetadataEditEn {
+	_TranslationsMetadataEditIt._(TranslationsIt root) : this._root = root, super.internal(root);
 
 	final TranslationsIt _root; // ignore: unused_field
 
@@ -1246,8 +1394,8 @@ class _TranslationsMetadataEditIt implements TranslationsMetadataEditEn {
 }
 
 // Path: matchScreen
-class _TranslationsMatchScreenIt implements TranslationsMatchScreenEn {
-	_TranslationsMatchScreenIt._(this._root);
+class _TranslationsMatchScreenIt extends TranslationsMatchScreenEn {
+	_TranslationsMatchScreenIt._(TranslationsIt root) : this._root = root, super.internal(root);
 
 	final TranslationsIt _root; // ignore: unused_field
 
@@ -1255,7 +1403,7 @@ class _TranslationsMatchScreenIt implements TranslationsMatchScreenEn {
 	@override String get match => 'Abbina...';
 	@override String get fixMatch => 'Correggi abbinamento...';
 	@override String get unmatch => 'Rimuovi abbinamento';
-	@override String get unmatchConfirm => 'Cancellare l\'abbinamento corrente di questo elemento? Plex lo tratterà come non abbinato finché non lo abbinerai di nuovo.';
+	@override String get unmatchConfirm => 'Cancellare questa corrispondenza? Plex la tratterà come non abbinata finché non verrà riabbinata.';
 	@override String get unmatchSuccess => 'Abbinamento rimosso';
 	@override String get unmatchFailed => 'Rimozione dell\'abbinamento non riuscita';
 	@override String get matchApplied => 'Abbinamento applicato';
@@ -1267,8 +1415,8 @@ class _TranslationsMatchScreenIt implements TranslationsMatchScreenEn {
 }
 
 // Path: serverTasks
-class _TranslationsServerTasksIt implements TranslationsServerTasksEn {
-	_TranslationsServerTasksIt._(this._root);
+class _TranslationsServerTasksIt extends TranslationsServerTasksEn {
+	_TranslationsServerTasksIt._(TranslationsIt root) : this._root = root, super.internal(root);
 
 	final TranslationsIt _root; // ignore: unused_field
 
@@ -1279,8 +1427,8 @@ class _TranslationsServerTasksIt implements TranslationsServerTasksEn {
 }
 
 // Path: trakt
-class _TranslationsTraktIt implements TranslationsTraktEn {
-	_TranslationsTraktIt._(this._root);
+class _TranslationsTraktIt extends TranslationsTraktEn {
+	_TranslationsTraktIt._(TranslationsIt root) : this._root = root, super.internal(root);
 
 	final TranslationsIt _root; // ignore: unused_field
 
@@ -1289,7 +1437,7 @@ class _TranslationsTraktIt implements TranslationsTraktEn {
 	@override String get connected => 'Connesso';
 	@override String connectedAs({required Object username}) => 'Connesso come @${username}';
 	@override String get disconnectConfirm => 'Disconnettere l\'account Trakt?';
-	@override String get disconnectConfirmBody => 'Plezy smetterà di inviare eventi di riproduzione a Trakt. Puoi riconnetterti in qualsiasi momento.';
+	@override String get disconnectConfirmBody => 'Plezy smetterà di inviare eventi a Trakt. Puoi riconnetterti quando vuoi.';
 	@override String get scrobble => 'Scrobbling in tempo reale';
 	@override String get scrobbleDescription => 'Invia eventi di riproduzione, pausa e arresto a Trakt durante la riproduzione.';
 	@override String get watchedSync => 'Sincronizza stato visualizzato';
@@ -1297,20 +1445,20 @@ class _TranslationsTraktIt implements TranslationsTraktEn {
 }
 
 // Path: trackers
-class _TranslationsTrackersIt implements TranslationsTrackersEn {
-	_TranslationsTrackersIt._(this._root);
+class _TranslationsTrackersIt extends TranslationsTrackersEn {
+	_TranslationsTrackersIt._(TranslationsIt root) : this._root = root, super.internal(root);
 
 	final TranslationsIt _root; // ignore: unused_field
 
 	// Translations
 	@override String get title => 'Tracker';
-	@override String get hubSubtitle => 'Mantieni i tuoi progressi sincronizzati con Trakt e altri servizi.';
+	@override String get hubSubtitle => 'Sincronizza l\'avanzamento di visione con Trakt e altri servizi.';
 	@override String get notConnected => 'Non connesso';
 	@override String connectedAs({required Object username}) => 'Connesso come @${username}';
 	@override String get scrobble => 'Traccia i progressi automaticamente';
 	@override String get scrobbleDescription => 'Aggiorna la tua lista quando finisci un episodio o un film.';
 	@override String disconnectConfirm({required Object service}) => 'Disconnettere ${service}?';
-	@override String disconnectConfirmBody({required Object service}) => 'Plezy smetterà di aggiornare la tua lista ${service}. Puoi riconnetterti in qualsiasi momento.';
+	@override String disconnectConfirmBody({required Object service}) => 'Plezy smetterà di aggiornare ${service}. Riconnetti quando vuoi.';
 	@override String connectFailed({required Object service}) => 'Impossibile connettersi a ${service}. Riprova.';
 	@override late final _TranslationsTrackersServicesIt services = _TranslationsTrackersServicesIt._(_root);
 	@override late final _TranslationsTrackersDeviceCodeIt deviceCode = _TranslationsTrackersDeviceCodeIt._(_root);
@@ -1318,9 +1466,50 @@ class _TranslationsTrackersIt implements TranslationsTrackersEn {
 	@override late final _TranslationsTrackersLibraryFilterIt libraryFilter = _TranslationsTrackersLibraryFilterIt._(_root);
 }
 
+// Path: addServer
+class _TranslationsAddServerIt extends TranslationsAddServerEn {
+	_TranslationsAddServerIt._(TranslationsIt root) : this._root = root, super.internal(root);
+
+	final TranslationsIt _root; // ignore: unused_field
+
+	// Translations
+	@override String get addJellyfinTitle => 'Aggiungi server Jellyfin';
+	@override String get jellyfinUrlIntro => 'Inserisci l\'URL del server, es. `https://jellyfin.example.com`.';
+	@override String get serverUrl => 'URL del server';
+	@override String get findServer => 'Trova server';
+	@override String get username => 'Nome utente';
+	@override String get password => 'Password';
+	@override String get signIn => 'Accedi';
+	@override String get change => 'Modifica';
+	@override String get required => 'Obbligatorio';
+	@override String couldNotReachServer({required Object error}) => 'Impossibile raggiungere il server: ${error}';
+	@override String signInFailed({required Object error}) => 'Accesso non riuscito: ${error}';
+	@override String quickConnectFailed({required Object error}) => 'Quick Connect non riuscito: ${error}';
+	@override String get addPlexTitle => 'Accedi con Plex';
+	@override String get plexAuthIntro => 'Accedi con un browser o un codice QR.';
+	@override String get plexQRPrompt => 'Scansiona questo QR code per accedere.';
+	@override String get waitingForPlexConfirmation => 'In attesa della conferma da plex.tv…';
+	@override String get pinExpired => 'PIN scaduto prima dell\'accesso. Riprova.';
+	@override String get duplicatePlexAccount => 'Accesso a Plex già effettuato. Esci per cambiare account.';
+	@override String failedToRegisterAccount({required Object error}) => 'Registrazione account non riuscita: ${error}';
+	@override String get enterJellyfinUrlError => 'Inserisci l\'URL del tuo server Jellyfin';
+	@override String get addConnectionTitle => 'Aggiungi connessione';
+	@override String addConnectionTitleScoped({required Object name}) => 'Aggiungi a ${name}';
+	@override String get addConnectionIntroGlobal => 'Aggiungi un altro server multimediale. Plex e Jellyfin appaiono insieme in Home.';
+	@override String get addConnectionIntroScoped => 'Aggiungi un nuovo server, o prendine in prestito uno da un altro profilo.';
+	@override String get signInWithPlexCard => 'Accedi con Plex';
+	@override String get signInWithPlexCardSubtitle => 'Autorizza questo dispositivo. I server condivisi vengono aggiunti.';
+	@override String get signInWithPlexCardSubtitleScoped => 'Autorizza un account Plex. Gli utenti Home diventano profili.';
+	@override String get connectToJellyfinCard => 'Connetti a Jellyfin';
+	@override String get connectToJellyfinCardSubtitle => 'Inserisci URL del server, nome utente e password.';
+	@override String connectToJellyfinCardSubtitleScoped({required Object name}) => 'Accedi a un server Jellyfin. Collegato a ${name}.';
+	@override String get borrowFromAnotherProfile => 'Prendi in prestito da un altro profilo';
+	@override String get borrowFromAnotherProfileSubtitle => 'Riutilizza la connessione di un altro profilo. I profili protetti da PIN richiedono un PIN.';
+}
+
 // Path: hotkeys.actions
-class _TranslationsHotkeysActionsIt implements TranslationsHotkeysActionsEn {
-	_TranslationsHotkeysActionsIt._(this._root);
+class _TranslationsHotkeysActionsIt extends TranslationsHotkeysActionsEn {
+	_TranslationsHotkeysActionsIt._(TranslationsIt root) : this._root = root, super.internal(root);
 
 	final TranslationsIt _root; // ignore: unused_field
 
@@ -1349,15 +1538,15 @@ class _TranslationsHotkeysActionsIt implements TranslationsHotkeysActionsEn {
 }
 
 // Path: videoControls.pipErrors
-class _TranslationsVideoControlsPipErrorsIt implements TranslationsVideoControlsPipErrorsEn {
-	_TranslationsVideoControlsPipErrorsIt._(this._root);
+class _TranslationsVideoControlsPipErrorsIt extends TranslationsVideoControlsPipErrorsEn {
+	_TranslationsVideoControlsPipErrorsIt._(TranslationsIt root) : this._root = root, super.internal(root);
 
 	final TranslationsIt _root; // ignore: unused_field
 
 	// Translations
 	@override String get androidVersion => 'Richiede Android 8.0 o versioni successive';
 	@override String get iosVersion => 'Richiede iOS 15.0 o versioni successive';
-	@override String get permissionDisabled => 'L\'autorizzazione Picture-in-Picture è disabilitata. Abilitala in Impostazioni > App > Plezy > Picture-in-Picture';
+	@override String get permissionDisabled => 'Picture-in-picture è disattivato. Attivalo nelle impostazioni di sistema.';
 	@override String get notSupported => 'Questo dispositivo non supporta la modalità Picture-in-Picture';
 	@override String get voSwitchFailed => 'Impossibile cambiare l\'uscita video per Picture-in-Picture';
 	@override String get failed => 'Impossibile avviare la modalità Picture-in-Picture';
@@ -1365,8 +1554,8 @@ class _TranslationsVideoControlsPipErrorsIt implements TranslationsVideoControls
 }
 
 // Path: libraries.tabs
-class _TranslationsLibrariesTabsIt implements TranslationsLibrariesTabsEn {
-	_TranslationsLibrariesTabsIt._(this._root);
+class _TranslationsLibrariesTabsIt extends TranslationsLibrariesTabsEn {
+	_TranslationsLibrariesTabsIt._(TranslationsIt root) : this._root = root, super.internal(root);
 
 	final TranslationsIt _root; // ignore: unused_field
 
@@ -1378,8 +1567,8 @@ class _TranslationsLibrariesTabsIt implements TranslationsLibrariesTabsEn {
 }
 
 // Path: libraries.groupings
-class _TranslationsLibrariesGroupingsIt implements TranslationsLibrariesGroupingsEn {
-	_TranslationsLibrariesGroupingsIt._(this._root);
+class _TranslationsLibrariesGroupingsIt extends TranslationsLibrariesGroupingsEn {
+	_TranslationsLibrariesGroupingsIt._(TranslationsIt root) : this._root = root, super.internal(root);
 
 	final TranslationsIt _root; // ignore: unused_field
 
@@ -1393,9 +1582,40 @@ class _TranslationsLibrariesGroupingsIt implements TranslationsLibrariesGrouping
 	@override String get folders => 'Cartelle';
 }
 
+// Path: libraries.filterCategories
+class _TranslationsLibrariesFilterCategoriesIt extends TranslationsLibrariesFilterCategoriesEn {
+	_TranslationsLibrariesFilterCategoriesIt._(TranslationsIt root) : this._root = root, super.internal(root);
+
+	final TranslationsIt _root; // ignore: unused_field
+
+	// Translations
+	@override String get genre => 'Genere';
+	@override String get year => 'Anno';
+	@override String get contentRating => 'Classificazione';
+	@override String get tag => 'Tag';
+}
+
+// Path: libraries.sortLabels
+class _TranslationsLibrariesSortLabelsIt extends TranslationsLibrariesSortLabelsEn {
+	_TranslationsLibrariesSortLabelsIt._(TranslationsIt root) : this._root = root, super.internal(root);
+
+	final TranslationsIt _root; // ignore: unused_field
+
+	// Translations
+	@override String get title => 'Titolo';
+	@override String get dateAdded => 'Data di aggiunta';
+	@override String get releaseDate => 'Data di uscita';
+	@override String get rating => 'Valutazione';
+	@override String get lastPlayed => 'Ultima riproduzione';
+	@override String get playCount => 'Riproduzioni';
+	@override String get random => 'Casuale';
+	@override String get dateShared => 'Data di condivisione';
+	@override String get latestEpisodeAirDate => 'Data ultima messa in onda';
+}
+
 // Path: companionRemote.session
-class _TranslationsCompanionRemoteSessionIt implements TranslationsCompanionRemoteSessionEn {
-	_TranslationsCompanionRemoteSessionIt._(this._root);
+class _TranslationsCompanionRemoteSessionIt extends TranslationsCompanionRemoteSessionEn {
+	_TranslationsCompanionRemoteSessionIt._(TranslationsIt root) : this._root = root, super.internal(root);
 
 	final TranslationsIt _root; // ignore: unused_field
 
@@ -1406,7 +1626,7 @@ class _TranslationsCompanionRemoteSessionIt implements TranslationsCompanionRemo
 	@override String get connected => 'Connesso';
 	@override String get serverRunning => 'Server remoto attivo';
 	@override String get serverStopped => 'Server remoto arrestato';
-	@override String get serverRunningDescription => 'I dispositivi mobili nella tua rete possono scoprire e connettersi a questa app';
+	@override String get serverRunningDescription => 'I dispositivi mobili sulla tua rete possono connettersi a questa app';
 	@override String get serverStoppedDescription => 'Avvia il server per consentire ai dispositivi mobili di connettersi';
 	@override String get usePhoneToControl => 'Usa il tuo dispositivo mobile per controllare questa app';
 	@override String get startServer => 'Avvia server';
@@ -1415,32 +1635,32 @@ class _TranslationsCompanionRemoteSessionIt implements TranslationsCompanionRemo
 }
 
 // Path: companionRemote.pairing
-class _TranslationsCompanionRemotePairingIt implements TranslationsCompanionRemotePairingEn {
-	_TranslationsCompanionRemotePairingIt._(this._root);
+class _TranslationsCompanionRemotePairingIt extends TranslationsCompanionRemotePairingEn {
+	_TranslationsCompanionRemotePairingIt._(TranslationsIt root) : this._root = root, super.internal(root);
 
 	final TranslationsIt _root; // ignore: unused_field
 
 	// Translations
-	@override String get discoveryDescription => 'I dispositivi nella tua rete che eseguono Plezy con lo stesso account Plex appariranno automaticamente';
+	@override String get discoveryDescription => 'I dispositivi Plezy con lo stesso account Plex appaiono qui';
 	@override String get hostAddressHint => '192.168.1.100:48632';
 	@override String get connecting => 'Connessione...';
 	@override String get searchingForDevices => 'Ricerca dispositivi...';
 	@override String get noDevicesFound => 'Nessun dispositivo trovato nella tua rete';
-	@override String get noDevicesHint => 'Assicurati che Plezy sia aperto sul tuo desktop e che entrambi i dispositivi siano sulla stessa rete WiFi';
+	@override String get noDevicesHint => 'Apri Plezy su desktop e usa lo stesso WiFi';
 	@override String get availableDevices => 'Dispositivi disponibili';
 	@override String get manualConnection => 'Connessione manuale';
-	@override String get cryptoInitFailed => 'Impossibile inizializzare la connessione sicura. Assicurati di aver effettuato l\'accesso a un account Plex.';
+	@override String get cryptoInitFailed => 'Impossibile avviare la connessione sicura. Accedi prima a Plex.';
 	@override String get validationHostRequired => 'Inserisci l\'indirizzo host';
 	@override String get validationHostFormat => 'Il formato deve essere IP:porta (es. 192.168.1.100:48632)';
-	@override String get connectionTimedOut => 'Connessione scaduta. Assicurati che entrambi i dispositivi siano sulla stessa rete.';
+	@override String get connectionTimedOut => 'Connessione scaduta. Usa la stessa rete su entrambi i dispositivi.';
 	@override String get sessionNotFound => 'Dispositivo non trovato. Assicurati che Plezy sia in esecuzione sull\'host.';
-	@override String get authFailed => 'Autenticazione fallita. Assicurati che entrambi i dispositivi utilizzino lo stesso account Plex.';
+	@override String get authFailed => 'Autenticazione non riuscita. Entrambi i dispositivi devono usare lo stesso account Plex.';
 	@override String failedToConnect({required Object error}) => 'Connessione fallita: ${error}';
 }
 
 // Path: companionRemote.remote
-class _TranslationsCompanionRemoteRemoteIt implements TranslationsCompanionRemoteRemoteEn {
-	_TranslationsCompanionRemoteRemoteIt._(this._root);
+class _TranslationsCompanionRemoteRemoteIt extends TranslationsCompanionRemoteRemoteEn {
+	_TranslationsCompanionRemoteRemoteIt._(TranslationsIt root) : this._root = root, super.internal(root);
 
 	final TranslationsIt _root; // ignore: unused_field
 
@@ -1475,8 +1695,8 @@ class _TranslationsCompanionRemoteRemoteIt implements TranslationsCompanionRemot
 }
 
 // Path: trackers.services
-class _TranslationsTrackersServicesIt implements TranslationsTrackersServicesEn {
-	_TranslationsTrackersServicesIt._(this._root);
+class _TranslationsTrackersServicesIt extends TranslationsTrackersServicesEn {
+	_TranslationsTrackersServicesIt._(TranslationsIt root) : this._root = root, super.internal(root);
 
 	final TranslationsIt _root; // ignore: unused_field
 
@@ -1487,8 +1707,8 @@ class _TranslationsTrackersServicesIt implements TranslationsTrackersServicesEn 
 }
 
 // Path: trackers.deviceCode
-class _TranslationsTrackersDeviceCodeIt implements TranslationsTrackersDeviceCodeEn {
-	_TranslationsTrackersDeviceCodeIt._(this._root);
+class _TranslationsTrackersDeviceCodeIt extends TranslationsTrackersDeviceCodeEn {
+	_TranslationsTrackersDeviceCodeIt._(TranslationsIt root) : this._root = root, super.internal(root);
 
 	final TranslationsIt _root; // ignore: unused_field
 
@@ -1501,21 +1721,21 @@ class _TranslationsTrackersDeviceCodeIt implements TranslationsTrackersDeviceCod
 }
 
 // Path: trackers.oauthProxy
-class _TranslationsTrackersOauthProxyIt implements TranslationsTrackersOauthProxyEn {
-	_TranslationsTrackersOauthProxyIt._(this._root);
+class _TranslationsTrackersOauthProxyIt extends TranslationsTrackersOauthProxyEn {
+	_TranslationsTrackersOauthProxyIt._(TranslationsIt root) : this._root = root, super.internal(root);
 
 	final TranslationsIt _root; // ignore: unused_field
 
 	// Translations
 	@override String title({required Object service}) => 'Accedi a ${service}';
-	@override String get body => 'Scansiona questo codice QR con il telefono oppure apri l\'URL sottostante su un dispositivo con browser.';
+	@override String get body => 'Scansiona questo codice QR o apri l\'URL su qualsiasi dispositivo.';
 	@override String openToSignIn({required Object service}) => 'Apri ${service} per accedere';
 	@override String get urlCopied => 'URL copiato';
 }
 
 // Path: trackers.libraryFilter
-class _TranslationsTrackersLibraryFilterIt implements TranslationsTrackersLibraryFilterEn {
-	_TranslationsTrackersLibraryFilterIt._(this._root);
+class _TranslationsTrackersLibraryFilterIt extends TranslationsTrackersLibraryFilterEn {
+	_TranslationsTrackersLibraryFilterIt._(TranslationsIt root) : this._root = root, super.internal(root);
 
 	final TranslationsIt _root; // ignore: unused_field
 
@@ -1543,13 +1763,22 @@ extension on TranslationsIt {
 	dynamic _flatMapFunction(String path) {
 		return switch (path) {
 			'app.title' => 'Plezy',
+			'auth.signIn' => 'Accedi',
 			'auth.signInWithPlex' => 'Accedi con Plex',
 			'auth.showQRCode' => 'Mostra QR Code',
 			'auth.authenticate' => 'Autenticazione',
 			'auth.authenticationTimeout' => 'Autenticazione scaduta. Riprova.',
 			'auth.scanQRToSignIn' => 'Scansiona il QR code per accedere',
-			'auth.waitingForAuth' => 'In attesa di autenticazione...\nCompleta l\'accesso dal tuo browser.',
+			'auth.waitingForAuth' => 'In attesa di autenticazione...\nAccedi dal browser.',
 			'auth.useBrowser' => 'Usa browser',
+			'auth.or' => 'o',
+			'auth.connectToJellyfin' => 'Connetti a Jellyfin',
+			'auth.useQuickConnect' => 'Usa Quick Connect',
+			'auth.quickConnectCode' => 'Codice Quick Connect',
+			'auth.quickConnectInstructions' => 'Apri Quick Connect in Jellyfin e inserisci questo codice.',
+			'auth.quickConnectWaiting' => 'In attesa di approvazione…',
+			'auth.quickConnectCancel' => 'Annulla',
+			'auth.quickConnectExpired' => 'Quick Connect scaduto. Riprova.',
 			'common.cancel' => 'Cancella',
 			'common.save' => 'Salva',
 			'common.close' => 'Chiudi',
@@ -1581,9 +1810,6 @@ extension on TranslationsIt {
 			'common.mute' => 'Muto',
 			'common.ok' => 'OK',
 			'common.reconnect' => 'Riconnetti',
-			'common.exitConfirmTitle' => 'Uscire dall\'app?',
-			'common.exitConfirmMessage' => 'Sei sicuro di voler uscire?',
-			'common.dontAskAgain' => 'Non chiedere più',
 			'common.exit' => 'Esci',
 			'common.viewAll' => 'Mostra tutto',
 			'common.checkingNetwork' => 'Verifica rete...',
@@ -1594,6 +1820,7 @@ extension on TranslationsIt {
 			'common.loading' => 'Caricamento...',
 			'common.fullscreen' => 'Schermo intero',
 			'common.exitFullscreen' => 'Esci da schermo intero',
+			'common.pressBackAgainToExit' => 'Premi di nuovo indietro per uscire',
 			'screens.licenses' => 'Licenze',
 			'screens.switchProfile' => 'Cambia profilo',
 			'screens.subtitleStyling' => 'Stile sottotitoli',
@@ -1636,22 +1863,22 @@ extension on TranslationsIt {
 			'settings.gridView' => 'Griglia',
 			'settings.listView' => 'Elenco',
 			'settings.showHeroSection' => 'Mostra sezione principale',
-			'settings.useGlobalHubs' => 'Usa layout Home di Plex',
-			'settings.useGlobalHubsDescription' => 'Mostra gli hub della home page come il client Plex ufficiale. Se disattivato, mostra invece i suggerimenti per libreria.',
+			'settings.useGlobalHubs' => 'Usa layout home',
+			'settings.useGlobalHubsDescription' => 'Mostra hub Home unificati. Altrimenti usa i consigli della libreria.',
 			'settings.showServerNameOnHubs' => 'Mostra nome server sugli hub',
-			'settings.showServerNameOnHubsDescription' => 'Mostra sempre il nome del server nei titoli degli hub. Se disattivato, solo per nomi hub duplicati.',
+			'settings.showServerNameOnHubsDescription' => 'Mostra sempre i nomi dei server nei titoli degli hub.',
 			'settings.groupLibrariesByServer' => 'Raggruppa librerie per server',
-			'settings.groupLibrariesByServerDescription' => 'Mostra un\'intestazione per ogni server Plex nella barra laterale quando sei connesso a più server.',
+			'settings.groupLibrariesByServerDescription' => 'Raggruppa le librerie laterali per server multimediale.',
 			'settings.alwaysKeepSidebarOpen' => 'Mantieni sempre aperta la barra laterale',
 			'settings.alwaysKeepSidebarOpenDescription' => 'La barra laterale rimane espansa e l\'area del contenuto si adatta',
 			'settings.showUnwatchedCount' => 'Mostra conteggio non visti',
 			'settings.showUnwatchedCountDescription' => 'Mostra il numero di episodi non visti per serie e stagioni',
 			'settings.showEpisodeNumberOnCards' => 'Mostra numero episodio sulle schede',
-			'settings.showEpisodeNumberOnCardsDescription' => 'Mostra il numero dell\'episodio accanto alla stagione (es. S2 E3) sulle schede degli episodi',
+			'settings.showEpisodeNumberOnCardsDescription' => 'Mostra stagione ed episodio sulle schede episodio',
 			'settings.showSeasonPostersOnTabs' => 'Mostra poster delle stagioni sulle schede',
-			'settings.showSeasonPostersOnTabsDescription' => 'Mostra il poster della stagione sopra ogni scheda di stagione nella pagina di dettaglio di una serie',
+			'settings.showSeasonPostersOnTabsDescription' => 'Mostra il poster di ogni stagione sopra la sua scheda',
 			'settings.hideSpoilers' => 'Nascondi spoiler per episodi non visti',
-			'settings.hideSpoilersDescription' => 'Sfoca le miniature e nascondi le descrizioni degli episodi che non hai ancora guardato',
+			'settings.hideSpoilersDescription' => 'Sfoca miniature e descrizioni degli episodi non visti',
 			'settings.playerBackend' => 'Motore di riproduzione',
 			'settings.exoPlayer' => 'ExoPlayer (Consigliato)',
 			'settings.mpv' => 'mpv',
@@ -1660,7 +1887,7 @@ extension on TranslationsIt {
 			'settings.bufferSize' => 'Dimensione buffer',
 			'settings.bufferSizeMB' => ({required Object size}) => '${size}MB',
 			'settings.bufferSizeAuto' => 'Auto (Consigliato)',
-			'settings.bufferSizeWarning' => ({required Object heap, required Object size}) => 'Il tuo dispositivo ha ${heap}MB di memoria. Un buffer di ${size}MB potrebbe causare problemi di riproduzione.',
+			'settings.bufferSizeWarning' => ({required Object heap, required Object size}) => '${heap}MB di memoria disponibile. Un buffer di ${size}MB può influire sulla riproduzione.',
 			'settings.defaultQualityTitle' => 'Qualità predefinita',
 			'settings.defaultQualityDescription' => 'Utilizzato all\'avvio della riproduzione. Valori più bassi riducono la larghezza di banda.',
 			'settings.subtitleStyling' => 'Stile sottotitoli',
@@ -1672,16 +1899,18 @@ extension on TranslationsIt {
 			'settings.defaultSleepTimer' => 'Timer spegnimento predefinito',
 			'settings.minutesUnit' => ({required Object minutes}) => '${minutes} minuti',
 			'settings.rememberTrackSelections' => 'Ricorda selezioni tracce per serie/film',
-			'settings.rememberTrackSelectionsDescription' => 'Salva automaticamente le preferenze delle lingue audio e sottotitoli quando cambi tracce durante la riproduzione',
+			'settings.rememberTrackSelectionsDescription' => 'Ricorda scelte audio e sottotitoli per titolo',
+			'settings.showChapterMarkersOnTimeline' => 'Mostra i marcatori dei capitoli sulla barra di avanzamento',
+			'settings.showChapterMarkersOnTimelineDescription' => 'Segmenta la barra di avanzamento ai confini dei capitoli',
 			'settings.clickVideoTogglesPlayback' => 'Fai clic sul video per avviare o mettere in pausa la riproduzione.',
-			'settings.clickVideoTogglesPlaybackDescription' => 'Se questa opzione è abilitata, facendo clic sul lettore video la riproduzione verrà avviata o messa in pausa. In caso contrario, facendo clic verranno mostrati o nascosti i controlli di riproduzione.',
+			'settings.clickVideoTogglesPlaybackDescription' => 'Clicca sul video per riprodurre/mettere in pausa invece di mostrare i controlli.',
 			'settings.videoPlayerControls' => 'Controlli del lettore video',
 			'settings.keyboardShortcuts' => 'Scorciatoie da tastiera',
 			'settings.keyboardShortcutsDescription' => 'Personalizza le scorciatoie da tastiera',
 			'settings.videoPlayerNavigation' => 'Navigazione del lettore video',
 			'settings.videoPlayerNavigationDescription' => 'Usa i tasti freccia per navigare nei controlli del lettore video',
 			'settings.watchTogetherRelay' => 'Relay Guarda Insieme',
-			'settings.watchTogetherRelayDescription' => 'Imposta un server relay personalizzato per Guarda Insieme. Tutti i partecipanti devono utilizzare lo stesso server.',
+			'settings.watchTogetherRelayDescription' => 'Imposta un relay personalizzato. Tutti devono usare lo stesso server.',
 			'settings.watchTogetherRelayHint' => 'https://mio-relay.esempio.it',
 			'settings.crashReporting' => 'Segnalazione errori',
 			'settings.crashReportingDescription' => 'Invia segnalazioni di errori per migliorare l\'app',
@@ -1690,10 +1919,10 @@ extension on TranslationsIt {
 			'settings.viewLogs' => 'Visualizza log',
 			'settings.viewLogsDescription' => 'Visualizza i log dell\'applicazione',
 			'settings.clearCache' => 'Svuota cache',
-			'settings.clearCacheDescription' => 'Questa opzione cancellerà tutte le immagini e i dati memorizzati nella cache. Dopo aver cancellato la cache, l\'app potrebbe impiegare più tempo per caricare i contenuti.',
+			'settings.clearCacheDescription' => 'Cancella immagini e dati in cache. Il contenuto può caricarsi più lentamente.',
 			'settings.clearCacheSuccess' => 'Cache cancellata correttamente',
 			'settings.resetSettings' => 'Ripristina impostazioni',
-			'settings.resetSettingsDescription' => 'Questa opzione ripristinerà tutte le impostazioni ai valori predefiniti. Non può essere annullata.',
+			'settings.resetSettingsDescription' => 'Ripristina impostazioni predefinite. Non si può annullare.',
 			'settings.resetSettingsSuccess' => 'Impostazioni ripristinate correttamente',
 			'settings.backup' => 'Backup',
 			'settings.exportSettings' => 'Esporta impostazioni',
@@ -1714,7 +1943,7 @@ extension on TranslationsIt {
 			'settings.updateAvailable' => 'Aggiornamento disponibile',
 			'settings.checkForUpdates' => 'Controlla aggiornamenti',
 			'settings.autoCheckUpdatesOnStartup' => 'Controlla automaticamente gli aggiornamenti all\'avvio',
-			'settings.autoCheckUpdatesOnStartupDescription' => 'Mostra una notifica quando è disponibile una nuova versione all\'avvio',
+			'settings.autoCheckUpdatesOnStartupDescription' => 'Avvisa all\'avvio quando è disponibile un aggiornamento',
 			'settings.validationErrorEnterNumber' => 'Inserisci un numero valido',
 			'settings.validationErrorDuration' => ({required Object min, required Object max, required Object unit}) => 'la durata deve essere compresa tra ${min} e ${max} ${unit}',
 			'settings.shortcutAlreadyAssigned' => ({required Object action}) => 'Scorciatoia già assegnata a ${action}',
@@ -1724,6 +1953,8 @@ extension on TranslationsIt {
 			'settings.autoSkipIntroDescription' => 'Salta automaticamente i marcatori dell\'intro dopo alcuni secondi',
 			'settings.autoSkipCredits' => 'Salta Crediti Automaticamente',
 			'settings.autoSkipCreditsDescription' => 'Salta automaticamente i crediti e riproduci l\'episodio successivo',
+			'settings.forceSkipMarkerFallback' => 'Forza marcatori fallback',
+			'settings.forceSkipMarkerFallbackDescription' => 'Usa pattern dei titoli dei capitoli anche se Plex ha marcatori',
 			'settings.autoSkipDelay' => 'Ritardo Salto Automatico',
 			'settings.autoSkipDelayDescription' => ({required Object seconds}) => 'Aspetta ${seconds} secondi prima del salto automatico',
 			'settings.introPattern' => 'Pattern marcatore intro',
@@ -1745,8 +1976,8 @@ extension on TranslationsIt {
 			'settings.downloadOnWifiOnly' => 'Scarica solo con WiFi',
 			'settings.downloadOnWifiOnlyDescription' => 'Impedisci i download quando si utilizza la rete dati cellulare',
 			'settings.autoRemoveWatchedDownloads' => 'Rimuovi automaticamente i download visti',
-			'settings.autoRemoveWatchedDownloadsDescription' => 'Elimina automaticamente episodi e film scaricati quando vengono segnati come visti',
-			'settings.cellularDownloadBlocked' => 'I download sono disabilitati sulla rete dati cellulare. Connettiti al WiFi o modifica l\'impostazione.',
+			'settings.autoRemoveWatchedDownloadsDescription' => 'Elimina automaticamente i download già visti',
+			'settings.cellularDownloadBlocked' => 'I download sono bloccati su rete mobile. Usa WiFi o cambia impostazione.',
 			'settings.maxVolume' => 'Volume massimo',
 			'settings.maxVolumeDescription' => 'Consenti volume superiore al 100% per contenuti audio bassi',
 			'settings.maxVolumePercent' => ({required Object percent}) => '${percent}%',
@@ -1759,22 +1990,20 @@ extension on TranslationsIt {
 			'settings.companionRemoteServer' => 'Server telecomando',
 			'settings.companionRemoteServerDescription' => 'Consenti ai dispositivi mobili nella tua rete di controllare questa app',
 			'settings.autoPip' => 'Picture-in-Picture automatico',
-			'settings.autoPipDescription' => 'Attiva automaticamente il picture-in-picture quando si esce dall\'app durante la riproduzione',
+			'settings.autoPipDescription' => 'Entra in picture-in-picture uscendo durante la riproduzione',
 			'settings.matchContentFrameRate' => 'Adatta frequenza fotogrammi',
-			'settings.matchContentFrameRateDescription' => 'Regola la frequenza di aggiornamento del display in base al contenuto video, riducendo i tremolii e risparmiando batteria',
+			'settings.matchContentFrameRateDescription' => 'Adatta la frequenza del display al contenuto video',
 			'settings.matchRefreshRate' => 'Adatta frequenza di aggiornamento',
-			'settings.matchRefreshRateDescription' => 'Cambia la frequenza di aggiornamento del display per adattarla al contenuto video a schermo intero',
+			'settings.matchRefreshRateDescription' => 'Adatta la frequenza del display a schermo intero',
 			'settings.matchDynamicRange' => 'Adatta gamma dinamica',
-			'settings.matchDynamicRangeDescription' => 'Attiva automaticamente l\'HDR per i contenuti HDR e torna in SDR all\'uscita dal lettore',
+			'settings.matchDynamicRangeDescription' => 'Attiva HDR per contenuti HDR, poi torna a SDR',
 			'settings.displaySwitchDelay' => 'Ritardo cambio display',
 			'settings.tunneledPlayback' => 'Riproduzione tunnelizzata',
-			'settings.tunneledPlaybackDescription' => 'Usa il tunneling video accelerato dall\'hardware. Disattiva se vedi uno schermo nero con audio su contenuti HDR',
+			'settings.tunneledPlaybackDescription' => 'Usa tunneling video. Disattiva se la riproduzione HDR mostra video nero.',
 			'settings.requireProfileSelectionOnOpen' => 'Chiedi profilo all\'apertura',
 			'settings.requireProfileSelectionOnOpenDescription' => 'Mostra la selezione del profilo ogni volta che l\'app viene aperta',
-			'settings.confirmExitOnBack' => 'Conferma prima di uscire',
-			'settings.confirmExitOnBackDescription' => 'Mostra una finestra di conferma quando si preme indietro per uscire dall\'app',
 			'settings.forceTvMode' => 'Forza modalità TV',
-			'settings.forceTvModeDescription' => 'Usa il layout TV indipendentemente dal rilevamento automatico. Utile sui dispositivi Android TV che non segnalano la funzionalità leanback. Riavvia l\'app al cambiamento.',
+			'settings.forceTvModeDescription' => 'Forza layout TV. Per dispositivi non rilevati automaticamente. Richiede riavvio.',
 			'settings.startInFullscreen' => 'Avvia a schermo intero',
 			'settings.startInFullscreenDescription' => 'Apri Plezy a schermo intero all\'avvio',
 			'settings.autoHidePerformanceOverlay' => 'Nascondi automaticamente overlay prestazioni',
@@ -1783,15 +2012,15 @@ extension on TranslationsIt {
 			'settings.showNavBarLabelsDescription' => 'Mostra le etichette sotto le icone della barra di navigazione',
 			'settings.liveTvDefaultFavorites' => 'Canali preferiti predefiniti',
 			'settings.liveTvDefaultFavoritesDescription' => 'Mostra solo i canali preferiti all\'apertura della TV dal vivo',
-			'settings.display' => 'Display',
-			'settings.homeScreen' => 'Home Screen',
-			'settings.navigation' => 'Navigation',
-			'settings.window' => 'Window',
-			'settings.content' => 'Content',
-			'settings.player' => 'Player',
-			'settings.subtitlesAndConfig' => 'Subtitles & Configuration',
-			'settings.seekAndTiming' => 'Seek & Timing',
-			'settings.behavior' => 'Behavior',
+			'settings.display' => 'Schermo',
+			'settings.homeScreen' => 'Schermata Home',
+			'settings.navigation' => 'Navigazione',
+			'settings.window' => 'Finestra',
+			'settings.content' => 'Contenuti',
+			'settings.player' => 'Lettore',
+			'settings.subtitlesAndConfig' => 'Sottotitoli e configurazione',
+			'settings.seekAndTiming' => 'Ricerca e tempistica',
+			'settings.behavior' => 'Comportamento',
 			'search.hint' => 'Cerca film. spettacoli, musica...',
 			'search.tryDifferentTerm' => 'Prova altri termini di ricerca',
 			'search.searchYourMedia' => 'Cerca nei tuoi media',
@@ -1852,7 +2081,7 @@ extension on TranslationsIt {
 			'mediaMenu.shufflePlay' => 'Riproduzione casuale',
 			'mediaMenu.fileInfo' => 'Info sul file',
 			'mediaMenu.deleteFromServer' => 'Elimina dal server',
-			'mediaMenu.confirmDelete' => 'Questo eliminerà permanentemente questo contenuto e i suoi file dal tuo server. Questa azione non può essere annullata.',
+			'mediaMenu.confirmDelete' => 'Eliminare questo media e i suoi file dal server?',
 			'mediaMenu.deleteMultipleWarning' => 'Questo include tutti gli episodi e i loro file.',
 			'mediaMenu.mediaDeletedSuccessfully' => 'Elemento multimediale eliminato con successo',
 			'mediaMenu.mediaFailedToDelete' => 'Impossibile eliminare l\'elemento multimediale',
@@ -1929,7 +2158,7 @@ extension on TranslationsIt {
 			'videoControls.pipFailed' => 'Impossibile avviare la modalità Picture-in-Picture',
 			'videoControls.pipErrors.androidVersion' => 'Richiede Android 8.0 o versioni successive',
 			'videoControls.pipErrors.iosVersion' => 'Richiede iOS 15.0 o versioni successive',
-			'videoControls.pipErrors.permissionDisabled' => 'L\'autorizzazione Picture-in-Picture è disabilitata. Abilitala in Impostazioni > App > Plezy > Picture-in-Picture',
+			'videoControls.pipErrors.permissionDisabled' => 'Picture-in-picture è disattivato. Attivalo nelle impostazioni di sistema.',
 			'videoControls.pipErrors.notSupported' => 'Questo dispositivo non supporta la modalità Picture-in-Picture',
 			'videoControls.pipErrors.voSwitchFailed' => 'Impossibile cambiare l\'uscita video per Picture-in-Picture',
 			'videoControls.pipErrors.failed' => 'Impossibile avviare la modalità Picture-in-Picture',
@@ -1962,7 +2191,7 @@ extension on TranslationsIt {
 			'messages.musicNotSupported' => 'La riproduzione musicale non è ancora supportata',
 			'messages.noDescriptionAvailable' => 'Nessuna descrizione disponibile',
 			'messages.noProfilesAvailable' => 'Nessun profilo disponibile',
-			'messages.contactAdminForProfiles' => 'Contatta il tuo amministratore Plex per aggiungere profili',
+			'messages.contactAdminForProfiles' => 'Contatta l\'amministratore del server per aggiungere profili',
 			'messages.unableToDetermineLibrarySection' => 'Impossibile determinare la sezione della libreria per questo elemento',
 			'messages.logsCleared' => 'Log eliminati',
 			'messages.logsCopied' => 'Log copiati negli appunti',
@@ -1984,7 +2213,7 @@ extension on TranslationsIt {
 			'messages.failedPlayback' => ({required Object action, required Object error}) => 'Impossibile ${action}: ${error}',
 			'messages.switchingToCompatiblePlayer' => 'Passaggio al lettore compatibile...',
 			'messages.serverLimitTitle' => 'Riproduzione non riuscita',
-			'messages.serverLimitBody' => 'Il server ha restituito un errore (HTTP 500). Di solito significa che il proprietario del server ha impostato un limite di banda o di transcodifica che sta rifiutando la tua sessione. Non c\'è nulla da fare dal client — il proprietario del server deve modificare le sue impostazioni.',
+			'messages.serverLimitBody' => 'Errore server (HTTP 500). Un limite di banda/transcodifica probabilmente ha rifiutato questa sessione. Chiedi al proprietario di modificarlo.',
 			'messages.logsUploaded' => 'Log caricati',
 			'messages.logsUploadFailed' => 'Caricamento log fallito',
 			'messages.logId' => 'ID log',
@@ -2016,11 +2245,82 @@ extension on TranslationsIt {
 			'mpvConfig.confirmDeletePreset' => 'Sei sicuro di voler eliminare questo preset?',
 			'mpvConfig.configPlaceholder' => 'gpu-api=vulkan\nhwdec=auto\n# comment',
 			'dialog.confirmAction' => 'Conferma azione',
+			'profiles.addPlezyProfile' => 'Aggiungi profilo Plezy',
+			'profiles.switchingProfile' => 'Cambio profilo…',
+			'profiles.deleteThisProfileTitle' => 'Eliminare questo profilo?',
+			'profiles.deleteThisProfileMessage' => ({required Object displayName}) => 'Rimuovi ${displayName}. Le connessioni non sono interessate.',
+			'profiles.active' => 'Attivo',
+			'profiles.manage' => 'Gestisci',
+			'profiles.delete' => 'Elimina',
+			'profiles.signOut' => 'Esci',
+			'profiles.signOutPlexTitle' => 'Uscire da Plex?',
+			'profiles.signOutPlexMessage' => ({required Object displayName}) => 'Rimuovere ${displayName} e tutti gli utenti Plex Home? Puoi accedere di nuovo quando vuoi.',
+			'profiles.signedOutPlex' => 'Uscito da Plex.',
+			'profiles.signOutFailed' => 'Uscita non riuscita.',
+			'profiles.sectionTitle' => 'Profili',
+			'profiles.summarySingle' => 'Aggiungi profili per combinare utenti gestiti e identità locali',
+			'profiles.summaryMultipleWithActive' => ({required Object count, required Object activeName}) => '${count} profili · attivo: ${activeName}',
+			'profiles.summaryMultiple' => ({required Object count}) => '${count} profili',
+			'profiles.removeConnectionTitle' => 'Rimuovere la connessione?',
+			'profiles.removeConnectionMessage' => ({required Object displayName, required Object connectionLabel}) => 'Rimuovi l\'accesso di ${displayName} a ${connectionLabel}. Gli altri profili lo mantengono.',
+			'profiles.deleteProfileTitle' => 'Eliminare il profilo?',
+			'profiles.deleteProfileMessage' => ({required Object displayName}) => 'Rimuovi ${displayName} e le sue connessioni. I server restano disponibili.',
+			'profiles.profileNameLabel' => 'Nome profilo',
+			'profiles.pinProtectionLabel' => 'Protezione PIN',
+			'profiles.pinManagedByPlex' => 'PIN gestito da Plex. Modifica su plex.tv.',
+			'profiles.noPinSetEditOnPlex' => 'Nessun PIN impostato. Per richiederne uno, modifica l\'utente Home su plex.tv.',
+			'profiles.setPin' => 'Imposta PIN',
+			'profiles.setPinTitle' => 'Imposta PIN',
+			'profiles.confirmPinTitle' => 'Conferma PIN',
+			'profiles.pinSet' => 'PIN impostato',
+			'profiles.changePin' => 'Cambia',
+			_ => null,
+		} ?? switch (path) {
+			'profiles.removePin' => 'Rimuovi',
+			'profiles.connectionsLabel' => 'Connessioni',
+			'profiles.add' => 'Aggiungi',
+			'profiles.deleteProfileButton' => 'Elimina profilo',
+			'profiles.noConnectionsHint' => 'Nessuna connessione — aggiungine una per usare questo profilo.',
+			'profiles.noConnections' => 'Nessuna connessione',
+			'profiles.plexHomeAccount' => 'Account Plex Home',
+			'profiles.connectionDefault' => 'Predefinita',
+			'profiles.connectionAs' => ({required Object displayName}) => 'come ${displayName}',
+			'profiles.makeDefault' => 'Imposta come predefinita',
+			'profiles.removeConnection' => 'Rimuovi',
+			'profiles.profileRenamed' => 'Profilo rinominato.',
+			'profiles.borrowAddTo' => ({required Object displayName}) => 'Aggiungi a ${displayName}',
+			'profiles.borrowExplain' => 'Prendi in prestito la connessione di un altro profilo. I profili protetti da PIN richiedono un PIN.',
+			'profiles.borrowEmpty' => 'Nulla da prendere in prestito al momento.',
+			'profiles.borrowEmptySubtitle' => 'Collega prima Plex o Jellyfin a un altro profilo.',
+			'profiles.borrowFromProfile' => ({required Object displayName}) => 'Da ${displayName}',
+			'profiles.borrowConnectionBorrowed' => 'Connessione presa in prestito.',
+			'profiles.borrowFailed' => 'Impossibile prendere in prestito la connessione.',
+			'profiles.incorrectPin' => 'PIN errato.',
+			'profiles.sourceProfileMissingParentAccount' => 'Al profilo di origine manca l\'account principale.',
+			'profiles.failedToVerifyPin' => 'Impossibile verificare il PIN.',
+			'profiles.newProfile' => 'Nuovo profilo',
+			'profiles.profileNameHint' => 'es. Ospiti, Bambini, Soggiorno',
+			'profiles.pinProtectionOptional' => 'Protezione PIN (opzionale)',
+			'profiles.pinExplain' => 'PIN a 4 cifre richiesto per cambiare profilo.',
+			'profiles.continueButton' => 'Continua',
+			'profiles.pinsDontMatch' => 'I PIN non corrispondono',
+			'connections.sectionTitle' => 'Connessioni',
+			'connections.addConnection' => 'Aggiungi connessione',
+			'connections.addConnectionSubtitleNoProfile' => 'Accedi con Plex o collega un server Jellyfin',
+			'connections.addConnectionSubtitleScoped' => ({required Object displayName}) => 'Aggiungi a ${displayName}: Plex, Jellyfin o un\'altra connessione profilo',
+			'connections.sessionExpiredOne' => ({required Object name}) => 'Sessione scaduta per ${name}',
+			'connections.sessionExpiredMany' => ({required Object count}) => 'Sessione scaduta per ${count} server',
+			'connections.signInAgain' => 'Accedi di nuovo',
 			'discover.title' => 'Esplora',
 			'discover.switchProfile' => 'Cambia profilo',
 			'discover.noContentAvailable' => 'Nessun contenuto disponibile',
 			'discover.addMediaToLibraries' => 'Aggiungi alcuni file multimediali alle tue librerie',
 			'discover.continueWatching' => 'Continua a guardare',
+			'discover.continueWatchingIn' => ({required Object library}) => 'Continua a guardare in ${library}',
+			'discover.nextUp' => 'Prossimi',
+			'discover.nextUpIn' => ({required Object library}) => 'Prossimi in ${library}',
+			'discover.recentlyAdded' => 'Aggiunti di recente',
+			'discover.recentlyAddedIn' => ({required Object library}) => 'Aggiunti di recente in ${library}',
 			'discover.playEpisode' => ({required Object season, required Object episode}) => 'S${season}E${episode}',
 			'discover.overview' => 'Panoramica',
 			'discover.cast' => 'Attori',
@@ -2032,7 +2332,7 @@ extension on TranslationsIt {
 			'discover.minutesLeft' => ({required Object minutes}) => '${minutes} minuti rimanenti',
 			'errors.searchFailed' => ({required Object error}) => 'Ricerca fallita: ${error}',
 			'errors.connectionTimeout' => ({required Object context}) => 'Timeout connessione durante caricamento di ${context}',
-			'errors.connectionFailed' => 'Impossibile connettersi al server Plex.',
+			'errors.connectionFailed' => 'Impossibile connettersi al server multimediale',
 			'errors.failedToLoad' => ({required Object context, required Object error}) => 'Impossibile caricare ${context}: ${error}',
 			'errors.noClientAvailable' => 'Nessun client disponibile',
 			'errors.authenticationFailed' => ({required Object error}) => 'Autenticazione fallita: ${error}',
@@ -2041,6 +2341,8 @@ extension on TranslationsIt {
 			'errors.invalidToken' => 'Token non valido',
 			'errors.failedToVerifyToken' => ({required Object error}) => 'Verifica token fallita: ${error}',
 			'errors.failedToSwitchProfile' => ({required Object displayName}) => 'Impossibile passare a ${displayName}',
+			'errors.failedToDeleteProfile' => ({required Object displayName}) => 'Impossibile eliminare ${displayName}',
+			'errors.failedToRate' => 'Impossibile aggiornare la valutazione',
 			'libraries.title' => 'Librerie',
 			'libraries.scanLibraryFiles' => 'Scansiona file libreria',
 			'libraries.scanLibrary' => 'Scansiona libreria',
@@ -2054,8 +2356,6 @@ extension on TranslationsIt {
 			'libraries.analyzing' => ({required Object title}) => 'Analisi "${title}"...',
 			'libraries.analysisStarted' => ({required Object title}) => 'Analisi iniziata per "${title}"',
 			'libraries.failedToAnalyze' => ({required Object error}) => 'Impossibile analizzare libreria: ${error}',
-			_ => null,
-		} ?? switch (path) {
 			'libraries.noLibrariesFound' => 'Nessuna libreria trovata',
 			'libraries.allLibrariesHidden' => 'Tutte le librerie sono nascoste',
 			'libraries.hiddenLibrariesCount' => ({required Object count}) => 'Librerie nascoste (${count})',
@@ -2092,12 +2392,25 @@ extension on TranslationsIt {
 			'libraries.groupings.seasons' => 'Stagioni',
 			'libraries.groupings.episodes' => 'Episodi',
 			'libraries.groupings.folders' => 'Cartelle',
+			'libraries.filterCategories.genre' => 'Genere',
+			'libraries.filterCategories.year' => 'Anno',
+			'libraries.filterCategories.contentRating' => 'Classificazione',
+			'libraries.filterCategories.tag' => 'Tag',
+			'libraries.sortLabels.title' => 'Titolo',
+			'libraries.sortLabels.dateAdded' => 'Data di aggiunta',
+			'libraries.sortLabels.releaseDate' => 'Data di uscita',
+			'libraries.sortLabels.rating' => 'Valutazione',
+			'libraries.sortLabels.lastPlayed' => 'Ultima riproduzione',
+			'libraries.sortLabels.playCount' => 'Riproduzioni',
+			'libraries.sortLabels.random' => 'Casuale',
+			'libraries.sortLabels.dateShared' => 'Data di condivisione',
+			'libraries.sortLabels.latestEpisodeAirDate' => 'Data ultima messa in onda',
 			'about.title' => 'Informazioni',
 			'about.openSourceLicenses' => 'Licenze Open Source',
 			'about.versionLabel' => ({required Object version}) => 'Versione ${version}',
-			'about.appDescription' => 'Un bellissimo client Plex per Flutter',
+			'about.appDescription' => 'Un bellissimo client Plex e Jellyfin per Flutter',
 			'about.viewLicensesDescription' => 'Visualizza le licenze delle librerie di terze parti',
-			'serverSelection.allServerConnectionsFailed' => 'Impossibile connettersi a nessun server. Controlla la tua rete e riprova.',
+			'serverSelection.allServerConnectionsFailed' => 'Impossibile connettersi ai server. Controlla la rete.',
 			'serverSelection.noServersFoundForAccount' => ({required Object username, required Object email}) => 'Nessun server trovato per ${username} (${email})',
 			'serverSelection.failedToLoadServers' => ({required Object error}) => 'Impossibile caricare i server: ${error}',
 			'hubDetail.title' => 'Titolo',
@@ -2124,6 +2437,7 @@ extension on TranslationsIt {
 			'liveTv.reloadGuide' => 'Ricarica guida',
 			'liveTv.now' => 'Ora',
 			'liveTv.today' => 'Oggi',
+			'liveTv.tomorrow' => 'Domani',
 			'liveTv.midnight' => 'Mezzanotte',
 			'liveTv.overnight' => 'Notte',
 			'liveTv.morning' => 'Mattina',
@@ -2138,12 +2452,46 @@ extension on TranslationsIt {
 			'liveTv.watchFromStart' => ({required Object minutes}) => 'Guarda dall\'inizio (${minutes} min fa)',
 			'liveTv.watchLive' => 'Guarda in diretta',
 			'liveTv.goToLive' => 'Vai al live',
+			'liveTv.record' => 'Registra',
+			'liveTv.recordEpisode' => 'Registra episodio',
+			'liveTv.recordSeries' => 'Registra serie',
+			'liveTv.recordOptions' => 'Opzioni di registrazione',
+			'liveTv.recordings' => 'Registrazioni',
+			'liveTv.scheduledRecordings' => 'Programmate',
+			'liveTv.recordingRules' => 'Regole di registrazione',
+			'liveTv.noScheduledRecordings' => 'Nessuna registrazione programmata',
+			'liveTv.noRecordingRules' => 'Nessuna regola di registrazione',
+			'liveTv.manageRecording' => 'Gestisci registrazione',
+			'liveTv.cancelRecording' => 'Annulla registrazione',
+			'liveTv.cancelRecordingTitle' => 'Annullare questa registrazione?',
+			'liveTv.cancelRecordingMessage' => ({required Object title}) => '${title} non sarà più registrato.',
+			'liveTv.deleteRule' => 'Elimina regola',
+			'liveTv.deleteRuleTitle' => 'Eliminare la regola di registrazione?',
+			'liveTv.deleteRuleMessage' => ({required Object title}) => 'I prossimi episodi di ${title} non saranno registrati.',
+			'liveTv.recordingScheduled' => 'Registrazione programmata',
+			'liveTv.alreadyScheduled' => 'Questo programma è già programmato',
+			'liveTv.dvrAdminRequired' => 'Le impostazioni DVR richiedono un account amministratore',
+			'liveTv.recordingFailed' => 'Impossibile programmare la registrazione',
+			'liveTv.recordingTargetMissing' => 'Impossibile determinare la libreria di registrazione',
+			'liveTv.recordNotAvailable' => 'Registrazione non disponibile per questo programma',
+			'liveTv.recordingCancelled' => 'Registrazione annullata',
+			'liveTv.recordingRuleDeleted' => 'Regola di registrazione eliminata',
+			'liveTv.processRecordingRules' => 'Rivaluta regole',
+			'liveTv.loadingRecordings' => 'Caricamento registrazioni...',
+			'liveTv.recordingInProgress' => 'Registrazione in corso',
+			'liveTv.recordingsCount' => ({required Object count}) => '${count} programmate',
+			'liveTv.editRule' => 'Modifica regola',
+			'liveTv.editRuleAction' => 'Modifica',
+			'liveTv.recordingRuleUpdated' => 'Regola di registrazione aggiornata',
+			'liveTv.guideReloadRequested' => 'Aggiornamento guida richiesto',
+			'liveTv.rulesProcessRequested' => 'Rivalutazione regole richiesta',
+			'liveTv.recordShow' => 'Registra programma',
 			'collections.title' => 'Raccolte',
 			'collections.collection' => 'Raccolta',
 			'collections.empty' => 'La raccolta è vuota',
 			'collections.unknownLibrarySection' => 'Impossibile eliminare: sezione libreria sconosciuta',
 			'collections.deleteCollection' => 'Elimina raccolta',
-			'collections.deleteConfirm' => ({required Object title}) => 'Sei sicuro di voler eliminare "${title}"? Questa azione non può essere annullata.',
+			'collections.deleteConfirm' => ({required Object title}) => 'Eliminare "${title}"? Non si può annullare.',
 			'collections.deleted' => 'Raccolta eliminata',
 			'collections.deleteFailed' => 'Impossibile eliminare la raccolta',
 			'collections.deleteFailedWithError' => ({required Object error}) => 'Impossibile eliminare la raccolta: ${error}',
@@ -2223,11 +2571,11 @@ extension on TranslationsIt {
 			'watchTogether.pasteFromClipboard' => 'Incolla dagli appunti',
 			'watchTogether.pleaseEnterCode' => 'Inserisci un codice sessione',
 			'watchTogether.codeMustBe5Chars' => 'Il codice sessione deve essere di 5 caratteri',
-			'watchTogether.joinInstructions' => 'Inserisci il codice sessione condiviso dall\'host per unirti alla loro sessione di visione.',
+			'watchTogether.joinInstructions' => 'Inserisci il codice sessione dell\'host per partecipare.',
 			'watchTogether.failedToCreate' => 'Impossibile creare la sessione',
 			'watchTogether.failedToJoin' => 'Impossibile unirsi alla sessione',
 			'watchTogether.sessionCodeCopied' => 'Codice sessione copiato negli appunti',
-			'watchTogether.relayUnreachable' => 'Il server di inoltro non è raggiungibile. Questo potrebbe essere causato dal blocco della connessione da parte del tuo provider. Puoi comunque provare, ma Watch Together potrebbe non funzionare.',
+			'watchTogether.relayUnreachable' => 'Server relay non raggiungibile. Il blocco ISP può impedire Watch Together.',
 			'watchTogether.reconnectingToHost' => 'Riconnessione all\'host...',
 			'watchTogether.currentPlayback' => 'Riproduzione corrente',
 			'watchTogether.joinCurrentPlayback' => 'Unisciti alla riproduzione corrente',
@@ -2243,6 +2591,8 @@ extension on TranslationsIt {
 			'watchTogether.recentRooms' => 'Stanze recenti',
 			'watchTogether.renameRoom' => 'Rinomina stanza',
 			'watchTogether.removeRoom' => 'Rimuovi',
+			'watchTogether.guestSwitchUnavailable' => 'Impossibile cambiare — server non disponibile per la sincronizzazione',
+			'watchTogether.guestSwitchFailed' => 'Impossibile cambiare — contenuto non trovato su questo server',
 			'downloads.title' => 'Download',
 			'downloads.manage' => 'Gestisci',
 			'downloads.tvShows' => 'Serie TV',
@@ -2253,10 +2603,10 @@ extension on TranslationsIt {
 			'downloads.deleteDownload' => 'Elimina download',
 			'downloads.retryDownload' => 'Riprova download',
 			'downloads.downloadQueued' => 'Download in coda',
-			'downloads.serverErrorBitrate' => 'Errore del server — il file potrebbe superare il limite di bitrate dello streaming remoto',
+			'downloads.serverErrorBitrate' => 'Errore server: il file può superare il limite di bitrate remoto',
 			'downloads.episodesQueued' => ({required Object count}) => '${count} episodi in coda per il download',
 			'downloads.downloadDeleted' => 'Download eliminato',
-			'downloads.deleteConfirm' => ({required Object title}) => 'Sei sicuro di voler eliminare "${title}"? Il file scaricato verrà rimosso dal tuo dispositivo.',
+			'downloads.deleteConfirm' => ({required Object title}) => 'Eliminare "${title}" da questo dispositivo?',
 			'downloads.deletingWithProgress' => ({required Object title, required Object current, required Object total}) => 'Eliminazione di ${title}... (${current} di ${total})',
 			'downloads.deleting' => 'Eliminazione...',
 			'downloads.queuedTooltip' => 'In coda',
@@ -2291,6 +2641,12 @@ extension on TranslationsIt {
 			'downloads.editSyncFilter' => 'Filtro di sincronizzazione',
 			'downloads.syncAllItems' => 'Sincronizzazione di tutti gli elementi',
 			'downloads.syncUnwatchedItems' => 'Sincronizzazione degli elementi non visti',
+			'downloads.syncRuleServerContext' => ({required Object server, required Object status}) => 'Server: ${server} • ${status}',
+			'downloads.syncRuleAvailable' => 'Disponibile',
+			'downloads.syncRuleOffline' => 'Offline',
+			'downloads.syncRuleSignInRequired' => 'Accesso richiesto',
+			'downloads.syncRuleNotAvailableForProfile' => 'Non disponibile per il profilo attuale',
+			'downloads.syncRuleUnknownServer' => 'Server sconosciuto',
 			'downloads.syncRuleListCreated' => 'Regola di sincronizzazione creata',
 			'shaders.title' => 'Shader',
 			'shaders.noShaderDescription' => 'Nessun miglioramento video',
@@ -2315,26 +2671,26 @@ extension on TranslationsIt {
 			'companionRemote.session.connected' => 'Connesso',
 			'companionRemote.session.serverRunning' => 'Server remoto attivo',
 			'companionRemote.session.serverStopped' => 'Server remoto arrestato',
-			'companionRemote.session.serverRunningDescription' => 'I dispositivi mobili nella tua rete possono scoprire e connettersi a questa app',
+			'companionRemote.session.serverRunningDescription' => 'I dispositivi mobili sulla tua rete possono connettersi a questa app',
 			'companionRemote.session.serverStoppedDescription' => 'Avvia il server per consentire ai dispositivi mobili di connettersi',
 			'companionRemote.session.usePhoneToControl' => 'Usa il tuo dispositivo mobile per controllare questa app',
 			'companionRemote.session.startServer' => 'Avvia server',
 			'companionRemote.session.stopServer' => 'Arresta server',
 			'companionRemote.session.minimize' => 'Riduci',
-			'companionRemote.pairing.discoveryDescription' => 'I dispositivi nella tua rete che eseguono Plezy con lo stesso account Plex appariranno automaticamente',
+			'companionRemote.pairing.discoveryDescription' => 'I dispositivi Plezy con lo stesso account Plex appaiono qui',
 			'companionRemote.pairing.hostAddressHint' => '192.168.1.100:48632',
 			'companionRemote.pairing.connecting' => 'Connessione...',
 			'companionRemote.pairing.searchingForDevices' => 'Ricerca dispositivi...',
 			'companionRemote.pairing.noDevicesFound' => 'Nessun dispositivo trovato nella tua rete',
-			'companionRemote.pairing.noDevicesHint' => 'Assicurati che Plezy sia aperto sul tuo desktop e che entrambi i dispositivi siano sulla stessa rete WiFi',
+			'companionRemote.pairing.noDevicesHint' => 'Apri Plezy su desktop e usa lo stesso WiFi',
 			'companionRemote.pairing.availableDevices' => 'Dispositivi disponibili',
 			'companionRemote.pairing.manualConnection' => 'Connessione manuale',
-			'companionRemote.pairing.cryptoInitFailed' => 'Impossibile inizializzare la connessione sicura. Assicurati di aver effettuato l\'accesso a un account Plex.',
+			'companionRemote.pairing.cryptoInitFailed' => 'Impossibile avviare la connessione sicura. Accedi prima a Plex.',
 			'companionRemote.pairing.validationHostRequired' => 'Inserisci l\'indirizzo host',
 			'companionRemote.pairing.validationHostFormat' => 'Il formato deve essere IP:porta (es. 192.168.1.100:48632)',
-			'companionRemote.pairing.connectionTimedOut' => 'Connessione scaduta. Assicurati che entrambi i dispositivi siano sulla stessa rete.',
+			'companionRemote.pairing.connectionTimedOut' => 'Connessione scaduta. Usa la stessa rete su entrambi i dispositivi.',
 			'companionRemote.pairing.sessionNotFound' => 'Dispositivo non trovato. Assicurati che Plezy sia in esecuzione sull\'host.',
-			'companionRemote.pairing.authFailed' => 'Autenticazione fallita. Assicurati che entrambi i dispositivi utilizzino lo stesso account Plex.',
+			'companionRemote.pairing.authFailed' => 'Autenticazione non riuscita. Entrambi i dispositivi devono usare lo stesso account Plex.',
 			'companionRemote.pairing.failedToConnect' => ({required Object error}) => 'Connessione fallita: ${error}',
 			'companionRemote.remote.disconnectConfirm' => 'Vuoi disconnetterti dalla sessione remota?',
 			'companionRemote.remote.reconnecting' => 'Riconnessione...',
@@ -2375,7 +2731,7 @@ extension on TranslationsIt {
 			'videoSettings.audioNormalization' => 'Normalizza volume',
 			'externalPlayer.title' => 'Lettore esterno',
 			'externalPlayer.useExternalPlayer' => 'Usa lettore esterno',
-			'externalPlayer.useExternalPlayerDescription' => 'Apri i video in un\'app esterna invece del lettore integrato',
+			'externalPlayer.useExternalPlayerDescription' => 'Apri video in un\'altra app',
 			'externalPlayer.selectPlayer' => 'Seleziona lettore',
 			'externalPlayer.customPlayers' => 'Lettori personalizzati',
 			'externalPlayer.systemDefault' => 'Predefinito di sistema',
@@ -2432,6 +2788,8 @@ extension on TranslationsIt {
 			'metadataEdit.episodesAddedPastDays' => ({required Object count}) => 'Episodi aggiunti negli ultimi ${count} giorni',
 			'metadataEdit.deleteAfterPlaying' => 'Elimina episodi dopo la riproduzione',
 			'metadataEdit.never' => 'Mai',
+			_ => null,
+		} ?? switch (path) {
 			'metadataEdit.afterADay' => 'Dopo un giorno',
 			'metadataEdit.afterAWeek' => 'Dopo una settimana',
 			'metadataEdit.afterAMonth' => 'Dopo un mese',
@@ -2465,7 +2823,7 @@ extension on TranslationsIt {
 			'matchScreen.match' => 'Abbina...',
 			'matchScreen.fixMatch' => 'Correggi abbinamento...',
 			'matchScreen.unmatch' => 'Rimuovi abbinamento',
-			'matchScreen.unmatchConfirm' => 'Cancellare l\'abbinamento corrente di questo elemento? Plex lo tratterà come non abbinato finché non lo abbinerai di nuovo.',
+			'matchScreen.unmatchConfirm' => 'Cancellare questa corrispondenza? Plex la tratterà come non abbinata finché non verrà riabbinata.',
 			'matchScreen.unmatchSuccess' => 'Abbinamento rimosso',
 			'matchScreen.unmatchFailed' => 'Rimozione dell\'abbinamento non riuscita',
 			'matchScreen.matchApplied' => 'Abbinamento applicato',
@@ -2481,19 +2839,19 @@ extension on TranslationsIt {
 			'trakt.connected' => 'Connesso',
 			'trakt.connectedAs' => ({required Object username}) => 'Connesso come @${username}',
 			'trakt.disconnectConfirm' => 'Disconnettere l\'account Trakt?',
-			'trakt.disconnectConfirmBody' => 'Plezy smetterà di inviare eventi di riproduzione a Trakt. Puoi riconnetterti in qualsiasi momento.',
+			'trakt.disconnectConfirmBody' => 'Plezy smetterà di inviare eventi a Trakt. Puoi riconnetterti quando vuoi.',
 			'trakt.scrobble' => 'Scrobbling in tempo reale',
 			'trakt.scrobbleDescription' => 'Invia eventi di riproduzione, pausa e arresto a Trakt durante la riproduzione.',
 			'trakt.watchedSync' => 'Sincronizza stato visualizzato',
 			'trakt.watchedSyncDescription' => 'Quando segni elementi come visti in Plezy, vengono segnati anche su Trakt.',
 			'trackers.title' => 'Tracker',
-			'trackers.hubSubtitle' => 'Mantieni i tuoi progressi sincronizzati con Trakt e altri servizi.',
+			'trackers.hubSubtitle' => 'Sincronizza l\'avanzamento di visione con Trakt e altri servizi.',
 			'trackers.notConnected' => 'Non connesso',
 			'trackers.connectedAs' => ({required Object username}) => 'Connesso come @${username}',
 			'trackers.scrobble' => 'Traccia i progressi automaticamente',
 			'trackers.scrobbleDescription' => 'Aggiorna la tua lista quando finisci un episodio o un film.',
 			'trackers.disconnectConfirm' => ({required Object service}) => 'Disconnettere ${service}?',
-			'trackers.disconnectConfirmBody' => ({required Object service}) => 'Plezy smetterà di aggiornare la tua lista ${service}. Puoi riconnetterti in qualsiasi momento.',
+			'trackers.disconnectConfirmBody' => ({required Object service}) => 'Plezy smetterà di aggiornare ${service}. Riconnetti quando vuoi.',
 			'trackers.connectFailed' => ({required Object service}) => 'Impossibile connettersi a ${service}. Riprova.',
 			'trackers.services.mal' => 'MyAnimeList',
 			'trackers.services.anilist' => 'AniList',
@@ -2504,7 +2862,7 @@ extension on TranslationsIt {
 			'trackers.deviceCode.waitingForAuthorization' => 'In attesa di autorizzazione…',
 			'trackers.deviceCode.codeCopied' => 'Codice copiato',
 			'trackers.oauthProxy.title' => ({required Object service}) => 'Accedi a ${service}',
-			'trackers.oauthProxy.body' => 'Scansiona questo codice QR con il telefono oppure apri l\'URL sottostante su un dispositivo con browser.',
+			'trackers.oauthProxy.body' => 'Scansiona questo codice QR o apri l\'URL su qualsiasi dispositivo.',
 			'trackers.oauthProxy.openToSignIn' => ({required Object service}) => 'Apri ${service} per accedere',
 			'trackers.oauthProxy.urlCopied' => 'URL copiato',
 			'trackers.libraryFilter.title' => 'Filtro librerie',
@@ -2519,6 +2877,38 @@ extension on TranslationsIt {
 			'trackers.libraryFilter.modeHintWhitelist' => 'Sincronizza solo le librerie selezionate sotto.',
 			'trackers.libraryFilter.libraries' => 'Librerie',
 			'trackers.libraryFilter.noLibraries' => 'Nessuna libreria disponibile',
+			'addServer.addJellyfinTitle' => 'Aggiungi server Jellyfin',
+			'addServer.jellyfinUrlIntro' => 'Inserisci l\'URL del server, es. `https://jellyfin.example.com`.',
+			'addServer.serverUrl' => 'URL del server',
+			'addServer.findServer' => 'Trova server',
+			'addServer.username' => 'Nome utente',
+			'addServer.password' => 'Password',
+			'addServer.signIn' => 'Accedi',
+			'addServer.change' => 'Modifica',
+			'addServer.required' => 'Obbligatorio',
+			'addServer.couldNotReachServer' => ({required Object error}) => 'Impossibile raggiungere il server: ${error}',
+			'addServer.signInFailed' => ({required Object error}) => 'Accesso non riuscito: ${error}',
+			'addServer.quickConnectFailed' => ({required Object error}) => 'Quick Connect non riuscito: ${error}',
+			'addServer.addPlexTitle' => 'Accedi con Plex',
+			'addServer.plexAuthIntro' => 'Accedi con un browser o un codice QR.',
+			'addServer.plexQRPrompt' => 'Scansiona questo QR code per accedere.',
+			'addServer.waitingForPlexConfirmation' => 'In attesa della conferma da plex.tv…',
+			'addServer.pinExpired' => 'PIN scaduto prima dell\'accesso. Riprova.',
+			'addServer.duplicatePlexAccount' => 'Accesso a Plex già effettuato. Esci per cambiare account.',
+			'addServer.failedToRegisterAccount' => ({required Object error}) => 'Registrazione account non riuscita: ${error}',
+			'addServer.enterJellyfinUrlError' => 'Inserisci l\'URL del tuo server Jellyfin',
+			'addServer.addConnectionTitle' => 'Aggiungi connessione',
+			'addServer.addConnectionTitleScoped' => ({required Object name}) => 'Aggiungi a ${name}',
+			'addServer.addConnectionIntroGlobal' => 'Aggiungi un altro server multimediale. Plex e Jellyfin appaiono insieme in Home.',
+			'addServer.addConnectionIntroScoped' => 'Aggiungi un nuovo server, o prendine in prestito uno da un altro profilo.',
+			'addServer.signInWithPlexCard' => 'Accedi con Plex',
+			'addServer.signInWithPlexCardSubtitle' => 'Autorizza questo dispositivo. I server condivisi vengono aggiunti.',
+			'addServer.signInWithPlexCardSubtitleScoped' => 'Autorizza un account Plex. Gli utenti Home diventano profili.',
+			'addServer.connectToJellyfinCard' => 'Connetti a Jellyfin',
+			'addServer.connectToJellyfinCardSubtitle' => 'Inserisci URL del server, nome utente e password.',
+			'addServer.connectToJellyfinCardSubtitleScoped' => ({required Object name}) => 'Accedi a un server Jellyfin. Collegato a ${name}.',
+			'addServer.borrowFromAnotherProfile' => 'Prendi in prestito da un altro profilo',
+			'addServer.borrowFromAnotherProfileSubtitle' => 'Riutilizza la connessione di un altro profilo. I profili protetti da PIN richiedono un PIN.',
 			_ => null,
 		};
 	}

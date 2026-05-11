@@ -11,14 +11,27 @@ import 'package:window_manager/window_manager.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:sentry_flutter/sentry_flutter.dart';
+import 'connection/connection.dart';
+import 'connection/connection_bootstrap.dart';
+import 'connection/connection_registry.dart';
+import 'profiles/active_profile_binder.dart';
+import 'profiles/active_profile_provider.dart';
+import 'profiles/profile.dart';
+import 'profiles/profile_connection_registry.dart';
+import 'profiles/profile_registry.dart';
+import 'mixins/mounted_set_state_mixin.dart';
+import 'profiles/plex_home_service.dart';
 import 'screens/main_screen.dart';
 import 'screens/auth_screen.dart';
+import 'screens/profile/pin_entry_dialog.dart';
+import 'screens/profile/profile_switch_screen.dart';
 import 'services/storage_service.dart';
 import 'services/macos_window_service.dart';
 import 'services/native_window_service.dart';
 import 'services/fullscreen_state_manager.dart';
 import 'services/settings_service.dart';
 import 'utils/platform_detector.dart';
+import 'services/apple_tv_remote_touch_service.dart';
 import 'services/discord_rpc_service.dart';
 import 'services/gamepad_service.dart';
 import 'services/trakt/trakt_scrobble_service.dart';
@@ -29,34 +42,32 @@ import 'providers/trackers_provider.dart';
 import 'providers/user_profile_provider.dart';
 import 'providers/multi_server_provider.dart';
 import 'providers/theme_provider.dart';
-import 'providers/settings_provider.dart';
 import 'providers/hidden_libraries_provider.dart';
 import 'providers/libraries_provider.dart';
 import 'providers/playback_state_provider.dart';
 import 'providers/download_provider.dart';
 import 'providers/offline_mode_provider.dart';
 import 'providers/offline_watch_provider.dart';
+import 'providers/watch_state_overlay_provider.dart';
 import 'providers/companion_remote_provider.dart';
 import 'providers/shader_provider.dart';
 import 'utils/snackbar_helper.dart';
 import 'watch_together/providers/watch_together_provider.dart';
 import 'services/multi_server_manager.dart';
 import 'services/offline_watch_sync_service.dart';
-import 'services/server_connection_orchestrator.dart';
 import 'services/data_aggregation_service.dart';
-import 'services/in_app_review_service.dart';
 import 'services/server_registry.dart';
 import 'services/download_manager_service.dart';
 import 'services/pip_service.dart';
 import 'services/download_storage_service.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
+import 'services/jellyfin_api_cache.dart';
 import 'services/plex_api_cache.dart';
 import 'database/app_database.dart';
 import 'screens/video_player_screen.dart';
 import 'utils/app_logger.dart';
-import 'utils/plex_http_client.dart' show httpClient;
+import 'utils/media_server_http_client.dart' show httpClient;
 import 'utils/orientation_helper.dart';
-import 'utils/global_key_utils.dart';
 import 'utils/watch_state_notifier.dart';
 import 'i18n/strings.g.dart';
 import 'focus/input_mode_tracker.dart';
@@ -69,7 +80,6 @@ import 'package:package_info_plus/package_info_plus.dart';
 const bool _enableSentry = bool.fromEnvironment('ENABLE_SENTRY', defaultValue: false);
 const String gitCommit = String.fromEnvironment('GIT_COMMIT');
 const String _sentryEnvironment = String.fromEnvironment('SENTRY_ENVIRONMENT');
-const String _plexTokenDefine = String.fromEnvironment('PLEX_TOKEN');
 
 // Workaround for Flutter bug #177992: iPadOS 26.1+ misinterprets fake touch events
 // at (0,0) as barrier taps, causing modals to dismiss immediately.
@@ -100,7 +110,10 @@ void _registerTvosPlatformPlugins() {
 }
 
 Future<void> main() async {
-  WidgetsFlutterBinding.ensureInitialized();
+  final binding = WidgetsFlutterBinding.ensureInitialized();
+  // Build the semantics tree in debug so Maestro/UI automation can locate
+  // widgets by text. Zero cost in release builds.
+  if (kDebugMode) binding.ensureSemantics();
   _installZeroOffsetPointerGuard(); // Workaround for iPadOS 26.1+ modal dismissal bug
 
   // On tvOS, Flutter's generated plugin registrant doesn't run (no tvOS
@@ -134,14 +147,11 @@ Future<void> main() async {
 }
 
 Future<void> _bootstrapApp() async {
-  // Initialize settings first to get saved locale
   final settings = await SettingsService.getInstance();
   final savedLocale = settings.read(SettingsService.appLocale);
 
-  // Initialize localization with saved locale
   unawaited(LocaleSettings.setLocale(savedLocale));
 
-  // Needed for formatting dates in different locales
   await initializeDateFormatting(savedLocale.languageCode, null);
 
   // Configure image cache — keep budget modest to leave headroom for Skia decode buffers
@@ -153,12 +163,14 @@ Future<void> _bootstrapApp() async {
     PaintingBinding.instance.imageCache.maximumSizeBytes = 100 << 20; // 100MB
   }
 
-  // Initialize services in parallel where possible
   final futures = <Future<void>>[];
 
-  // Initialize window_manager for desktop platforms
   if (PlatformDetector.isDesktopOS()) {
-    futures.add(windowManager.ensureInitialized());
+    if (Platform.isMacOS) {
+      futures.add(windowManager.ensureInitialized().then((_) => MacOSWindowService.setupCustomTitlebar()));
+    } else {
+      futures.add(windowManager.ensureInitialized());
+    }
   }
 
   // Initialize TV detection (Android leanback or Apple TV) and PiP on Android.
@@ -166,33 +178,23 @@ Future<void> _bootstrapApp() async {
     futures.add(TvDetectionService.getInstance(forceTv: settings.read(SettingsService.forceTvMode)));
   }
   if (Platform.isAndroid) {
-    // Initialize PiP service to listen for PiP state changes (Android only).
     PipService();
   }
-
-  // Configure macOS window with custom titlebar (depends on window manager)
-  futures.add(MacOSWindowService.setupCustomTitlebar());
 
   // Hook Windows native fullscreen callback (no-op elsewhere).
   NativeWindowService.initialize();
 
-  // Initialize storage service
   futures.add(StorageService.getInstance());
 
-  // Wait for all parallel services to complete
   await Future.wait(futures);
 
-  // Seed Plex token from dart-define (used by screenshot automation)
-  if (_plexTokenDefine.isNotEmpty) {
-    final storage = await StorageService.getInstance();
-    await storage.savePlexToken(_plexTokenDefine);
-  }
+  // The PLEX_TOKEN dart-define (screenshot automation) is consumed by
+  // [ConnectionBootstrap.seedFromDevTokenDefine] later, when the registry
+  // is available — keeps the deprecated legacy slots out of runtime paths.
 
-  // Initialize logger level based on debug setting
   final debugEnabled = settings.read(SettingsService.enableDebugLogging);
   setLoggerLevel(debugEnabled);
 
-  // Log app version and git commit at startup
   final packageInfo = await PackageInfo.fromPlatform();
   final commitSuffix = gitCommit.isNotEmpty ? ' (${gitCommit.substring(0, 7)})' : '';
   String renderer = '';
@@ -201,10 +203,8 @@ Future<void> _bootstrapApp() async {
   }
   appLogger.i('Plezy v${packageInfo.version}+${packageInfo.buildNumber}$commitSuffix$renderer');
 
-  // Initialize download storage service with settings
   await DownloadStorageService.instance.initialize(settings);
 
-  // Start global fullscreen state monitoring
   FullscreenStateManager().startMonitoring();
 
   // Apply "start in fullscreen" preference on Windows/Linux. macOS is
@@ -217,18 +217,16 @@ Future<void> _bootstrapApp() async {
   // Initialize gamepad service (all platforms — universal_gamepad auto-registers
   // and intercepts input events, so we must listen to re-dispatch them)
   GamepadService.instance.start();
+  if (PlatformDetector.isAppleTV()) {
+    AppleTvRemoteTouchService.instance.start();
+  }
 
-  // Desktop-only services
   if (PlatformDetector.isDesktopOS()) {
     unawaited(DiscordRPCService.instance.initialize());
   }
 
-  // Trakt scrobble service (all platforms)
   await TraktScrobbleService.instance.initialize();
 
-  // DTD service is available for MCP tooling connection if needed
-
-  // Register bundled shader licenses
   _registerShaderLicenses();
 
   // In release mode, show a colored placeholder instead of a blank/white screen
@@ -384,9 +382,24 @@ void _registerShaderLicenses() {
   });
 }
 
-// Global RouteObserver for tracking navigation
 final RouteObserver<PageRoute> routeObserver = RouteObserver<PageRoute>();
 final rootNavigatorKey = GlobalKey<NavigatorState>();
+
+@visibleForTesting
+bool shouldEnterOfflineModeAfterStartupBind({required bool bindingSucceeded, required bool hasOnlineServers}) {
+  return !bindingSucceeded && !hasOnlineServers;
+}
+
+/// Top-level PIN prompt used by [ActiveProfileBinder] when it runs above the
+/// per-screen widget tree. Routes through [rootNavigatorKey] so the dialog
+/// renders correctly whether the binder fires from the splash, MainScreen,
+/// or any future host. Returns `null` when no Navigator is available yet
+/// (early boot, post-dispose) so the binder treats it as "PIN cancelled".
+Future<String?> _rootPinPrompt(Profile profile, {String? errorMessage}) {
+  final ctx = rootNavigatorKey.currentContext;
+  if (ctx == null) return Future.value(null);
+  return showPinEntryDialog(ctx, profile.displayName, errorMessage: errorMessage);
+}
 
 class MainApp extends StatefulWidget {
   const MainApp({super.key});
@@ -396,7 +409,6 @@ class MainApp extends StatefulWidget {
 }
 
 class _MainAppState extends State<MainApp> with WidgetsBindingObserver {
-  // Initialize multi-server infrastructure
   late final MultiServerManager _serverManager;
   late final DataAggregationService _aggregationService;
   late final AppDatabase _appDatabase;
@@ -421,7 +433,6 @@ class _MainAppState extends State<MainApp> with WidgetsBindingObserver {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
 
-    // On desktop, periodically check RSS and evict image cache if too high
     if (PlatformDetector.isDesktopOS()) {
       _memoryCheckTimer = Timer.periodic(const Duration(seconds: 30), (_) {
         final rss = ProcessInfo.currentRss;
@@ -437,11 +448,16 @@ class _MainAppState extends State<MainApp> with WidgetsBindingObserver {
     _aggregationService = DataAggregationService(_serverManager);
     _appDatabase = AppDatabase();
 
-    // Initialize API cache with database
     PlexApiCache.initialize(_appDatabase);
+    JellyfinApiCache.initialize(_appDatabase);
 
     _downloadManager = DownloadManagerService(database: _appDatabase, storageService: DownloadStorageService.instance);
-    _downloadManager.setClientResolver(_serverManager.getClient);
+    _downloadManager.setClientResolver((serverId, {clientScopeId}) {
+      if (clientScopeId != null && clientScopeId.isNotEmpty) {
+        return _serverManager.getJellyfinClientByCompoundId(clientScopeId) ?? _serverManager.getClient(serverId);
+      }
+      return _serverManager.getClient(serverId);
+    });
     _downloadManager.recoveryFuture = _downloadManager.recoverInterruptedDownloads();
 
     _offlineWatchSyncService = OfflineWatchSyncService(database: _appDatabase, serverManager: _serverManager);
@@ -457,9 +473,6 @@ class _MainAppState extends State<MainApp> with WidgetsBindingObserver {
         return AppExitResponse.exit;
       },
     );
-
-    // Start in-app review session tracking
-    InAppReviewService.instance.startSession();
   }
 
   @override
@@ -470,6 +483,7 @@ class _MainAppState extends State<MainApp> with WidgetsBindingObserver {
     _memoryCheckTimer?.cancel();
     _appLifecycleListener.dispose();
     _downloadManager.dispose();
+    _serverManager.dispose();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
@@ -536,10 +550,10 @@ class _MainAppState extends State<MainApp> with WidgetsBindingObserver {
     _isAutoDeleteRunning = true;
     try {
       await downloadProvider.refreshMetadataFromCache();
-      final activeKey = VideoPlayerScreenState.activeRatingKey;
+      final activeKey = VideoPlayerScreenState.activeId;
       final settings = SettingsService.instanceOrNull;
       if (settings != null && settings.read(SettingsService.autoRemoveWatchedDownloads)) {
-        final deleted = await downloadProvider.autoDeleteWatchedDownloads(activeRatingKey: activeKey);
+        final deleted = await downloadProvider.autoDeleteWatchedDownloads(activeId: activeKey);
         if (deleted.isNotEmpty) {
           final msg = deleted.length == 1
               ? t.messages.autoRemovedWatchedDownload(title: deleted.first)
@@ -572,10 +586,9 @@ class _MainAppState extends State<MainApp> with WidgetsBindingObserver {
   void didChangeAppLifecycleState(AppLifecycleState state) {
     switch (state) {
       case AppLifecycleState.resumed:
-        // App came back to foreground - trigger sync check and start new session
+        // App came back to foreground - trigger sync check
         _offlineWatchSyncService.onAppResumed();
         TraktSyncService.instance.flushQueue();
-        InAppReviewService.instance.startSession();
         // Re-probe servers — mobile OS may have dropped TCP connections during doze/sleep.
         // On desktop, resumed fires on every window focus (alt-tab), so apply a cooldown
         // to avoid piling up network probes from rapid alt-tabbing.
@@ -598,7 +611,6 @@ class _MainAppState extends State<MainApp> with WidgetsBindingObserver {
         // Closing here would kill the Drift isolate channel while services
         // (sync, downloads, cache) still hold references to the executor.
         // SQLite WAL mode handles process death; desktop uses onExitRequested.
-        InAppReviewService.instance.endSession();
         if (PlatformDetector.isDesktopOS()) {
           if (ProcessInfo.currentRss > 1024 * 1024 * 1024) {
             // 1GB
@@ -616,8 +628,68 @@ class _MainAppState extends State<MainApp> with WidgetsBindingObserver {
   Widget build(BuildContext context) {
     return MultiProvider(
       providers: [
-        ChangeNotifierProvider(create: (context) => MultiServerProvider(_serverManager, _aggregationService)),
-        // Offline mode provider - depends on MultiServerProvider
+        // Expose AppDatabase + ConnectionRegistry so screens (Settings, Setup)
+        // can manage stored Jellyfin/Plex connections without re-creating
+        // the registry per-call site.
+        Provider<AppDatabase>.value(value: _appDatabase),
+        Provider<ConnectionRegistry>(create: (_) => ConnectionRegistry(_appDatabase)),
+        Provider<ProfileRegistry>(create: (_) => ProfileRegistry(_appDatabase)),
+        Provider<ProfileConnectionRegistry>(create: (_) => ProfileConnectionRegistry(_appDatabase)),
+        Provider<PlexHomeService>(
+          create: (context) {
+            // start() resolves StorageService internally — the singleton was
+            // already initialised eagerly during boot, so the await is a
+            // microtask hop in practice.
+            final service = PlexHomeService(
+              connections: context.read<ConnectionRegistry>(),
+              profileConnections: context.read<ProfileConnectionRegistry>(),
+            );
+            unawaited(service.start());
+            return service;
+          },
+          dispose: (_, s) => s.dispose(),
+        ),
+        ChangeNotifierProvider<ActiveProfileProvider>(
+          create: (context) {
+            final provider = ActiveProfileProvider(
+              registry: context.read<ProfileRegistry>(),
+              plexHome: context.read<PlexHomeService>(),
+              connections: context.read<ConnectionRegistry>(),
+            );
+            unawaited(provider.initialize());
+            return provider;
+          },
+        ),
+        ChangeNotifierProvider(
+          create: (context) {
+            _serverManager.onJellyfinConnectionUpdated = context.read<ConnectionRegistry>().upsert;
+            return MultiServerProvider(_serverManager, _aggregationService);
+          },
+        ),
+        // Profile binder owns the cold-start client connect: Plex token
+        // refresh + Jellyfin client creation. Hoisted out of MainScreen so
+        // the splash can await its first settle — without this, MainScreen
+        // mounts (and discover/libraries query) before any client exists.
+        Provider<ActiveProfileBinder>(
+          lazy: false,
+          create: (context) {
+            final activeProfile = context.read<ActiveProfileProvider>();
+            return ActiveProfileBinder(
+              activeProfile: activeProfile,
+              connections: context.read<ConnectionRegistry>(),
+              profileConnections: context.read<ProfileConnectionRegistry>(),
+              serverManager: _serverManager,
+              multiServerProvider: context.read<MultiServerProvider>(),
+              pinPrompt: _rootPinPrompt,
+              shouldDeferInitialBind: (_) async {
+                final settings = await SettingsService.getInstance();
+                return settings.read(SettingsService.requireProfileSelectionOnOpen) &&
+                    activeProfile.hasMultipleProfiles;
+              },
+            )..start();
+          },
+          dispose: (_, binder) => binder.dispose(),
+        ),
         ChangeNotifierProxyProvider<MultiServerProvider, OfflineModeProvider>(
           create: (_) {
             final provider = OfflineModeProvider(_serverManager);
@@ -630,15 +702,33 @@ class _MainAppState extends State<MainApp> with WidgetsBindingObserver {
             return provider;
           },
         ),
-        // Download provider
-        ChangeNotifierProvider(
+        // Download provider. Downloads are shared, but sync rules are scoped to
+        // the active profile and reload when the profile changes.
+        ChangeNotifierProxyProvider<ActiveProfileProvider, DownloadProvider>(
           create: (context) => DownloadProvider(downloadManager: _downloadManager, database: _appDatabase),
+          update: (context, activeProfile, previous) {
+            final provider = previous ?? DownloadProvider(downloadManager: _downloadManager, database: _appDatabase);
+            provider.setActiveProfileId(activeProfile.activeId);
+            return provider;
+          },
         ),
-        // Offline watch sync service
-        ChangeNotifierProvider<OfflineWatchSyncService>(
+        ChangeNotifierProxyProvider<ActiveProfileProvider, WatchStateOverlayProvider>(
+          create: (_) => WatchStateOverlayProvider(),
+          update: (_, activeProfile, previous) {
+            final provider = previous ?? WatchStateOverlayProvider();
+            provider.setActiveProfileId(activeProfile.activeId);
+            return provider;
+          },
+        ),
+        ChangeNotifierProxyProvider<ActiveProfileProvider, OfflineWatchSyncService>(
           create: (context) {
             final offlineModeProvider = context.read<OfflineModeProvider>();
             final downloadProvider = context.read<DownloadProvider>();
+            final activeProfile = context.read<ActiveProfileProvider>();
+            _offlineWatchSyncService.setActiveProfileId(
+              activeProfile.activeId,
+              availableProfileCount: activeProfile.profiles.length,
+            );
 
             // Offline-sync drain replays a batch of queued watch actions without
             // per-item data, so we can't target rules — force a full pass.
@@ -652,12 +742,9 @@ class _MainAppState extends State<MainApp> with WidgetsBindingObserver {
             // binge-watching coalesces into one pass.
             _watchStateSubscription = WatchStateNotifier().stream.listen((event) {
               if (event.changeType != WatchStateChangeType.watched) return;
-              if (VideoPlayerScreenState.activeRatingKey == event.ratingKey) return;
+              if (VideoPlayerScreenState.activeId == event.itemId) return;
 
-              _pendingSyncKeys.add(event.globalKey);
-              for (final parentKey in event.parentChain) {
-                _pendingSyncKeys.add(buildGlobalKey(event.serverId, parentKey));
-              }
+              _pendingSyncKeys.addAll(downloadProvider.syncRuleKeysForWatchEvent(event));
 
               _syncDebounce?.cancel();
               _syncDebounce = Timer(const Duration(seconds: 5), () {
@@ -676,8 +763,12 @@ class _MainAppState extends State<MainApp> with WidgetsBindingObserver {
             _offlineWatchSyncService.startConnectivityMonitoring(offlineModeProvider);
             return _offlineWatchSyncService;
           },
+          update: (_, activeProfile, previous) {
+            final provider = previous ?? _offlineWatchSyncService;
+            provider.setActiveProfileId(activeProfile.activeId, availableProfileCount: activeProfile.profiles.length);
+            return provider;
+          },
         ),
-        // Offline watch provider - depends on sync service and download provider
         ChangeNotifierProxyProvider2<OfflineWatchSyncService, DownloadProvider, OfflineWatchProvider>(
           create: (context) => OfflineWatchProvider(
             syncService: _offlineWatchSyncService,
@@ -687,14 +778,24 @@ class _MainAppState extends State<MainApp> with WidgetsBindingObserver {
             return previous ?? OfflineWatchProvider(syncService: syncService, downloadProvider: downloadProvider);
           },
         ),
-        // Existing providers
-        ChangeNotifierProvider(create: (context) => UserProfileProvider()),
+        ChangeNotifierProxyProvider2<ActiveProfileProvider, ConnectionRegistry, UserProfileProvider>(
+          create: (_) => UserProfileProvider(),
+          update: (context, activeProfile, connections, previous) {
+            final provider = previous ?? UserProfileProvider();
+            provider.attach(
+              connections: connections,
+              activeProfile: activeProfile,
+              profileConnections: context.read<ProfileConnectionRegistry>(),
+              serverManager: context.read<MultiServerProvider>().serverManager,
+            );
+            return provider;
+          },
+        ),
         ChangeNotifierProvider(create: (context) => ThemeProvider()),
         // Tracker accounts — depend on UserProfileProvider for per-profile
         // session scoping. Hydrated and rebound by `_TrackerProfileBootstrap`.
         ChangeNotifierProvider(create: (context) => TraktAccountProvider()),
         ChangeNotifierProvider(create: (context) => TrackersProvider()),
-        ChangeNotifierProvider(create: (context) => SettingsProvider(), lazy: true),
         ChangeNotifierProvider(create: (context) => HiddenLibrariesProvider(), lazy: true),
         ChangeNotifierProvider(create: (context) => LibrariesProvider()),
         ChangeNotifierProvider(create: (context) => PlaybackStateProvider()),
@@ -739,6 +840,9 @@ class _MainAppState extends State<MainApp> with WidgetsBindingObserver {
                           ...WidgetsApp.defaultShortcuts,
                           const SingleActivator(LogicalKeyboardKey.select): const ActivateIntent(),
                           const SingleActivator(LogicalKeyboardKey.gameButtonA): const ActivateIntent(),
+                          const SingleActivator(LogicalKeyboardKey.goBack): const DismissIntent(),
+                          const SingleActivator(LogicalKeyboardKey.browserBack): const DismissIntent(),
+                          const SingleActivator(LogicalKeyboardKey.gameButtonB): const DismissIntent(),
                         },
                         builder: (context, child) => ScaffoldMessenger(
                           key: rootScaffoldMessengerKey,
@@ -809,15 +913,15 @@ class _AppleTvScale extends StatelessWidget {
   }
 }
 
-/// Hydrates Trakt and MAL/AniList/Simkl providers with the active Plex
-/// profile's sessions and rebinds their services whenever the user switches.
+/// Hydrates Trakt and MAL/AniList/Simkl providers with the active profile's
+/// sessions and rebinds their services whenever the user switches profiles.
 ///
 /// Lives high in the widget tree (above MaterialApp) so the listener survives
 /// route changes. [onFirstMount] runs exactly once after the first
 /// `didChangeDependencies`.
 class _TrackerProfileBootstrap extends StatefulWidget {
   final Widget child;
-  final List<Future<void> Function(String? uuid)> onProfileChanged;
+  final List<Future<void> Function(String? profileId)> onProfileChanged;
   final VoidCallback? onFirstMount;
 
   const _TrackerProfileBootstrap({required this.child, required this.onProfileChanged, this.onFirstMount});
@@ -827,19 +931,19 @@ class _TrackerProfileBootstrap extends StatefulWidget {
 }
 
 class _TrackerProfileBootstrapState extends State<_TrackerProfileBootstrap> {
-  UserProfileProvider? _profile;
-  String? _lastUuid;
+  ActiveProfileProvider? _provider;
+  String? _lastId;
   bool _initialized = false;
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    final profile = context.read<UserProfileProvider>();
+    final provider = context.read<ActiveProfileProvider>();
 
-    if (!identical(_profile, profile)) {
-      _profile?.removeListener(_onProfileChanged);
-      _profile = profile;
-      _profile!.addListener(_onProfileChanged);
+    if (!identical(_provider, provider)) {
+      _provider?.removeListener(_onProfileChanged);
+      _provider = provider;
+      _provider!.addListener(_onProfileChanged);
     }
 
     if (!_initialized) {
@@ -850,12 +954,12 @@ class _TrackerProfileBootstrapState extends State<_TrackerProfileBootstrap> {
   }
 
   void _onProfileChanged() {
-    final uuid = _profile?.currentUser?.uuid;
-    if (uuid == _lastUuid) return;
-    _lastUuid = uuid;
+    final id = _provider?.activeId;
+    if (id == _lastId) return;
+    _lastId = id;
     for (final fn in widget.onProfileChanged) {
       unawaited(
-        fn(uuid).catchError((Object e, StackTrace s) {
+        fn(id).catchError((Object e, StackTrace s) {
           appLogger.w('Tracker profile bootstrap failed', error: e, stackTrace: s);
         }),
       );
@@ -864,7 +968,7 @@ class _TrackerProfileBootstrapState extends State<_TrackerProfileBootstrap> {
 
   @override
   void dispose() {
-    _profile?.removeListener(_onProfileChanged);
+    _provider?.removeListener(_onProfileChanged);
     super.dispose();
   }
 
@@ -903,7 +1007,7 @@ class SetupScreen extends StatefulWidget {
   State<SetupScreen> createState() => _SetupScreenState();
 }
 
-class _SetupScreenState extends State<SetupScreen> {
+class _SetupScreenState extends State<SetupScreen> with MountedSetStateMixin {
   String _statusMessage = '';
 
   // Per-server connection status: serverId -> (name, connected?)
@@ -916,7 +1020,7 @@ class _SetupScreenState extends State<SetupScreen> {
   }
 
   void _setStatus(String message) {
-    if (mounted) setState(() => _statusMessage = message);
+    setStateIfMounted(() => _statusMessage = message);
   }
 
   Future<void> _loadSavedCredentials() async {
@@ -924,6 +1028,31 @@ class _SetupScreenState extends State<SetupScreen> {
 
     final storage = await StorageService.getInstance();
     final registry = ServerRegistry(storage);
+
+    // Idempotent: brings legacy SharedPreferences state (plexToken,
+    // currentUserUUID, homeUsersCache) into the new ConnectionRegistry +
+    // ProfileRegistry tables. No-op on subsequent launches.
+    if (mounted) {
+      try {
+        final connRegistry = context.read<ConnectionRegistry>();
+        final profileRegistry = context.read<ProfileRegistry>();
+        final activeProfiles = context.read<ActiveProfileProvider>();
+        final bootstrap = ConnectionBootstrap(
+          storage: storage,
+          connectionRegistry: connRegistry,
+          serverRegistry: registry,
+          profileRegistry: profileRegistry,
+        );
+        await bootstrap.run();
+        // Provider initialization starts before this screen runs the legacy
+        // migration. Reload after bootstrap so copied Plex Home users and the
+        // selected active profile are visible before setup decides binding is
+        // already settled and navigates to MainScreen.
+        await activeProfiles.reloadFromStorage();
+      } catch (e, st) {
+        appLogger.w('Boot-time migration failed', error: e, stackTrace: st);
+      }
+    }
 
     // Check network connectivity early to fast-path airplane mode.
     // Timeout guards against connectivity_plus hanging on some Android TV devices after force-close.
@@ -944,28 +1073,17 @@ class _SetupScreenState extends State<SetupScreen> {
       Sentry.addBreadcrumb(Breadcrumb(message: 'Network check done: hasNetwork=$hasNetwork', category: 'setup')),
     );
 
-    if (hasNetwork) {
-      _setStatus(t.common.refreshingServers);
-
-      // Refresh servers from API to get updated connection info (IPs may change).
-      // If the stored token is invalid (e.g. after removing a Plex profile PIN),
-      // redirect to AuthScreen so the user can re-authenticate.
-      final refreshResult = await registry.refreshServersFromApi();
-      if (refreshResult == ServerRefreshResult.authError) {
-        await storage.clearCredentials();
-        if (mounted) {
-          unawaited(Navigator.pushReplacement(context, fadeRoute(const AuthScreen())));
-        }
-        return;
-      }
-    }
-
     _setStatus(t.common.loadingServers);
 
-    // Load all configured servers
-    final servers = await registry.getServers();
+    if (!mounted) return;
 
-    if (servers.isEmpty) {
+    // Snapshot ConnectionRegistry before we cross any awaits — Provider lookups
+    // through `context` after async gaps trip the use_build_context_synchronously
+    // lint, and reading early is safe because the registry is a singleton.
+    final connectionRegistry = context.read<ConnectionRegistry>();
+    final allConnections = await connectionRegistry.list();
+
+    if (allConnections.isEmpty) {
       if (mounted) {
         unawaited(Navigator.pushReplacement(context, fadeRoute(const AuthScreen())));
       }
@@ -983,67 +1101,142 @@ class _SetupScreenState extends State<SetupScreen> {
       return;
     }
 
-    unawaited(
-      Sentry.addBreadcrumb(Breadcrumb(message: 'Connecting to ${servers.length} server(s)', category: 'setup')),
-    );
-    _setStatus(t.common.connectingToServers);
-
-    // Populate per-server status for splash display
     if (mounted) {
       setState(() {
-        for (final server in servers) {
-          _serverStatus[server.clientIdentifier] = (server.name, null);
+        for (final conn in allConnections) {
+          if (conn is PlexAccountConnection) {
+            for (final s in conn.servers) {
+              _serverStatus[s.clientIdentifier] = (s.name, null);
+            }
+          } else if (conn is JellyfinConnection) {
+            _serverStatus[conn.serverMachineId] = (conn.serverName, null);
+          }
         }
       });
     }
 
-    try {
-      final result = await ServerConnectionOrchestrator.connectAndInitialize(
-        servers: servers,
-        multiServerProvider: context.read<MultiServerProvider>(),
-        librariesProvider: context.read<LibrariesProvider>(),
-        syncService: context.read<OfflineWatchSyncService>(),
-        clientIdentifier: storage.getClientIdentifier(),
-        onServerStatus: (serverId, success) {
-          if (mounted) {
-            setState(() {
-              final existing = _serverStatus[serverId];
-              if (existing != null) {
-                _serverStatus[serverId] = (existing.$1, success);
-              }
-            });
-          }
-        },
-      );
+    final plexCount = allConnections.whereType<PlexAccountConnection>().fold<int>(0, (n, c) => n + c.servers.length);
+    final jellyfinCount = allConnections.whereType<JellyfinConnection>().length;
+    unawaited(
+      Sentry.addBreadcrumb(
+        Breadcrumb(
+          message: 'Handing off to MainScreen with $plexCount Plex server(s) + $jellyfinCount Jellyfin',
+          category: 'setup',
+        ),
+      ),
+    );
+    _setStatus(t.common.connectingToServers);
 
+    // Snapshot Provider refs before further awaits.
+    final activeProfile = context.read<ActiveProfileProvider>();
+    // Reading the binder here is enough — the Provider is `lazy: false` so
+    // it has already constructed the binder and called `start()` during
+    // MultiProvider build. We just need to wait for it.
+    final binder = context.read<ActiveProfileBinder>();
+    final downloadProvider = context.read<DownloadProvider>();
+
+    // Wait for the active profile to load from disk so the binder has a
+    // profile to bind. `initialize` is fire-and-forget at provider creation,
+    // so awaiting here pulls control through the same future and triggers
+    // the listener-driven rebind synchronously.
+    await activeProfile.reloadFromStorage();
+    if (!mounted) return;
+
+    if (activeProfile.active == null && activeProfile.profiles.isEmpty) {
+      appLogger.w('Setup: stored connections exist but no profiles resolved after bootstrap; returning to auth');
+      unawaited(Navigator.pushReplacement(context, fadeRoute(const AuthScreen())));
+      return;
+    }
+
+    // Wire the per-server status listener before either branch so the splash
+    // checkmarks fill in even while the user is choosing a profile.
+    _bindServerStatusListener(activeProfile, _serverManagerFromContext);
+
+    // If "prompt for profile on launch" is on (or no profile is selected
+    // yet), surface the picker BEFORE waiting for the previously-active
+    // profile's bind to settle — otherwise the user sees the splash fully
+    // connect before the prompt arrives. The picker's own `_switchTo` calls
+    // `awaitBindingSettle` after activation, so by the time it pops, the
+    // chosen profile's bind is settled.
+    final settings = await SettingsService.getInstance();
+    if (!mounted) return;
+    final hasNoActive = activeProfile.active == null && activeProfile.profiles.isNotEmpty;
+    final requireOnOpen =
+        settings.read(SettingsService.requireProfileSelectionOnOpen) && activeProfile.hasMultipleProfiles;
+    final shouldPrompt = hasNoActive || requireOnOpen;
+
+    var bindingSucceeded = activeProfile.lastBindingSucceeded;
+    if (shouldPrompt) {
+      await Navigator.of(
+        context,
+      ).push(MaterialPageRoute(builder: (_) => const ProfileSwitchScreen(requireSelection: true)));
       if (!mounted) return;
-
-      if (result.hasConnections && result.firstClient != null) {
-        // Resume any downloads that were interrupted by app kill
-        final downloadProvider = context.read<DownloadProvider>();
-        unawaited(
-          downloadProvider.ensureInitialized().then((_) {
-            downloadProvider.resumeQueuedDownloads(result.firstClient!);
-          }),
-        );
-
-        unawaited(Navigator.pushReplacement(context, fadeRoute(MainScreen(client: result.firstClient!))));
-      } else {
-        _setStatus(t.common.startingOfflineMode);
-        await context.read<DownloadProvider>().ensureInitialized();
+      bindingSucceeded = activeProfile.active != null && activeProfile.lastBindingSucceeded;
+    } else {
+      // Now wait for the binder to settle. This is the Plex/Jellyfin server
+      // race: per-server status flips on the splash list as each client comes
+      // online, and we don't push MainScreen until they're all done (success
+      // or fail). Eliminates the "Failed to load discover content: No servers
+      // available" race the old eager-navigate flow caused.
+      bindingSucceeded = await activeProfile.awaitBindingSettle();
+      if (!mounted) return;
+      if (!bindingSucceeded) {
+        appLogger.w('Setup: initial profile bind failed; retrying once before entering main screen');
+        await binder.rebindActive();
         if (!mounted) return;
-        unawaited(Navigator.pushReplacement(context, fadeRoute(const MainScreen(isOfflineMode: true))));
-      }
-    } catch (e, stackTrace) {
-      appLogger.e('Error during multi-server connection', error: e, stackTrace: stackTrace);
-
-      if (mounted) {
-        _setStatus(t.common.startingOfflineMode);
-        await context.read<DownloadProvider>().ensureInitialized();
-        if (!mounted) return;
-        unawaited(Navigator.pushReplacement(context, fadeRoute(const MainScreen(isOfflineMode: true))));
+        bindingSucceeded = activeProfile.lastBindingSucceeded;
       }
     }
+
+    if (shouldEnterOfflineModeAfterStartupBind(
+      bindingSucceeded: bindingSucceeded,
+      hasOnlineServers: _serverManagerFromContext().onlineServerIds.isNotEmpty,
+    )) {
+      appLogger.w('Setup: no servers online after startup bind; starting offline mode');
+      await downloadProvider.ensureInitialized();
+      if (!mounted) return;
+      unawaited(Navigator.pushReplacement(context, fadeRoute(const MainScreen(isOfflineMode: true))));
+      return;
+    }
+
+    // Repopulate metadata for downloaded items now that per-backend caches
+    // are resolvable (the Connections row + live JellyfinClient are in
+    // place). Without this the downloads list and sync-rule titles render
+    // empty until something forces a later refresh.
+    await downloadProvider.refreshMetadataFromCache();
+    if (!mounted) return;
+
+    unawaited(Navigator.pushReplacement(context, fadeRoute(MainScreen(initialPromptHandled: shouldPrompt))));
+  }
+
+  /// Wire per-server status updates from [MultiServerManager] into the
+  /// splash list so the user sees check/cross marks land as the binder
+  /// brings each client online. Best-effort: stops listening when the
+  /// state goes away.
+  StreamSubscription<Map<String, bool>>? _statusSub;
+
+  void _bindServerStatusListener(ActiveProfileProvider _, MultiServerManager Function() resolveManager) {
+    _statusSub?.cancel();
+    final manager = resolveManager();
+    _statusSub = manager.statusStream.listen((status) {
+      if (!mounted) return;
+      setState(() {
+        for (final entry in status.entries) {
+          final existing = _serverStatus[entry.key];
+          if (existing != null) {
+            _serverStatus[entry.key] = (existing.$1, entry.value);
+          }
+        }
+      });
+    });
+  }
+
+  MultiServerManager _serverManagerFromContext() => context.read<MultiServerProvider>().serverManager;
+
+  @override
+  void dispose() {
+    _statusSub?.cancel();
+    super.dispose();
   }
 
   Widget _buildStatusText(BuildContext context) {
@@ -1085,6 +1278,7 @@ class _SetupScreenState extends State<SetupScreen> {
           statusIcon = const Icon(Icons.cancel, size: 14, color: failColor);
         }
         return Padding(
+          key: ValueKey(entry.key),
           padding: const EdgeInsets.symmetric(vertical: 2),
           child: Row(
             mainAxisSize: MainAxisSize.min,

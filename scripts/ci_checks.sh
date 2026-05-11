@@ -1,6 +1,14 @@
 #!/usr/bin/env bash
 set -uo pipefail
 
+# Git sets GIT_DIR (and friends) for hook invocations. Inside `flutter pub
+# run`, that leaks into Flutter's own SDK-version probe (`git describe` from
+# Flutter's checkout) and makes Flutter misreport its version as
+# `1.35.1-0.0.pre-1`, which then fails dependency resolution. Strip those
+# vars so the script behaves the same when invoked from a hook as it does
+# from a plain shell.
+unset GIT_DIR GIT_INDEX_FILE GIT_WORK_TREE GIT_PREFIX
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$ROOT"
@@ -51,7 +59,39 @@ else
   rm -f "$out"
 fi
 
-# 2. flutter analyze (mirrors ci.yml "Analyze code")
+# 2. Codegen freshness (build_runner outputs newer than their sources)
+section "codegen freshness"
+stale=()
+while IFS= read -r -d '' src; do
+  for gen in "${src%.dart}.g.dart" "${src%.dart}.freezed.dart"; do
+    if [ -f "$gen" ] && [ "$src" -nt "$gen" ]; then
+      stale+=("${src#./}")
+      break
+    fi
+  done
+done < <(find lib -name "*.dart" ! -name "*.g.dart" ! -name "*.freezed.dart" -type f -print0 2>/dev/null)
+if [ ${#stale[@]} -eq 0 ]; then
+  ok "no stale generated files"
+else
+  fail "${#stale[@]} dart source(s) newer than their generated .g/.freezed:"
+  printf '    %s\n' "${stale[@]}"
+  echo "    Run: scripts/codegen.sh"
+  FAILED=1
+fi
+
+# 3. Native formatting
+section "native format"
+out="$(mktemp)"
+if scripts/format_native.sh --check >"$out" 2>&1; then
+  ok "native files correctly formatted"
+else
+  fail "native formatting issues"
+  sed 's/^/    /' "$out"
+  FAILED=1
+fi
+rm -f "$out"
+
+# 3. flutter analyze (mirrors ci.yml "Analyze code")
 section "flutter analyze"
 out="$(mktemp)"
 flutter analyze >"$out" 2>&1 || true
@@ -68,13 +108,13 @@ else
 fi
 rm -f "$out"
 
-# 3. Unused code (mirrors ci.yml "Check for unused code")
+# 4. Unused code (mirrors ci.yml "Check for unused code")
 section "dart_code_linter: unused code"
 if ! have_dart_code_linter; then
   skip "dart_code_linter unresolved — run 'flutter pub get'"
 else
   out="$(mktemp)"
-  dart run dart_code_linter:metrics check-unused-code lib >"$out" 2>&1 || true
+  flutter pub run dart_code_linter:metrics check-unused-code lib >"$out" 2>&1 || true
   if grep -qi "no unused code found" "$out"; then
     ok "none"
   else
@@ -85,13 +125,13 @@ else
   rm -f "$out"
 fi
 
-# 4. Unused files (mirrors ci.yml "Check for unused files")
+# 5. Unused files (mirrors ci.yml "Check for unused files")
 section "dart_code_linter: unused files"
 if ! have_dart_code_linter; then
   skip "dart_code_linter unresolved — run 'flutter pub get'"
 else
   out="$(mktemp)"
-  dart run dart_code_linter:metrics check-unused-files lib >"$out" 2>&1 || true
+  flutter pub run dart_code_linter:metrics check-unused-files lib >"$out" 2>&1 || true
   if grep -qi "no unused files found" "$out"; then
     ok "none"
   else

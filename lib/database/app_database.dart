@@ -12,11 +12,45 @@ import '../utils/global_key_utils.dart';
 
 part 'app_database.g.dart';
 
-/// String values stored in [OfflineWatchProgress.actionType] (use `.name`).
-enum OfflineActionType { progress, watched, unwatched }
+/// Action queued in the offline watch-progress sync table. The serialized
+/// form ([id]) is what gets persisted in [OfflineWatchProgress.actionType];
+/// keep these strings stable across renames so existing rows resolve.
+enum OfflineActionType {
+  progress,
+  watched,
+  unwatched;
 
-// Simplified database with API cache for offline support
-@DriftDatabase(tables: [DownloadedMedia, DownloadQueue, ApiCache, OfflineWatchProgress, SyncRules])
+  /// Stable string id used for persistence. Survives an enum-name rename
+  /// (e.g. `progress` → `inProgress`) — `.name` would corrupt every row.
+  String get id => switch (this) {
+    OfflineActionType.progress => 'progress',
+    OfflineActionType.watched => 'watched',
+    OfflineActionType.unwatched => 'unwatched',
+  };
+
+  /// Inverse of [id]. Throws on unknown so a typo in production doesn't
+  /// silently fall back to the wrong action.
+  static OfflineActionType fromId(String id) => switch (id) {
+    'progress' => OfflineActionType.progress,
+    'watched' => OfflineActionType.watched,
+    'unwatched' => OfflineActionType.unwatched,
+    _ => throw ArgumentError('Unknown OfflineActionType id: $id'),
+  };
+}
+
+@DriftDatabase(
+  tables: [
+    DownloadedMedia,
+    DownloadOwners,
+    DownloadQueue,
+    ApiCache,
+    OfflineWatchProgress,
+    SyncRules,
+    Connections,
+    Profiles,
+    ProfileConnections,
+  ],
+)
 class AppDatabase extends _$AppDatabase {
   AppDatabase() : super(_openConnection());
 
@@ -26,11 +60,20 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.e);
 
   @override
-  int get schemaVersion => 13;
+  int get schemaVersion => 14;
 
   @override
   MigrationStrategy get migration {
     return MigrationStrategy(
+      // Enforce ProfileConnections → Profiles/Connections cascades.
+      // Drift turns FKs *off* during migrations, so the per-connection
+      // pragma we set in `_openConnection` is wiped on first open. This
+      // hook runs after migrations and re-enables it for subsequent
+      // queries — also applies to in-memory test databases that don't go
+      // through `_openConnection`.
+      beforeOpen: (details) async {
+        await customStatement('PRAGMA foreign_keys = ON');
+      },
       onCreate: (Migrator m) async {
         await m.createAll();
       },
@@ -41,19 +84,17 @@ class AppDatabase extends _$AppDatabase {
         }
         if (from < 8) {
           appLogger.i('Adding bgTaskId column to DownloadedMedia (v8 migration)');
-          try {
-            await m.addColumn(downloadedMedia, downloadedMedia.bgTaskId);
-          } catch (e) {
-            appLogger.w('bgTaskId column may already exist: $e');
-          }
+          await _ignoreAlreadyExists(
+            'DownloadedMedia.bgTaskId column',
+            () => m.addColumn(downloadedMedia, downloadedMedia.bgTaskId),
+          );
         }
         if (from < 9) {
           appLogger.i('Adding mediaIndex column to DownloadedMedia (v9 migration)');
-          try {
-            await m.addColumn(downloadedMedia, downloadedMedia.mediaIndex);
-          } catch (e) {
-            appLogger.w('mediaIndex column may already exist: $e');
-          }
+          await _ignoreAlreadyExists(
+            'DownloadedMedia.mediaIndex column',
+            () => m.addColumn(downloadedMedia, downloadedMedia.mediaIndex),
+          );
         }
         if (from < 10) {
           appLogger.i('Adding SyncRules table (v10 migration)');
@@ -61,19 +102,14 @@ class AppDatabase extends _$AppDatabase {
         }
         if (from < 11) {
           appLogger.i('Adding enabled column to SyncRules (v11 migration)');
-          try {
-            await m.addColumn(syncRules, syncRules.enabled);
-          } catch (e) {
-            appLogger.w('enabled column may already exist: $e');
-          }
+          await _ignoreAlreadyExists('SyncRules.enabled column', () => m.addColumn(syncRules, syncRules.enabled));
         }
         if (from < 12) {
           appLogger.i('Adding downloadFilter column to SyncRules (v12 migration)');
-          try {
-            await m.addColumn(syncRules, syncRules.downloadFilter);
-          } catch (e) {
-            appLogger.w('downloadFilter column may already exist: $e');
-          }
+          await _ignoreAlreadyExists(
+            'SyncRules.downloadFilter column',
+            () => m.addColumn(syncRules, syncRules.downloadFilter),
+          );
         }
         if (from < 13) {
           appLogger.i('Adding indexes on DownloadedMedia hot-queried columns (v13 migration)');
@@ -84,38 +120,163 @@ class AppDatabase extends _$AppDatabase {
             'idx_downloaded_media_grandparent': idxDownloadedMediaGrandparent,
           };
           for (final entry in indexes.entries) {
-            try {
-              await m.create(entry.value);
-            } catch (e) {
-              appLogger.w('Index ${entry.key} may already exist: $e');
-            }
+            await _ignoreAlreadyExists('Index ${entry.key}', () => m.create(entry.value));
           }
+        }
+        if (from < 14) {
+          appLogger.i(
+            'Adding Connections, Profiles, ProfileConnections, DownloadOwners + scope/profile columns (v14 migration)',
+          );
+
+          await m.createTable(connections);
+          await _ignoreAlreadyExists('Index idx_connections_kind', () => m.create(idxConnectionsKind));
+
+          await m.createTable(profiles);
+          await _ignoreAlreadyExists('Index idx_profiles_kind', () => m.create(idxProfilesKind));
+
+          await m.createTable(profileConnections);
+          await _ignoreAlreadyExists(
+            'Index idx_profile_connections_connection_id',
+            () => m.create(idxProfileConnectionsConnectionId),
+          );
+          await _ignoreAlreadyExists(
+            'Index idx_profile_connections_profile_id',
+            () => m.create(idxProfileConnectionsProfileId),
+          );
+
+          await _ignoreAlreadyExists('DownloadOwners table', () => m.createTable(downloadOwners));
+          await _ignoreAlreadyExists('Index idx_download_owners_profile', () => m.create(idxDownloadOwnersProfile));
+          await _ignoreAlreadyExists(
+            'Index idx_download_owners_global_key',
+            () => m.create(idxDownloadOwnersGlobalKey),
+          );
+
+          await _ignoreAlreadyExists(
+            'DownloadedMedia.clientScopeId column',
+            () => m.addColumn(downloadedMedia, downloadedMedia.clientScopeId),
+          );
+          await _ignoreAlreadyExists(
+            'OfflineWatchProgress.clientScopeId column',
+            () => m.addColumn(offlineWatchProgress, offlineWatchProgress.clientScopeId),
+          );
+          await _ignoreAlreadyExists('SyncRules.profileId column', () => m.addColumn(syncRules, syncRules.profileId));
+          await _ignoreAlreadyExists(
+            'OfflineWatchProgress.profileId column',
+            () => m.addColumn(offlineWatchProgress, offlineWatchProgress.profileId),
+          );
+
+          await customStatement('''
+            UPDATE downloaded_media
+            SET client_scope_id = (
+              SELECT id FROM connections
+              WHERE kind = 'jellyfin'
+                AND substr(id, 1, length(downloaded_media.server_id) + 1) = downloaded_media.server_id || '/'
+              LIMIT 1
+            )
+            WHERE client_scope_id IS NULL
+              AND EXISTS (
+                SELECT 1 FROM connections
+                WHERE kind = 'jellyfin'
+                  AND substr(id, 1, length(downloaded_media.server_id) + 1) = downloaded_media.server_id || '/'
+              )
+          ''');
+          await customStatement('''
+            UPDATE offline_watch_progress
+            SET client_scope_id = (
+              SELECT id FROM connections
+              WHERE kind = 'jellyfin'
+                AND substr(id, 1, length(offline_watch_progress.server_id) + 1) = offline_watch_progress.server_id || '/'
+              LIMIT 1
+            )
+            WHERE client_scope_id IS NULL
+              AND EXISTS (
+                SELECT 1 FROM connections
+                WHERE kind = 'jellyfin'
+                  AND substr(id, 1, length(offline_watch_progress.server_id) + 1) = offline_watch_progress.server_id || '/'
+              )
+          ''');
+
+          await _ignoreAlreadyExists(
+            'Index idx_offline_watch_progress_server',
+            () => m.create(idxOfflineWatchProgressServer),
+          );
+          await _ignoreAlreadyExists('Index idx_sync_rules_profile', () => m.create(idxSyncRulesProfile));
+          await _ignoreAlreadyExists(
+            'Index idx_offline_watch_progress_profile',
+            () => m.create(idxOfflineWatchProgressProfile),
+          );
         }
       },
     );
   }
 
-  // ============================================================
-  // Offline Watch Progress Operations
-  // ============================================================
+  Future<void> _ignoreAlreadyExists(String label, Future<void> Function() operation) async {
+    try {
+      await operation();
+    } catch (e) {
+      final message = e.toString().toLowerCase();
+      if (message.contains('already exists') || message.contains('duplicate column name')) {
+        appLogger.w('$label already exists during migration: $e');
+        return;
+      }
+      rethrow;
+    }
+  }
+
+  Expression<bool> _clientScopePredicate(GeneratedColumn<String> column, String? clientScopeId) {
+    return clientScopeId == null ? column.isNull() : column.equals(clientScopeId);
+  }
+
+  Expression<bool> _nullableTextPredicate(GeneratedColumn<String> column, String? value) {
+    return value == null ? column.isNull() : column.equals(value);
+  }
 
   /// Get all pending offline watch actions for sync
-  Future<List<OfflineWatchProgressItem>> getPendingWatchActions() {
-    return (select(offlineWatchProgress)..orderBy([(t) => OrderingTerm.asc(t.createdAt)])).get();
+  Future<List<OfflineWatchProgressItem>> getPendingWatchActions({String? profileId}) {
+    final query = select(offlineWatchProgress)..orderBy([(t) => OrderingTerm.asc(t.createdAt)]);
+    if (profileId != null) {
+      query.where((t) => t.profileId.equals(profileId));
+    }
+    return query.get();
+  }
+
+  /// Claim pre-v18 offline watch actions for [profileId]. Those rows predate
+  /// profile ownership and have `NULL profile_id`; the first active profile
+  /// inherits them so already-watched offline progress is not stranded.
+  Future<void> adoptLegacyOfflineWatchActionsForProfile(String profileId) async {
+    if (profileId.isEmpty) return;
+    await (update(
+      offlineWatchProgress,
+    )..where((t) => t.profileId.isNull())).write(OfflineWatchProgressCompanion(profileId: Value(profileId)));
   }
 
   /// Get pending watch actions for a specific server
-  Future<List<OfflineWatchProgressItem>> getPendingWatchActionsForServer(String serverId) {
+  Future<List<OfflineWatchProgressItem>> getPendingWatchActionsForServer(String serverId, {String? profileId}) {
     return (select(offlineWatchProgress)
-          ..where((t) => t.serverId.equals(serverId))
+          ..where(
+            (t) =>
+                t.serverId.equals(serverId) &
+                (profileId == null ? const Constant(true) : t.profileId.equals(profileId)),
+          )
           ..orderBy([(t) => OrderingTerm.asc(t.createdAt)]))
         .get();
   }
 
   /// Get the latest action for a specific item
-  Future<OfflineWatchProgressItem?> getLatestWatchAction(String globalKey) {
+  Future<OfflineWatchProgressItem?> getLatestWatchAction(
+    String globalKey, {
+    String? profileId,
+    bool filterProfile = false,
+    String? clientScopeId,
+    bool filterClientScope = false,
+  }) {
     return (select(offlineWatchProgress)
-          ..where((t) => t.globalKey.equals(globalKey))
+          ..where(
+            (t) =>
+                t.globalKey.equals(globalKey) &
+                (filterProfile ? _nullableTextPredicate(t.profileId, profileId) : const Constant(true)) &
+                (filterClientScope ? _clientScopePredicate(t.clientScopeId, clientScopeId) : const Constant(true)),
+          )
           ..orderBy([(t) => OrderingTerm.desc(t.updatedAt)])
           ..limit(1))
         .getSingleOrNull();
@@ -125,19 +286,32 @@ class AppDatabase extends _$AppDatabase {
   ///
   /// Returns a map of globalKey -> latest action for each key.
   /// Keys with no actions will not be present in the returned map.
-  Future<Map<String, OfflineWatchProgressItem>> getLatestWatchActionsForKeys(Set<String> globalKeys) async {
+  Future<Map<String, OfflineWatchProgressItem>> getLatestWatchActionsForKeys(
+    Set<String> globalKeys, {
+    String? profileId,
+    bool filterProfile = false,
+    Map<String, String?>? clientScopeIdsByGlobalKey,
+  }) async {
     if (globalKeys.isEmpty) return {};
 
     // Query all actions for the given keys
     final allActions =
         await (select(offlineWatchProgress)
-              ..where((t) => t.globalKey.isIn(globalKeys))
+              ..where(
+                (t) =>
+                    t.globalKey.isIn(globalKeys) &
+                    (filterProfile ? _nullableTextPredicate(t.profileId, profileId) : const Constant(true)),
+              )
               ..orderBy([(t) => OrderingTerm.desc(t.updatedAt)]))
             .get();
 
     // Group by globalKey and take the latest (first due to ordering)
     final result = <String, OfflineWatchProgressItem>{};
     for (final action in allActions) {
+      if (clientScopeIdsByGlobalKey != null && clientScopeIdsByGlobalKey.containsKey(action.globalKey)) {
+        final expectedScope = clientScopeIdsByGlobalKey[action.globalKey];
+        if (!_clientScopeValuesMatch(action.clientScopeId, expectedScope)) continue;
+      }
       // Only keep the first (latest) action for each key
       result.putIfAbsent(action.globalKey, () => action);
     }
@@ -145,9 +319,17 @@ class AppDatabase extends _$AppDatabase {
     return result;
   }
 
-  /// Insert or update a progress action (merges with existing)
+  bool _clientScopeValuesMatch(String? actual, String? expected) {
+    final normalizedActual = actual == null || actual.isEmpty ? null : actual;
+    final normalizedExpected = expected == null || expected.isEmpty ? null : expected;
+    return normalizedActual == normalizedExpected;
+  }
+
+  /// Insert or update a progress action (merges with existing).
   Future<void> upsertProgressAction({
+    String? profileId,
     required String serverId,
+    String? clientScopeId,
     required String ratingKey,
     required int viewOffset,
     required int duration,
@@ -159,7 +341,13 @@ class AppDatabase extends _$AppDatabase {
     // Check for existing progress entry
     final existing =
         await (select(offlineWatchProgress)
-              ..where((t) => t.globalKey.equals(globalKey) & t.actionType.equals(OfflineActionType.progress.name))
+              ..where(
+                (t) =>
+                    t.globalKey.equals(globalKey) &
+                    _nullableTextPredicate(t.profileId, profileId) &
+                    _clientScopePredicate(t.clientScopeId, clientScopeId) &
+                    t.actionType.equals(OfflineActionType.progress.id),
+              )
               ..limit(1))
             .getSingleOrNull();
 
@@ -170,6 +358,8 @@ class AppDatabase extends _$AppDatabase {
           viewOffset: Value(viewOffset),
           duration: Value(duration),
           shouldMarkWatched: Value(shouldMarkWatched),
+          profileId: Value(profileId),
+          clientScopeId: Value(clientScopeId),
           updatedAt: Value(now),
         ),
       );
@@ -178,9 +368,11 @@ class AppDatabase extends _$AppDatabase {
       await into(offlineWatchProgress).insert(
         OfflineWatchProgressCompanion.insert(
           serverId: serverId,
+          profileId: Value(profileId),
+          clientScopeId: Value(clientScopeId),
           ratingKey: ratingKey,
           globalKey: globalKey,
-          actionType: OfflineActionType.progress.name,
+          actionType: OfflineActionType.progress.id,
           viewOffset: Value(viewOffset),
           duration: Value(duration),
           shouldMarkWatched: Value(shouldMarkWatched),
@@ -191,10 +383,12 @@ class AppDatabase extends _$AppDatabase {
     }
   }
 
-  /// Insert a manual watch action (watched or unwatched)
-  /// Removes conflicting actions for the same item
+  /// Insert a manual watch action (watched or unwatched).
+  /// Removes conflicting actions for the same item.
   Future<void> insertWatchAction({
+    String? profileId,
     required String serverId,
+    String? clientScopeId,
     required String ratingKey,
     required String actionType, // 'watched' or 'unwatched'
   }) async {
@@ -202,12 +396,20 @@ class AppDatabase extends _$AppDatabase {
     final now = DateTime.now().millisecondsSinceEpoch;
 
     // Remove conflicting actions (opposite action type and progress)
-    await (delete(offlineWatchProgress)..where((t) => t.globalKey.equals(globalKey))).go();
+    await (delete(offlineWatchProgress)..where(
+          (t) =>
+              t.globalKey.equals(globalKey) &
+              _nullableTextPredicate(t.profileId, profileId) &
+              _clientScopePredicate(t.clientScopeId, clientScopeId),
+        ))
+        .go();
 
     // Insert the new action
     await into(offlineWatchProgress).insert(
       OfflineWatchProgressCompanion.insert(
         serverId: serverId,
+        profileId: Value(profileId),
+        clientScopeId: Value(clientScopeId),
         ratingKey: ratingKey,
         globalKey: globalKey,
         actionType: actionType,
@@ -234,10 +436,12 @@ class AppDatabase extends _$AppDatabase {
   }
 
   /// Get count of pending sync items
-  Future<int> getPendingSyncCount() async {
-    final count = await (selectOnly(offlineWatchProgress)..addColumns([offlineWatchProgress.id.count()]))
-        .map((row) => row.read(offlineWatchProgress.id.count()))
-        .getSingle();
+  Future<int> getPendingSyncCount({String? profileId}) async {
+    final query = selectOnly(offlineWatchProgress)..addColumns([offlineWatchProgress.id.count()]);
+    if (profileId != null) {
+      query.where(offlineWatchProgress.profileId.equals(profileId));
+    }
+    final count = await query.map((row) => row.read(offlineWatchProgress.id.count())).getSingle();
     return count ?? 0;
   }
 
@@ -246,12 +450,12 @@ class AppDatabase extends _$AppDatabase {
     return delete(offlineWatchProgress).go();
   }
 
-  // ============================================================
-  // Sync Rules Operations
-  // ============================================================
-
-  Future<List<SyncRuleItem>> getSyncRules() {
-    return select(syncRules).get();
+  Future<List<SyncRuleItem>> getSyncRules({String? profileId}) {
+    final query = select(syncRules);
+    if (profileId != null) {
+      query.where((t) => t.profileId.equals(profileId));
+    }
+    return query.get();
   }
 
   Future<SyncRuleItem?> getSyncRule(String globalKey) {
@@ -259,6 +463,7 @@ class AppDatabase extends _$AppDatabase {
   }
 
   Future<void> insertSyncRule({
+    String profileId = '',
     required String serverId,
     required String ratingKey,
     required String globalKey,
@@ -267,9 +472,15 @@ class AppDatabase extends _$AppDatabase {
     int mediaIndex = 0,
     String downloadFilter = 'unwatched',
   }) async {
-    await into(syncRules).insertOnConflictUpdate(
+    // [insertOnConflictUpdate] defaults the conflict target to the primary
+    // key (`id`), which is auto-incremented — the conflict never triggers
+    // and the row's UNIQUE [globalKey] constraint blows up instead. Drive
+    // the upsert off the public [globalKey] so re-creating a rule for the same
+    // shared target updates the existing row.
+    await into(syncRules).insert(
       SyncRulesCompanion.insert(
         serverId: serverId,
+        profileId: Value(profileId),
         ratingKey: ratingKey,
         globalKey: globalKey,
         targetType: targetType,
@@ -278,7 +489,37 @@ class AppDatabase extends _$AppDatabase {
         mediaIndex: Value(mediaIndex),
         downloadFilter: Value(downloadFilter),
       ),
+      onConflict: DoUpdate(
+        (_) => SyncRulesCompanion(
+          serverId: Value(serverId),
+          profileId: Value(profileId),
+          ratingKey: Value(ratingKey),
+          targetType: Value(targetType),
+          episodeCount: Value(episodeCount),
+          mediaIndex: Value(mediaIndex),
+          downloadFilter: Value(downloadFilter),
+        ),
+        target: [syncRules.globalKey],
+      ),
     );
+  }
+
+  /// Claim pre-v16 public sync rules for [profileId]. Rules created before
+  /// profile ownership have an empty profile id and a public global key.
+  Future<void> adoptLegacySyncRulesForProfile(String profileId) async {
+    if (profileId.isEmpty) return;
+    final legacyRules = await (select(syncRules)..where((t) => t.profileId.equals(''))).get();
+    for (final rule in legacyRules) {
+      final scopedKey = buildProfileScopedGlobalKey(profileId, rule.serverId, rule.ratingKey);
+      final duplicate = await getSyncRule(scopedKey);
+      if (duplicate != null) {
+        await (delete(syncRules)..where((t) => t.id.equals(rule.id))).go();
+        continue;
+      }
+      await (update(syncRules)..where((t) => t.id.equals(rule.id))).write(
+        SyncRulesCompanion(profileId: Value(profileId), globalKey: Value(scopedKey)),
+      );
+    }
   }
 
   Future<void> updateSyncRuleCount(String globalKey, int episodeCount) async {
@@ -309,10 +550,6 @@ class AppDatabase extends _$AppDatabase {
     await (delete(syncRules)..where((t) => t.globalKey.equals(globalKey))).go();
   }
 
-  // ============================================================
-  // Downloaded Media Queries for Watch State Sync
-  // ============================================================
-
   /// Get all downloaded media items (for syncing watch states)
   Future<List<DownloadedMediaItem>> getAllDownloadedMetadata() {
     return (select(downloadedMedia)..where((t) => t.status.equals(DownloadStatus.completed.index))).get();
@@ -327,7 +564,6 @@ LazyDatabase _openConnection() {
 
     final file = File(p.join(dbFolder.path, 'plezy_downloads.db'));
 
-    // Ensure directory exists
     if (!await file.parent.exists()) {
       await file.parent.create(recursive: true);
     }
@@ -346,6 +582,9 @@ LazyDatabase _openConnection() {
       setup: (db) {
         db.execute('PRAGMA journal_mode=WAL');
         db.execute('PRAGMA synchronous=NORMAL');
+        // Enforce ProfileConnections → Profiles/Connections cascades.
+        // SQLite requires this on every connection — it's not persisted.
+        db.execute('PRAGMA foreign_keys = ON');
       },
     );
   });

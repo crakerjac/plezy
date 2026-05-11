@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../utils/platform_detector.dart';
 import 'dpad_navigator.dart';
 
 /// Handles back key events by popping the current route.
@@ -52,15 +53,19 @@ class BackKeyCoordinator {
   }
 }
 
-/// Handle a BACK key press by running [onBack] on key up.
-///
-/// This consumes KeyDown/KeyRepeat to avoid duplicate actions from key repeat.
-/// Optionally suppresses stray KeyUp events delivered to the next route after a pop.
+/// Consumes KeyDown/KeyRepeat to avoid duplicate actions, runs [onBack] on KeyUp.
 KeyEventResult handleBackKeyAction(KeyEvent event, VoidCallback onBack) {
   if (!event.logicalKey.isBackKey) return KeyEventResult.ignored;
 
   // Check if this BACK event should be suppressed (e.g., after modal closed)
   if (BackKeyUpSuppressor.consumeIfSuppressed(event)) {
+    return KeyEventResult.handled;
+  }
+
+  if (PlatformDetector.isAppleTV() && event.isPhysicalKeyboardEvent && event is KeyDownEvent) {
+    BackKeyCoordinator.markHandled();
+    BackKeyUpSuppressor.suppressBackUntilKeyUp();
+    onBack();
     return KeyEventResult.handled;
   }
 
@@ -92,12 +97,8 @@ KeyEventResult handleBackKeyNavigation<T>(BuildContext context, KeyEvent event, 
   return handleBackKeyAction(event, () => Navigator.pop(context, result));
 }
 
-/// Handles a select key as a one-shot button activation.
-///
-/// Fires [onActivate] on the initial [KeyDownEvent] only.
-/// Consumes all select key events (down, repeat, up) to prevent
-/// unhandled events from reaching platform-level handling.
-/// Returns [KeyEventResult.ignored] for non-select keys.
+/// Consumes all select-key events (down, repeat, up) so they don't reach
+/// platform-level handlers; fires [onActivate] on the initial KeyDown only.
 KeyEventResult handleOneShotSelect(KeyEvent event, VoidCallback onActivate) {
   if (!event.logicalKey.isSelectKey) return KeyEventResult.ignored;
   if (event is KeyDownEvent) onActivate();
