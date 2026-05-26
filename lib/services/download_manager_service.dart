@@ -19,6 +19,8 @@ import '../media/media_server_client.dart';
 import 'api_cache.dart';
 import 'download_artwork_helpers.dart';
 import 'download_artwork_service.dart';
+import 'plex_api_cache.dart';
+import '../utils/plex_cache_parser.dart';
 import 'settings_service.dart';
 import 'saf_storage_service.dart';
 import 'package:saf_util/saf_util_platform_interface.dart' show SafDocumentFile;
@@ -2527,43 +2529,42 @@ class DownloadManagerService {
   // PlexSyncer: register externally-synced items directly into the DB/cache
   // ─────────────────────────────────────────────────────────────────────────
 
-  /// Register a fully-synced media item (movie or episode) that was imported
-  /// from a PlexSyncer manifest. Writes the DB row and pins the API cache.
-  Future<void> registerSyncedDownload(MediaItem metadata, String localFilePath) async {
+  /// Register an externally-synced file as a completed download.
+  /// Called by [PlexSyncerImportService] for each manifest item not already in the DB.
+  Future<void> registerSyncedDownload({
+    required MediaItem metadata,
+    required String    fileUri,
+    String?            thumbPath,
+  }) async {
     final serverId  = metadata.serverId;
     final ratingKey = metadata.id;
-    if (serverId == null) return;
+    final globalKey = metadata.globalKey;
+
+    if (serverId == null) {
+      appLogger.w('PlexSyncer registerSyncedDownload: missing serverId for $ratingKey');
+      return;
+    }
 
     await _cachePlexItemForOffline(serverId, ratingKey, metadata);
 
-    final globalKey = '$serverId-$ratingKey';
-    final existing  = await _database.getDownloadedMedia(globalKey);
-    if (existing != null) return; // already registered, skip
-
-    await _database.insertDownloadedMedia(
-      globalKey:       globalKey,
-      serverId:        serverId,
-      ratingKey:       ratingKey,
-      title:           metadata.title ?? ratingKey,
-      filePath:        localFilePath,
-      status:          DownloadStatus.completed.index,
-      kind:            metadata.kind.id,
-      mediaVersionId:  null,
-      thumbPath:       metadata.thumbPath == null ? null : artworkStorageKey(metadata.thumbPath!),
-      artPath:         metadata.artPath   == null ? null : artworkStorageKey(metadata.artPath!),
-      durationMs:      metadata.durationMs,
-      addedAt:         metadata.addedAt,
-      parentId:        metadata.parentId,
-      grandparentId:   metadata.grandparentId,
-      parentTitle:     metadata.parentTitle,
-      grandparentTitle:metadata.grandparentTitle,
-      parentThumbPath: metadata.parentThumbPath == null ? null : artworkStorageKey(metadata.parentThumbPath!),
-      grandparentThumbPath: metadata.grandparentThumbPath == null
-          ? null : artworkStorageKey(metadata.grandparentThumbPath!),
-      index:           metadata.index,
-      parentIndex:     metadata.parentIndex,
-      year:            metadata.year,
+    await _database.insertDownload(
+      serverId:             serverId,
+      ratingKey:            ratingKey,
+      globalKey:            globalKey,
+      type:                 metadata.kind.id,
+      parentRatingKey:      metadata.parentId,
+      grandparentRatingKey: metadata.grandparentId,
+      status:               DownloadStatus.completed.index,
+      mediaIndex:           0,
     );
+
+    await _database.updateVideoFilePath(globalKey, fileUri);
+
+    if (thumbPath != null) {
+      await _database.updateArtworkPaths(globalKey: globalKey, thumbPath: thumbPath);
+    }
+
+    appLogger.i('PlexSyncer: registered $globalKey → $fileUri');
   }
 
   /// Cache a minimal show/season stub so the TV Shows grid works offline.
