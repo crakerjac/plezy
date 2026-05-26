@@ -283,7 +283,7 @@ class _VideoSettingsSheetState extends State<VideoSettingsSheet> {
   String _getTitle() {
     switch (_currentView) {
       case _SettingsView.menu:
-        return t.videoSettings.playbackSettings;
+        return t.videoControls.settingsButton;
       case _SettingsView.speed:
         return t.videoSettings.playbackSpeed;
       case _SettingsView.versionQuality:
@@ -599,7 +599,7 @@ class _VideoSettingsSheetState extends State<VideoSettingsSheet> {
       initialData: widget.player.state.rate,
       builder: (context, snapshot) {
         final currentRate = snapshot.data ?? 1.0;
-        final speeds = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 2.5, 3.0];
+        final speeds = [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0, 2.25, 2.5, 2.75, 3.0];
 
         return ListView.builder(
           itemCount: speeds.length,
@@ -798,8 +798,9 @@ class _VideoSettingsSheetState extends State<VideoSettingsSheet> {
                 }
                 await widget.shaderService!.applyPreset(preset);
                 await shaderProvider.setPreset(preset);
+                if (!context.mounted) return;
                 widget.onShaderChanged?.call();
-                if (context.mounted) OverlaySheetController.of(context).close();
+                OverlaySheetController.of(context).close();
               },
             );
           },
@@ -826,6 +827,7 @@ class _VideoSettingsSheetState extends State<VideoSettingsSheet> {
         }
         await widget.shaderService!.applyPreset(preset);
         await shaderProvider.setPreset(preset);
+        if (!mounted) return;
         widget.onShaderChanged?.call();
       }
 
@@ -846,7 +848,7 @@ class _VideoSettingsSheetState extends State<VideoSettingsSheet> {
     // If the deleted shader is active, clear it from the player first
     if (widget.shaderService!.currentPreset.id == preset.id) {
       await widget.shaderService!.applyPreset(ShaderPreset.none);
-      widget.onShaderChanged?.call();
+      if (mounted) widget.onShaderChanged?.call();
     }
 
     await shaderProvider.deleteCustomShader(preset);

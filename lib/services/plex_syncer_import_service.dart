@@ -84,11 +84,15 @@ class PlexSyncerImportService {
     final serverName = readResult.serverName;
     int imported = 0;
     int skipped  = readResult.manifestGlobalKeys.where(existingKeys.contains).length;
+    int _loopCount = 0;
 
     final fetchedShowKeys   = <String>{};
     final stubbedParentKeys = <String>{};
 
     for (final item in readResult.resolved) {
+      // Yield to the UI thread every 10 items to prevent jank on slow devices.
+      if (++_loopCount % 10 == 0) await Future.delayed(Duration.zero);
+
       final globalKey = buildGlobalKey(serverId, item.ratingKey);
       if (existingKeys.contains(globalKey)) {
         skipped++;

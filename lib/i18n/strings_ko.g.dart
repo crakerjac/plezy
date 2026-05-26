@@ -49,6 +49,7 @@ class TranslationsKo extends Translations with BaseTranslations<AppLocale, Trans
 	@override late final _TranslationsHotkeysKo hotkeys = _TranslationsHotkeysKo._(_root);
 	@override late final _TranslationsFileInfoKo fileInfo = _TranslationsFileInfoKo._(_root);
 	@override late final _TranslationsMediaMenuKo mediaMenu = _TranslationsMediaMenuKo._(_root);
+	@override late final _TranslationsRateSheetKo rateSheet = _TranslationsRateSheetKo._(_root);
 	@override late final _TranslationsAccessibilityKo accessibility = _TranslationsAccessibilityKo._(_root);
 	@override late final _TranslationsTooltipsKo tooltips = _TranslationsTooltipsKo._(_root);
 	@override late final _TranslationsVideoControlsKo videoControls = _TranslationsVideoControlsKo._(_root);
@@ -375,6 +376,12 @@ class _TranslationsSettingsKo extends TranslationsSettingsEn {
 	@override String get displaySwitchDelay => '디스플레이 전환 지연';
 	@override String get tunneledPlayback => '터널 재생';
 	@override String get tunneledPlaybackDescription => '비디오 터널링을 사용합니다. HDR 재생 시 검은 화면이 보이면 비활성화하세요.';
+	@override String get dvConversionMode => 'Dolby Vision 변환';
+	@override String get dvConversionModeDescription => 'ExoPlayer가 Dolby Vision Profile 7 파일을 처리하는 방식을 선택합니다.';
+	@override String get dvConversionAuto => '자동';
+	@override String get dvConversionNative => '네이티브 / 비활성화';
+	@override String get dvConversionDv81 => 'P7 → P8.1';
+	@override String get dvConversionHevcStrip => 'P7 → HEVC';
 	@override String get requireProfileSelectionOnOpen => '앱 실행 시 프로필 선택';
 	@override String get requireProfileSelectionOnOpenDescription => '앱을 열 때마다 프로필 선택 화면을 표시합니다';
 	@override String get forceTvMode => 'TV 모드 강제 사용';
@@ -481,6 +488,26 @@ class _TranslationsMediaMenuKo extends TranslationsMediaMenuEn {
 	@override String get playVersion => '버전 재생...';
 }
 
+// Path: rateSheet
+class _TranslationsRateSheetKo extends TranslationsRateSheetEn {
+	_TranslationsRateSheetKo._(TranslationsKo root) : this._root = root, super.internal(root);
+
+	final TranslationsKo _root; // ignore: unused_field
+
+	// Translations
+	@override String get title => '평가';
+	@override String get server => '서버';
+	@override String starValue({required Object rating}) => '${rating} / 5';
+	@override String scoreValue({required Object score}) => '${score} / 10';
+	@override String get setScore => '점수 설정';
+	@override String get notRated => '평가 없음';
+	@override String get liked => '좋아요';
+	@override String get notLiked => '좋아요 아님';
+	@override String get saved => '저장됨';
+	@override String get notAvailable => '일치 항목 없음';
+	@override String get noConnectedTrackers => '설정에서 트래커를 연결하면 거기에도 평가할 수 있습니다.';
+}
+
 // Path: accessibility
 class _TranslationsAccessibilityKo extends TranslationsAccessibilityEn {
 	_TranslationsAccessibilityKo._(TranslationsKo root) : this._root = root, super.internal(root);
@@ -548,7 +575,7 @@ class _TranslationsVideoControlsKo extends TranslationsVideoControlsEn {
 	@override String get nextChapterButton => '다음 챕터';
 	@override String get muteButton => '음소거';
 	@override String get unmuteButton => '음소거 해제';
-	@override String get settingsButton => '동영상 설정';
+	@override String get settingsButton => '재생 설정';
 	@override String get tracksButton => '오디오 및 자막';
 	@override String get chaptersButton => '챕터';
 	@override String get versionsButton => '동영상 버전';
@@ -574,6 +601,7 @@ class _TranslationsVideoControlsKo extends TranslationsVideoControlsEn {
 	@override String endsAt({required Object time}) => '${time}에 종료';
 	@override String get pipActive => '화면 속 화면으로 재생 중';
 	@override String get pipFailed => '화면 속 화면 모드를 시작할 수 없습니다';
+	@override String get screenshotSaved => '스크린샷 저장됨';
 	@override late final _TranslationsVideoControlsPipErrorsKo pipErrors = _TranslationsVideoControlsPipErrorsKo._(_root);
 	@override String get chapters => '챕터';
 	@override String get noChaptersAvailable => '사용 가능한 챕터가 없습니다';
@@ -1274,7 +1302,6 @@ class _TranslationsVideoSettingsKo extends TranslationsVideoSettingsEn {
 	final TranslationsKo _root; // ignore: unused_field
 
 	// Translations
-	@override String get playbackSettings => '재생 설정';
 	@override String get playbackSpeed => '재생 속도';
 	@override String get sleepTimer => '취침 타이머';
 	@override String get audioSync => '오디오 동기화';
@@ -1535,6 +1562,7 @@ class _TranslationsHotkeysActionsKo extends TranslationsHotkeysActionsEn {
 	@override String get subSeekPrev => '이전 자막으로 이동';
 	@override String get shaderToggle => '셰이더 전환';
 	@override String get skipMarker => '인트로/크레딧 건너뛰기';
+	@override String get screenshot => '스크린샷 찍기';
 }
 
 // Path: videoControls.pipErrors
@@ -1606,8 +1634,18 @@ class _TranslationsLibrariesSortLabelsKo extends TranslationsLibrariesSortLabels
 	@override String get dateAdded => '추가된 날짜';
 	@override String get releaseDate => '출시일';
 	@override String get rating => '평점';
+	@override String get communityRating => '커뮤니티 평점';
+	@override String get criticRating => '평론가 평점';
 	@override String get lastPlayed => '마지막 재생';
+	@override String get datePlayed => '재생일';
 	@override String get playCount => '재생 횟수';
+	@override String get productionYear => '제작 연도';
+	@override String get runtime => '재생 시간';
+	@override String get officialRating => '공식 등급';
+	@override String get premiereDate => '최초 공개일';
+	@override String get startDate => '시작일';
+	@override String get airTime => '방영 시간';
+	@override String get studio => '스튜디오';
 	@override String get random => '무작위';
 	@override String get dateShared => '공유된 날짜';
 	@override String get latestEpisodeAirDate => '최신 에피소드 방영일';
@@ -2000,6 +2038,12 @@ extension on TranslationsKo {
 			'settings.displaySwitchDelay' => '디스플레이 전환 지연',
 			'settings.tunneledPlayback' => '터널 재생',
 			'settings.tunneledPlaybackDescription' => '비디오 터널링을 사용합니다. HDR 재생 시 검은 화면이 보이면 비활성화하세요.',
+			'settings.dvConversionMode' => 'Dolby Vision 변환',
+			'settings.dvConversionModeDescription' => 'ExoPlayer가 Dolby Vision Profile 7 파일을 처리하는 방식을 선택합니다.',
+			'settings.dvConversionAuto' => '자동',
+			'settings.dvConversionNative' => '네이티브 / 비활성화',
+			'settings.dvConversionDv81' => 'P7 → P8.1',
+			'settings.dvConversionHevcStrip' => 'P7 → HEVC',
 			'settings.requireProfileSelectionOnOpen' => '앱 실행 시 프로필 선택',
 			'settings.requireProfileSelectionOnOpenDescription' => '앱을 열 때마다 프로필 선택 화면을 표시합니다',
 			'settings.forceTvMode' => 'TV 모드 강제 사용',
@@ -2048,6 +2092,7 @@ extension on TranslationsKo {
 			'hotkeys.actions.subSeekPrev' => '이전 자막으로 이동',
 			'hotkeys.actions.shaderToggle' => '셰이더 전환',
 			'hotkeys.actions.skipMarker' => '인트로/크레딧 건너뛰기',
+			'hotkeys.actions.screenshot' => '스크린샷 찍기',
 			'fileInfo.title' => '파일 정보',
 			'fileInfo.video' => '비디오',
 			'fileInfo.audio' => '오디오',
@@ -2088,6 +2133,17 @@ extension on TranslationsKo {
 			'mediaMenu.rate' => '평가',
 			'mediaMenu.playFromBeginning' => '처음부터 재생',
 			'mediaMenu.playVersion' => '버전 재생...',
+			'rateSheet.title' => '평가',
+			'rateSheet.server' => '서버',
+			'rateSheet.starValue' => ({required Object rating}) => '${rating} / 5',
+			'rateSheet.scoreValue' => ({required Object score}) => '${score} / 10',
+			'rateSheet.setScore' => '점수 설정',
+			'rateSheet.notRated' => '평가 없음',
+			'rateSheet.liked' => '좋아요',
+			'rateSheet.notLiked' => '좋아요 아님',
+			'rateSheet.saved' => '저장됨',
+			'rateSheet.notAvailable' => '일치 항목 없음',
+			'rateSheet.noConnectedTrackers' => '설정에서 트래커를 연결하면 거기에도 평가할 수 있습니다.',
 			'accessibility.mediaCardMovie' => ({required Object title}) => '${title}, 영화',
 			'accessibility.mediaCardShow' => ({required Object title}) => '${title}, TV 프로그램',
 			'accessibility.mediaCardEpisode' => ({required Object title, required Object episodeInfo}) => '${title}, ${episodeInfo}',
@@ -2130,7 +2186,7 @@ extension on TranslationsKo {
 			'videoControls.nextChapterButton' => '다음 챕터',
 			'videoControls.muteButton' => '음소거',
 			'videoControls.unmuteButton' => '음소거 해제',
-			'videoControls.settingsButton' => '동영상 설정',
+			'videoControls.settingsButton' => '재생 설정',
 			'videoControls.tracksButton' => '오디오 및 자막',
 			'videoControls.chaptersButton' => '챕터',
 			'videoControls.versionsButton' => '동영상 버전',
@@ -2156,6 +2212,7 @@ extension on TranslationsKo {
 			'videoControls.endsAt' => ({required Object time}) => '${time}에 종료',
 			'videoControls.pipActive' => '화면 속 화면으로 재생 중',
 			'videoControls.pipFailed' => '화면 속 화면 모드를 시작할 수 없습니다',
+			'videoControls.screenshotSaved' => '스크린샷 저장됨',
 			'videoControls.pipErrors.androidVersion' => 'Android 8.0 이상이 필요합니다',
 			'videoControls.pipErrors.iosVersion' => 'iOS 15.0 이상이 필요합니다',
 			'videoControls.pipErrors.permissionDisabled' => '화면 속 화면이 비활성화되어 있습니다. 시스템 설정에서 활성화하세요.',
@@ -2255,6 +2312,8 @@ extension on TranslationsKo {
 			'profiles.signOut' => '로그아웃',
 			'profiles.signOutPlexTitle' => 'Plex에서 로그아웃하시겠습니까?',
 			'profiles.signOutPlexMessage' => ({required Object displayName}) => '${displayName} 및 모든 Plex Home 사용자를 제거할까요? 언제든 다시 로그인할 수 있습니다.',
+			_ => null,
+		} ?? switch (path) {
 			'profiles.signedOutPlex' => 'Plex에서 로그아웃되었습니다.',
 			'profiles.signOutFailed' => '로그아웃에 실패했습니다.',
 			'profiles.sectionTitle' => '프로필',
@@ -2274,8 +2333,6 @@ extension on TranslationsKo {
 			'profiles.confirmPinTitle' => 'PIN 확인',
 			'profiles.pinSet' => 'PIN 설정됨',
 			'profiles.changePin' => '변경',
-			_ => null,
-		} ?? switch (path) {
 			'profiles.removePin' => '제거',
 			'profiles.connectionsLabel' => '연결',
 			'profiles.add' => '추가',
@@ -2400,8 +2457,18 @@ extension on TranslationsKo {
 			'libraries.sortLabels.dateAdded' => '추가된 날짜',
 			'libraries.sortLabels.releaseDate' => '출시일',
 			'libraries.sortLabels.rating' => '평점',
+			'libraries.sortLabels.communityRating' => '커뮤니티 평점',
+			'libraries.sortLabels.criticRating' => '평론가 평점',
 			'libraries.sortLabels.lastPlayed' => '마지막 재생',
+			'libraries.sortLabels.datePlayed' => '재생일',
 			'libraries.sortLabels.playCount' => '재생 횟수',
+			'libraries.sortLabels.productionYear' => '제작 연도',
+			'libraries.sortLabels.runtime' => '재생 시간',
+			'libraries.sortLabels.officialRating' => '공식 등급',
+			'libraries.sortLabels.premiereDate' => '최초 공개일',
+			'libraries.sortLabels.startDate' => '시작일',
+			'libraries.sortLabels.airTime' => '방영 시간',
+			'libraries.sortLabels.studio' => '스튜디오',
 			'libraries.sortLabels.random' => '무작위',
 			'libraries.sortLabels.dateShared' => '공유된 날짜',
 			'libraries.sortLabels.latestEpisodeAirDate' => '최신 에피소드 방영일',
@@ -2719,7 +2786,6 @@ extension on TranslationsKo {
 			'companionRemote.remote.subtitles' => '자막',
 			'companionRemote.remote.audio' => '오디오',
 			'companionRemote.remote.searchHint' => '데스크톱에서 검색...',
-			'videoSettings.playbackSettings' => '재생 설정',
 			'videoSettings.playbackSpeed' => '재생 속도',
 			'videoSettings.sleepTimer' => '취침 타이머',
 			'videoSettings.audioSync' => '오디오 동기화',
@@ -2760,6 +2826,8 @@ extension on TranslationsKo {
 			'metadataEdit.poster' => '포스터',
 			'metadataEdit.background' => '배경',
 			'metadataEdit.logo' => '로고',
+			_ => null,
+		} ?? switch (path) {
 			'metadataEdit.squareArt' => '정사각형 아트',
 			'metadataEdit.selectPoster' => '포스터 선택',
 			'metadataEdit.selectBackground' => '배경 선택',
@@ -2788,8 +2856,6 @@ extension on TranslationsKo {
 			'metadataEdit.episodesAddedPastDays' => ({required Object count}) => '최근 ${count}일 내 추가된 에피소드',
 			'metadataEdit.deleteAfterPlaying' => '재생 후 에피소드 삭제',
 			'metadataEdit.never' => '안 함',
-			_ => null,
-		} ?? switch (path) {
 			'metadataEdit.afterADay' => '하루 후',
 			'metadataEdit.afterAWeek' => '일주일 후',
 			'metadataEdit.afterAMonth' => '한 달 후',

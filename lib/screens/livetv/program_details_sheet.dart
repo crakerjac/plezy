@@ -13,6 +13,7 @@ import '../../services/image_cache_service.dart';
 import '../../utils/app_logger.dart';
 import '../../utils/formatters.dart';
 import '../../widgets/app_icon.dart';
+import '../../widgets/collapsible_text.dart';
 import '../../widgets/overlay_sheet.dart';
 import '../../widgets/optimized_media_image.dart' show blurArtwork;
 import 'livetv_recording_actions.dart';
@@ -30,6 +31,7 @@ void showProgramDetailsSheet(
   required String? posterUrl,
   required VoidCallback? onTuneChannel,
   MediaServerClient? client,
+  ValueChanged<bool>? onRecordingStateChanged,
 }) {
   OverlaySheetController.showAdaptive(
     context,
@@ -40,6 +42,7 @@ void showProgramDetailsSheet(
         posterUrl: posterUrl,
         onTuneChannel: onTuneChannel,
         client: client,
+        onRecordingStateChanged: onRecordingStateChanged,
       );
     },
   );
@@ -67,6 +70,7 @@ class _ProgramDetailsSheetContent extends StatefulWidget {
   final String? posterUrl;
   final VoidCallback? onTuneChannel;
   final MediaServerClient? client;
+  final ValueChanged<bool>? onRecordingStateChanged;
 
   const _ProgramDetailsSheetContent({
     required this.program,
@@ -74,6 +78,7 @@ class _ProgramDetailsSheetContent extends StatefulWidget {
     required this.posterUrl,
     required this.onTuneChannel,
     required this.client,
+    required this.onRecordingStateChanged,
   });
 
   @override
@@ -82,8 +87,10 @@ class _ProgramDetailsSheetContent extends StatefulWidget {
 
 class _ProgramDetailsSheetContentState extends State<_ProgramDetailsSheetContent> with MountedSetStateMixin {
   final List<FocusNode> _focusNodes = [];
+  final FocusNode _summaryFocusNode = FocusNode(debugLabel: 'program_sheet_summary');
   MediaSubscription? _existingSubscription;
   bool _checkedMapping = false;
+  bool _summaryOverflows = false;
 
   bool get _canRecord {
     final client = widget.client;
@@ -108,6 +115,7 @@ class _ProgramDetailsSheetContentState extends State<_ProgramDetailsSheetContent
     for (final node in _focusNodes) {
       node.dispose();
     }
+    _summaryFocusNode.dispose();
     super.dispose();
   }
 
@@ -151,6 +159,11 @@ class _ProgramDetailsSheetContentState extends State<_ProgramDetailsSheetContent
 
   void _closeSheet() => OverlaySheetController.closeAdaptive(context);
 
+  void _handleSummaryOverflowChanged(bool overflows) {
+    if (_summaryOverflows == overflows) return;
+    setStateIfMounted(() => _summaryOverflows = overflows);
+  }
+
   List<_SheetAction> _buildActions() {
     final program = widget.program;
     final client = widget.client;
@@ -181,7 +194,10 @@ class _ProgramDetailsSheetContentState extends State<_ProgramDetailsSheetContent
             style: _ActionStyle.filled,
             onPressed: () async {
               final deleted = await confirmDeleteRule(context, client, existing);
-              if (deleted && mounted) _closeSheet();
+              if (deleted && mounted) {
+                widget.onRecordingStateChanged?.call(false);
+                _closeSheet();
+              }
             },
           ),
         );
@@ -195,6 +211,7 @@ class _ProgramDetailsSheetContentState extends State<_ProgramDetailsSheetContent
               final outcome = await recordProgram(context, client, program);
               if (!mounted) return;
               if (outcome == RecordOutcome.scheduled || outcome == RecordOutcome.alreadyScheduled) {
+                widget.onRecordingStateChanged?.call(true);
                 _closeSheet();
               }
             },
@@ -206,7 +223,7 @@ class _ProgramDetailsSheetContentState extends State<_ProgramDetailsSheetContent
     return actions;
   }
 
-  Widget _buildButton(_SheetAction action, int index, int total) {
+  Widget _buildButton(_SheetAction action, int index, int total, {VoidCallback? onNavigateUp}) {
     final node = _focusNodes[index];
     final child = action.style == _ActionStyle.filled
         ? FilledButton.icon(
@@ -227,6 +244,7 @@ class _ProgramDetailsSheetContentState extends State<_ProgramDetailsSheetContent
       onPressed: action.onPressed,
       onNavigateLeft: index > 0 ? () => _focusButton(index - 1) : null,
       onNavigateRight: index < total - 1 ? () => _focusButton(index + 1) : null,
+      onNavigateUp: onNavigateUp,
       onBack: _closeSheet,
       child: child,
     );
@@ -239,14 +257,24 @@ class _ProgramDetailsSheetContentState extends State<_ProgramDetailsSheetContent
     final channel = widget.channel;
     final actions = _buildActions();
     _ensureFocusNodes(actions.length);
+    final summary = program.summary;
+    final hasSummary = summary != null && summary.isNotEmpty;
+    final canFocusSummary = hasSummary && _summaryOverflows;
 
     final buttons = <Widget>[];
     for (var i = 0; i < actions.length; i++) {
       if (i > 0) buttons.add(const SizedBox(width: 8));
-      buttons.add(_buildButton(actions[i], i, actions.length));
+      buttons.add(
+        _buildButton(
+          actions[i],
+          i,
+          actions.length,
+          onNavigateUp: canFocusSummary ? () => _summaryFocusNode.requestFocus() : null,
+        ),
+      );
     }
 
-    return Padding(
+    return SingleChildScrollView(
       padding: const EdgeInsets.all(20),
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -303,13 +331,15 @@ class _ProgramDetailsSheetContentState extends State<_ProgramDetailsSheetContent
                       ].join(' · '),
                       style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
                     ),
-                    if (program.summary != null && program.summary!.isNotEmpty) ...[
+                    if (hasSummary) ...[
                       const SizedBox(height: 12),
-                      Text(
-                        program.summary!,
+                      CollapsibleText(
+                        text: summary,
                         style: theme.textTheme.bodyMedium,
                         maxLines: 4,
-                        overflow: TextOverflow.ellipsis,
+                        focusNode: _summaryFocusNode,
+                        onOverflowChanged: _handleSummaryOverflowChanged,
+                        onNavigateDown: buttons.isNotEmpty ? () => _focusButton(0) : null,
                       ),
                     ],
                   ],

@@ -1,5 +1,5 @@
 import 'dart:async';
-import 'dart:io' show Platform, ProcessInfo;
+import 'dart:io' show Directory, Platform, ProcessInfo;
 import 'dart:ui' show AppExitResponse;
 import 'package:flutter/foundation.dart';
 // ignore: depend_on_referenced_packages
@@ -33,6 +33,8 @@ import 'services/settings_service.dart';
 import 'utils/platform_detector.dart';
 import 'services/apple_tv_remote_touch_service.dart';
 import 'services/discord_rpc_service.dart';
+import 'package:path_provider/path_provider.dart';
+import 'services/image_cache_service.dart';
 import 'services/gamepad_service.dart';
 import 'services/trakt/trakt_scrobble_service.dart';
 import 'services/trakt/trakt_sync_service.dart';
@@ -66,7 +68,8 @@ import 'services/plex_api_cache.dart';
 import 'database/app_database.dart';
 import 'screens/video_player_screen.dart';
 import 'utils/app_logger.dart';
-import 'utils/media_server_http_client.dart' show httpClient;
+import 'utils/managed_http_client.dart';
+import 'utils/media_server_http_client.dart';
 import 'utils/orientation_helper.dart';
 import 'utils/watch_state_notifier.dart';
 import 'i18n/strings.g.dart';
@@ -80,6 +83,7 @@ import 'package:package_info_plus/package_info_plus.dart';
 const bool _enableSentry = bool.fromEnvironment('ENABLE_SENTRY', defaultValue: false);
 const String gitCommit = String.fromEnvironment('GIT_COMMIT');
 const String _sentryEnvironment = String.fromEnvironment('SENTRY_ENVIRONMENT');
+const String _sentryDist = String.fromEnvironment('SENTRY_DIST');
 
 // Workaround for Flutter bug #177992: iPadOS 26.1+ misinterprets fake touch events
 // at (0,0) as barrier taps, causing modals to dismiss immediately.
@@ -130,6 +134,7 @@ Future<void> main() async {
           ? 'plezy@${gitCommit.substring(0, 7)}'
           : 'plezy@${packageInfo.version}+${packageInfo.buildNumber}';
       if (_sentryEnvironment.isNotEmpty) options.environment = _sentryEnvironment;
+      if (_sentryDist.isNotEmpty) options.dist = _sentryDist;
       options.tracesSampleRate = 0;
       options.attachStacktrace = true;
       options.enableAutoSessionTracking = false;
@@ -153,6 +158,21 @@ Future<void> _bootstrapApp() async {
   unawaited(LocaleSettings.setLocale(savedLocale));
 
   await initializeDateFormatting(savedLocale.languageCode, null);
+
+  // One-time cleanup of the old flutter_cache_manager image cache directory
+  // (replaced by cached_network_image_ce in a prior refactor).
+  if (!settings.read(SettingsService.cleanedOldImageCache)) {
+    try {
+      final tempDir = await getTemporaryDirectory();
+      final oldCacheDir = Directory('${tempDir.path}/plexImageCache');
+      if (await oldCacheDir.exists()) {
+        await oldCacheDir.delete(recursive: true);
+      }
+    } catch (_) {
+      // Best-effort; the directory may be locked or already partial.
+    }
+    await settings.write(SettingsService.cleanedOldImageCache, true);
+  }
 
   // Configure image cache — keep budget modest to leave headroom for Skia decode buffers
   if (PlatformDetector.isDesktopOS()) {
@@ -421,6 +441,7 @@ class _MainAppState extends State<MainApp> with WidgetsBindingObserver {
   final Set<String> _pendingSyncKeys = <String>{};
   bool _isAutoDeleteRunning = false;
   bool _lastConnectivityWasWifi = false;
+  bool _shutdownStarted = false;
 
   /// Last time server health probes ran from a resume event (cooldown for desktop)
   DateTime _lastResumeProbe = DateTime(0);
@@ -468,11 +489,33 @@ class _MainAppState extends State<MainApp> with WidgetsBindingObserver {
 
     _appLifecycleListener = AppLifecycleListener(
       onExitRequested: () async {
-        httpClient.close();
-        await _appDatabase.close();
+        await _shutdownForExit();
         return AppExitResponse.exit;
       },
     );
+  }
+
+  Future<void> _shutdownForExit() async {
+    if (_shutdownStarted) return;
+    _shutdownStarted = true;
+
+    _syncDebounce?.cancel();
+    await _watchStateSubscription?.cancel();
+    await _connectivitySubscription?.cancel();
+    _memoryCheckTimer?.cancel();
+
+    _downloadManager.dispose();
+    TrackerCoordinator.instance.cancelInFlight();
+    TraktScrobbleService.instance.cancelInFlight();
+    await TraktSyncService.instance.dispose();
+
+    await _serverManager.disconnectAllGracefully();
+    await Future.wait([
+      httpClient.closeGracefully(drainTimeout: const Duration(seconds: 5)),
+      closeArtworkHttpClientGracefully(),
+    ], eagerError: false);
+    await ManagedHttpClient.closeAllGracefully();
+    await _appDatabase.close();
   }
 
   @override
@@ -482,8 +525,10 @@ class _MainAppState extends State<MainApp> with WidgetsBindingObserver {
     _connectivitySubscription?.cancel();
     _memoryCheckTimer?.cancel();
     _appLifecycleListener.dispose();
-    _downloadManager.dispose();
-    _serverManager.dispose();
+    if (!_shutdownStarted) {
+      _downloadManager.dispose();
+      _serverManager.dispose();
+    }
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
@@ -666,10 +711,29 @@ class _MainAppState extends State<MainApp> with WidgetsBindingObserver {
             return MultiServerProvider(_serverManager, _aggregationService);
           },
         ),
+        ChangeNotifierProxyProvider<MultiServerProvider, OfflineModeProvider>(
+          create: (context) {
+            final provider = OfflineModeProvider(
+              _serverManager,
+              multiServerProvider: context.read<MultiServerProvider>(),
+            );
+            provider.initialize(); // Initialize immediately so statusStream listener is ready
+            return provider;
+          },
+          update: (_, multiServerProvider, previous) {
+            final provider = previous ?? OfflineModeProvider(_serverManager, multiServerProvider: multiServerProvider);
+            provider.updateMultiServerProvider(multiServerProvider);
+            provider.initialize(); // Idempotent - safe to call again
+            return provider;
+          },
+        ),
         // Profile binder owns the cold-start client connect: Plex token
         // refresh + Jellyfin client creation. Hoisted out of MainScreen so
         // the splash can await its first settle — without this, MainScreen
         // mounts (and discover/libraries query) before any client exists.
+        // It is intentionally not auto-started here: SetupScreen first checks
+        // whether startup should go straight offline, otherwise the binder's
+        // microtask can begin network work before the offline decision lands.
         Provider<ActiveProfileBinder>(
           lazy: false,
           create: (context) {
@@ -686,21 +750,9 @@ class _MainAppState extends State<MainApp> with WidgetsBindingObserver {
                 return settings.read(SettingsService.requireProfileSelectionOnOpen) &&
                     activeProfile.hasMultipleProfiles;
               },
-            )..start();
+            );
           },
           dispose: (_, binder) => binder.dispose(),
-        ),
-        ChangeNotifierProxyProvider<MultiServerProvider, OfflineModeProvider>(
-          create: (_) {
-            final provider = OfflineModeProvider(_serverManager);
-            provider.initialize(); // Initialize immediately so statusStream listener is ready
-            return provider;
-          },
-          update: (_, multiServerProvider, previous) {
-            final provider = previous ?? OfflineModeProvider(_serverManager);
-            provider.initialize(); // Idempotent - safe to call again
-            return provider;
-          },
         ),
         // Download provider. Downloads are shared, but sync rules are scoped to
         // the active profile and reload when the profile changes.
@@ -1009,6 +1061,7 @@ class SetupScreen extends StatefulWidget {
 
 class _SetupScreenState extends State<SetupScreen> with MountedSetStateMixin {
   String _statusMessage = '';
+  bool _enteringOffline = false;
 
   // Per-server connection status: serverId -> (name, connected?)
   final Map<String, (String name, bool? connected)> _serverStatus = {};
@@ -1021,6 +1074,15 @@ class _SetupScreenState extends State<SetupScreen> with MountedSetStateMixin {
 
   void _setStatus(String message) {
     setStateIfMounted(() => _statusMessage = message);
+  }
+
+  Future<void> _enterOfflineMode() async {
+    if (_enteringOffline) return;
+    _enteringOffline = true;
+    _setStatus(t.common.startingOfflineMode);
+    await context.read<DownloadProvider>().ensureInitialized();
+    if (!mounted) return;
+    unawaited(Navigator.pushReplacement(context, fadeRoute(const MainScreen(isOfflineMode: true))));
   }
 
   Future<void> _loadSavedCredentials() async {
@@ -1081,7 +1143,21 @@ class _SetupScreenState extends State<SetupScreen> with MountedSetStateMixin {
     // through `context` after async gaps trip the use_build_context_synchronously
     // lint, and reading early is safe because the registry is a singleton.
     final connectionRegistry = context.read<ConnectionRegistry>();
-    final allConnections = await connectionRegistry.list();
+    final List<Connection> allConnections;
+    try {
+      allConnections = await connectionRegistry.list();
+    } catch (e, st) {
+      // Defence-in-depth: a DB-open failure here used to propagate
+      // uncaught and strand the splash forever (#1022). Route to auth so
+      // the user is never trapped, and surface to Sentry so an unknown
+      // regression doesn't go silent.
+      appLogger.e('Setup: failed to load connections; returning to auth', error: e, stackTrace: st);
+      unawaited(Sentry.captureException(e, stackTrace: st));
+      if (mounted) {
+        unawaited(Navigator.pushReplacement(context, fadeRoute(const AuthScreen())));
+      }
+      return;
+    }
 
     if (allConnections.isEmpty) {
       if (mounted) {
@@ -1094,10 +1170,7 @@ class _SetupScreenState extends State<SetupScreen> with MountedSetStateMixin {
 
     // No network — skip connection attempts and go straight to offline mode
     if (!hasNetwork) {
-      _setStatus(t.common.startingOfflineMode);
-      await context.read<DownloadProvider>().ensureInitialized();
-      if (!mounted) return;
-      unawaited(Navigator.pushReplacement(context, fadeRoute(const MainScreen(isOfflineMode: true))));
+      await _enterOfflineMode();
       return;
     }
 
@@ -1129,9 +1202,8 @@ class _SetupScreenState extends State<SetupScreen> with MountedSetStateMixin {
 
     // Snapshot Provider refs before further awaits.
     final activeProfile = context.read<ActiveProfileProvider>();
-    // Reading the binder here is enough — the Provider is `lazy: false` so
-    // it has already constructed the binder and called `start()` during
-    // MultiProvider build. We just need to wait for it.
+    // The Provider is `lazy: false` so the binder is constructed already, but
+    // SetupScreen starts it only after the offline fast path has been ruled out.
     final binder = context.read<ActiveProfileBinder>();
     final downloadProvider = context.read<DownloadProvider>();
 
@@ -1151,6 +1223,11 @@ class _SetupScreenState extends State<SetupScreen> with MountedSetStateMixin {
     // Wire the per-server status listener before either branch so the splash
     // checkmarks fill in even while the user is choosing a profile.
     _bindServerStatusListener(activeProfile, _serverManagerFromContext);
+
+    // Start only after network/offline startup has been decided and the
+    // active profile snapshot is hydrated. This prevents an eager binder
+    // microtask from racing the no-network/manual-offline fast path.
+    binder.start();
 
     // If "prompt for profile on launch" is on (or no profile is selected
     // yet), surface the picker BEFORE waiting for the previously-active
@@ -1180,12 +1257,6 @@ class _SetupScreenState extends State<SetupScreen> with MountedSetStateMixin {
       // available" race the old eager-navigate flow caused.
       bindingSucceeded = await activeProfile.awaitBindingSettle();
       if (!mounted) return;
-      if (!bindingSucceeded) {
-        appLogger.w('Setup: initial profile bind failed; retrying once before entering main screen');
-        await binder.rebindActive();
-        if (!mounted) return;
-        bindingSucceeded = activeProfile.lastBindingSucceeded;
-      }
     }
 
     if (shouldEnterOfflineModeAfterStartupBind(
@@ -1193,9 +1264,7 @@ class _SetupScreenState extends State<SetupScreen> with MountedSetStateMixin {
       hasOnlineServers: _serverManagerFromContext().onlineServerIds.isNotEmpty,
     )) {
       appLogger.w('Setup: no servers online after startup bind; starting offline mode');
-      await downloadProvider.ensureInitialized();
-      if (!mounted) return;
-      unawaited(Navigator.pushReplacement(context, fadeRoute(const MainScreen(isOfflineMode: true))));
+      await _enterOfflineMode();
       return;
     }
 

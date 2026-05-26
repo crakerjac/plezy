@@ -97,6 +97,9 @@ class DesktopVideoControls extends StatefulWidget {
   /// Called when content strip visibility changes
   final ValueChanged<bool>? onContentStripVisibilityChanged;
 
+  /// Called when a seek should be executed by the owning screen.
+  final Future<void> Function(Duration position)? onSeekRequested;
+
   /// Called when a seek operation completes successfully.
   final Function(Duration position)? onSeekCompleted;
 
@@ -139,6 +142,7 @@ class DesktopVideoControls extends StatefulWidget {
     this.onCancelAutoHide,
     this.onStartAutoHide,
     this.onContentStripVisibilityChanged,
+    this.onSeekRequested,
     this.onSeekCompleted,
   });
 
@@ -336,6 +340,7 @@ class DesktopVideoControlsState extends State<DesktopVideoControls> {
     widget.onContentStripVisibilityChanged?.call(true);
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
       _contentStripKey.currentState?.requestInitialFocus();
     });
   }
@@ -349,6 +354,7 @@ class DesktopVideoControlsState extends State<DesktopVideoControls> {
 
     // Return focus to the last focused button (or play/pause as fallback)
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
       final target = _lastFocusedButtonNode;
       if (target != null && target.context != null) {
         target.requestFocus();
@@ -610,6 +616,7 @@ class DesktopVideoControlsState extends State<DesktopVideoControls> {
                           serverId: widget.serverId,
                           showQueueTab: widget.showQueueTab,
                           onQueueItemSelected: widget.onQueueItemSelected,
+                          onSeekRequested: widget.onSeekRequested,
                           onSeekCompleted: widget.onSeekCompleted,
                           useFocusNavigation: true,
                           onNavigateUp: _onContentStripNavigateUp,
@@ -915,6 +922,7 @@ class DesktopVideoControlsState extends State<DesktopVideoControls> {
                   chapters: widget.chapters,
                   chaptersLoaded: widget.chaptersLoaded,
                   trackControlsState: _trackControlsState,
+                  onSeekRequested: widget.onSeekRequested,
                   onSeekCompleted: widget.onSeekCompleted,
                   focusNodes: _trackControlFocusNodes,
                   onFocusChange: _onFocusChange,

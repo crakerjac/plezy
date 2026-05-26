@@ -49,6 +49,7 @@ class TranslationsNb extends Translations with BaseTranslations<AppLocale, Trans
 	@override late final _TranslationsHotkeysNb hotkeys = _TranslationsHotkeysNb._(_root);
 	@override late final _TranslationsFileInfoNb fileInfo = _TranslationsFileInfoNb._(_root);
 	@override late final _TranslationsMediaMenuNb mediaMenu = _TranslationsMediaMenuNb._(_root);
+	@override late final _TranslationsRateSheetNb rateSheet = _TranslationsRateSheetNb._(_root);
 	@override late final _TranslationsAccessibilityNb accessibility = _TranslationsAccessibilityNb._(_root);
 	@override late final _TranslationsTooltipsNb tooltips = _TranslationsTooltipsNb._(_root);
 	@override late final _TranslationsVideoControlsNb videoControls = _TranslationsVideoControlsNb._(_root);
@@ -375,6 +376,12 @@ class _TranslationsSettingsNb extends TranslationsSettingsEn {
 	@override String get displaySwitchDelay => 'Forsinkelse ved skjermbytte';
 	@override String get tunneledPlayback => 'Tunnelert avspilling';
 	@override String get tunneledPlaybackDescription => 'Bruk videotunneling. Slå av hvis HDR-avspilling viser svart video.';
+	@override String get dvConversionMode => 'Dolby Vision-konvertering';
+	@override String get dvConversionModeDescription => 'Velg hvordan ExoPlayer håndterer Dolby Vision Profile 7-filer.';
+	@override String get dvConversionAuto => 'Auto';
+	@override String get dvConversionNative => 'Innebygd / deaktivert';
+	@override String get dvConversionDv81 => 'P7 → P8.1';
+	@override String get dvConversionHevcStrip => 'P7 → HEVC';
 	@override String get requireProfileSelectionOnOpen => 'Spør om profil ved appåpning';
 	@override String get requireProfileSelectionOnOpenDescription => 'Vis profilvalg hver gang appen åpnes';
 	@override String get forceTvMode => 'Tving TV-modus';
@@ -481,6 +488,26 @@ class _TranslationsMediaMenuNb extends TranslationsMediaMenuEn {
 	@override String get playVersion => 'Spill av versjon...';
 }
 
+// Path: rateSheet
+class _TranslationsRateSheetNb extends TranslationsRateSheetEn {
+	_TranslationsRateSheetNb._(TranslationsNb root) : this._root = root, super.internal(root);
+
+	final TranslationsNb _root; // ignore: unused_field
+
+	// Translations
+	@override String get title => 'Vurder';
+	@override String get server => 'Server';
+	@override String starValue({required Object rating}) => '${rating} / 5';
+	@override String scoreValue({required Object score}) => '${score} / 10';
+	@override String get setScore => 'Sett en poengsum';
+	@override String get notRated => 'Ikke vurdert';
+	@override String get liked => 'Likt';
+	@override String get notLiked => 'Ikke likt';
+	@override String get saved => 'Lagret';
+	@override String get notAvailable => 'Ingen treff';
+	@override String get noConnectedTrackers => 'Koble til en sporer i Innstillinger for å vurdere der.';
+}
+
 // Path: accessibility
 class _TranslationsAccessibilityNb extends TranslationsAccessibilityEn {
 	_TranslationsAccessibilityNb._(TranslationsNb root) : this._root = root, super.internal(root);
@@ -548,7 +575,7 @@ class _TranslationsVideoControlsNb extends TranslationsVideoControlsEn {
 	@override String get nextChapterButton => 'Neste kapittel';
 	@override String get muteButton => 'Demp';
 	@override String get unmuteButton => 'Opphev demping';
-	@override String get settingsButton => 'Videoinnstillinger';
+	@override String get settingsButton => 'Avspillingsinnstillinger';
 	@override String get tracksButton => 'Lyd og undertekster';
 	@override String get chaptersButton => 'Kapitler';
 	@override String get versionsButton => 'Videoversjoner';
@@ -574,6 +601,7 @@ class _TranslationsVideoControlsNb extends TranslationsVideoControlsEn {
 	@override String endsAt({required Object time}) => 'Slutter kl. ${time}';
 	@override String get pipActive => 'Spiller i bilde-i-bilde';
 	@override String get pipFailed => 'Bilde-i-bilde kunne ikke starte';
+	@override String get screenshotSaved => 'Skjermbilde lagret';
 	@override late final _TranslationsVideoControlsPipErrorsNb pipErrors = _TranslationsVideoControlsPipErrorsNb._(_root);
 	@override String get chapters => 'Kapitler';
 	@override String get noChaptersAvailable => 'Ingen kapitler tilgjengelig';
@@ -1274,7 +1302,6 @@ class _TranslationsVideoSettingsNb extends TranslationsVideoSettingsEn {
 	final TranslationsNb _root; // ignore: unused_field
 
 	// Translations
-	@override String get playbackSettings => 'Avspillingsinnstillinger';
 	@override String get playbackSpeed => 'Avspillingshastighet';
 	@override String get sleepTimer => 'Søvntimer';
 	@override String get audioSync => 'Lydsynkronisering';
@@ -1535,6 +1562,7 @@ class _TranslationsHotkeysActionsNb extends TranslationsHotkeysActionsEn {
 	@override String get subSeekPrev => 'Spol til forrige undertekst';
 	@override String get shaderToggle => 'Veksle shadere';
 	@override String get skipMarker => 'Hopp over intro/rulletekst';
+	@override String get screenshot => 'Ta skjermbilde';
 }
 
 // Path: videoControls.pipErrors
@@ -1606,8 +1634,18 @@ class _TranslationsLibrariesSortLabelsNb extends TranslationsLibrariesSortLabels
 	@override String get dateAdded => 'Lagt til-dato';
 	@override String get releaseDate => 'Utgivelsesdato';
 	@override String get rating => 'Vurdering';
+	@override String get communityRating => 'Fellesskapsvurdering';
+	@override String get criticRating => 'Kritikervurdering';
 	@override String get lastPlayed => 'Sist spilt';
+	@override String get datePlayed => 'Avspillingsdato';
 	@override String get playCount => 'Avspillinger';
+	@override String get productionYear => 'Produksjonsår';
+	@override String get runtime => 'Varighet';
+	@override String get officialRating => 'Offisiell vurdering';
+	@override String get premiereDate => 'Premieredato';
+	@override String get startDate => 'Startdato';
+	@override String get airTime => 'Sendetid';
+	@override String get studio => 'Studio';
 	@override String get random => 'Tilfeldig';
 	@override String get dateShared => 'Delingsdato';
 	@override String get latestEpisodeAirDate => 'Siste episodes sendedato';
@@ -2000,6 +2038,12 @@ extension on TranslationsNb {
 			'settings.displaySwitchDelay' => 'Forsinkelse ved skjermbytte',
 			'settings.tunneledPlayback' => 'Tunnelert avspilling',
 			'settings.tunneledPlaybackDescription' => 'Bruk videotunneling. Slå av hvis HDR-avspilling viser svart video.',
+			'settings.dvConversionMode' => 'Dolby Vision-konvertering',
+			'settings.dvConversionModeDescription' => 'Velg hvordan ExoPlayer håndterer Dolby Vision Profile 7-filer.',
+			'settings.dvConversionAuto' => 'Auto',
+			'settings.dvConversionNative' => 'Innebygd / deaktivert',
+			'settings.dvConversionDv81' => 'P7 → P8.1',
+			'settings.dvConversionHevcStrip' => 'P7 → HEVC',
 			'settings.requireProfileSelectionOnOpen' => 'Spør om profil ved appåpning',
 			'settings.requireProfileSelectionOnOpenDescription' => 'Vis profilvalg hver gang appen åpnes',
 			'settings.forceTvMode' => 'Tving TV-modus',
@@ -2048,6 +2092,7 @@ extension on TranslationsNb {
 			'hotkeys.actions.subSeekPrev' => 'Spol til forrige undertekst',
 			'hotkeys.actions.shaderToggle' => 'Veksle shadere',
 			'hotkeys.actions.skipMarker' => 'Hopp over intro/rulletekst',
+			'hotkeys.actions.screenshot' => 'Ta skjermbilde',
 			'fileInfo.title' => 'Filinformasjon',
 			'fileInfo.video' => 'Video',
 			'fileInfo.audio' => 'Lyd',
@@ -2088,6 +2133,17 @@ extension on TranslationsNb {
 			'mediaMenu.rate' => 'Vurder',
 			'mediaMenu.playFromBeginning' => 'Spill fra begynnelsen',
 			'mediaMenu.playVersion' => 'Spill av versjon...',
+			'rateSheet.title' => 'Vurder',
+			'rateSheet.server' => 'Server',
+			'rateSheet.starValue' => ({required Object rating}) => '${rating} / 5',
+			'rateSheet.scoreValue' => ({required Object score}) => '${score} / 10',
+			'rateSheet.setScore' => 'Sett en poengsum',
+			'rateSheet.notRated' => 'Ikke vurdert',
+			'rateSheet.liked' => 'Likt',
+			'rateSheet.notLiked' => 'Ikke likt',
+			'rateSheet.saved' => 'Lagret',
+			'rateSheet.notAvailable' => 'Ingen treff',
+			'rateSheet.noConnectedTrackers' => 'Koble til en sporer i Innstillinger for å vurdere der.',
 			'accessibility.mediaCardMovie' => ({required Object title}) => '${title}, film',
 			'accessibility.mediaCardShow' => ({required Object title}) => '${title}, TV-serie',
 			'accessibility.mediaCardEpisode' => ({required Object title, required Object episodeInfo}) => '${title}, ${episodeInfo}',
@@ -2130,7 +2186,7 @@ extension on TranslationsNb {
 			'videoControls.nextChapterButton' => 'Neste kapittel',
 			'videoControls.muteButton' => 'Demp',
 			'videoControls.unmuteButton' => 'Opphev demping',
-			'videoControls.settingsButton' => 'Videoinnstillinger',
+			'videoControls.settingsButton' => 'Avspillingsinnstillinger',
 			'videoControls.tracksButton' => 'Lyd og undertekster',
 			'videoControls.chaptersButton' => 'Kapitler',
 			'videoControls.versionsButton' => 'Videoversjoner',
@@ -2156,6 +2212,7 @@ extension on TranslationsNb {
 			'videoControls.endsAt' => ({required Object time}) => 'Slutter kl. ${time}',
 			'videoControls.pipActive' => 'Spiller i bilde-i-bilde',
 			'videoControls.pipFailed' => 'Bilde-i-bilde kunne ikke starte',
+			'videoControls.screenshotSaved' => 'Skjermbilde lagret',
 			'videoControls.pipErrors.androidVersion' => 'Krever Android 8.0 eller nyere',
 			'videoControls.pipErrors.iosVersion' => 'Krever iOS 15.0 eller nyere',
 			'videoControls.pipErrors.permissionDisabled' => 'Bilde-i-bilde er deaktivert. Slå det på i systeminnstillinger.',
@@ -2255,6 +2312,8 @@ extension on TranslationsNb {
 			'profiles.signOut' => 'Logg ut',
 			'profiles.signOutPlexTitle' => 'Logge ut av Plex?',
 			'profiles.signOutPlexMessage' => ({required Object displayName}) => 'Fjerne ${displayName} og alle Plex Home-brukere? Du kan logge inn igjen når som helst.',
+			_ => null,
+		} ?? switch (path) {
 			'profiles.signedOutPlex' => 'Logget ut av Plex.',
 			'profiles.signOutFailed' => 'Utlogging mislyktes.',
 			'profiles.sectionTitle' => 'Profiler',
@@ -2274,8 +2333,6 @@ extension on TranslationsNb {
 			'profiles.confirmPinTitle' => 'Bekreft PIN',
 			'profiles.pinSet' => 'PIN satt',
 			'profiles.changePin' => 'Endre',
-			_ => null,
-		} ?? switch (path) {
 			'profiles.removePin' => 'Fjern',
 			'profiles.connectionsLabel' => 'Tilkoblinger',
 			'profiles.add' => 'Legg til',
@@ -2400,8 +2457,18 @@ extension on TranslationsNb {
 			'libraries.sortLabels.dateAdded' => 'Lagt til-dato',
 			'libraries.sortLabels.releaseDate' => 'Utgivelsesdato',
 			'libraries.sortLabels.rating' => 'Vurdering',
+			'libraries.sortLabels.communityRating' => 'Fellesskapsvurdering',
+			'libraries.sortLabels.criticRating' => 'Kritikervurdering',
 			'libraries.sortLabels.lastPlayed' => 'Sist spilt',
+			'libraries.sortLabels.datePlayed' => 'Avspillingsdato',
 			'libraries.sortLabels.playCount' => 'Avspillinger',
+			'libraries.sortLabels.productionYear' => 'Produksjonsår',
+			'libraries.sortLabels.runtime' => 'Varighet',
+			'libraries.sortLabels.officialRating' => 'Offisiell vurdering',
+			'libraries.sortLabels.premiereDate' => 'Premieredato',
+			'libraries.sortLabels.startDate' => 'Startdato',
+			'libraries.sortLabels.airTime' => 'Sendetid',
+			'libraries.sortLabels.studio' => 'Studio',
 			'libraries.sortLabels.random' => 'Tilfeldig',
 			'libraries.sortLabels.dateShared' => 'Delingsdato',
 			'libraries.sortLabels.latestEpisodeAirDate' => 'Siste episodes sendedato',
@@ -2719,7 +2786,6 @@ extension on TranslationsNb {
 			'companionRemote.remote.subtitles' => 'Undertekster',
 			'companionRemote.remote.audio' => 'Lyd',
 			'companionRemote.remote.searchHint' => 'Søk på stasjonær...',
-			'videoSettings.playbackSettings' => 'Avspillingsinnstillinger',
 			'videoSettings.playbackSpeed' => 'Avspillingshastighet',
 			'videoSettings.sleepTimer' => 'Søvntimer',
 			'videoSettings.audioSync' => 'Lydsynkronisering',
@@ -2760,6 +2826,8 @@ extension on TranslationsNb {
 			'metadataEdit.poster' => 'Plakat',
 			'metadataEdit.background' => 'Bakgrunn',
 			'metadataEdit.logo' => 'Logo',
+			_ => null,
+		} ?? switch (path) {
 			'metadataEdit.squareArt' => 'Kvadratisk bilde',
 			'metadataEdit.selectPoster' => 'Velg plakat',
 			'metadataEdit.selectBackground' => 'Velg bakgrunn',
@@ -2788,8 +2856,6 @@ extension on TranslationsNb {
 			'metadataEdit.episodesAddedPastDays' => ({required Object count}) => 'Episoder lagt til de siste ${count} dagene',
 			'metadataEdit.deleteAfterPlaying' => 'Slett episoder etter avspilling',
 			'metadataEdit.never' => 'Aldri',
-			_ => null,
-		} ?? switch (path) {
 			'metadataEdit.afterADay' => 'Etter en dag',
 			'metadataEdit.afterAWeek' => 'Etter en uke',
 			'metadataEdit.afterAMonth' => 'Etter en måned',

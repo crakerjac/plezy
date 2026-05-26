@@ -1,5 +1,6 @@
 import 'dart:io' show Platform;
 
+import '../../media/media_display_criteria.dart';
 import '../models.dart';
 import 'platform/player_android.dart';
 import 'player_native.dart';
@@ -57,7 +58,14 @@ abstract class Player {
   ///
   /// [media] - The media source to open.
   /// [play] - Whether to start playback immediately (default: true).
-  Future<void> open(Media media, {bool play = true, bool isLive = false, List<SubtitleTrack>? externalSubtitles});
+  Future<void> open(
+    Media media, {
+    bool play = true,
+    bool isLive = false,
+    List<SubtitleTrack>? externalSubtitles,
+    Duration timelineOffset = Duration.zero,
+    Duration? timelineDuration,
+  });
 
   /// Start or resume playback.
   Future<void> play();
@@ -145,6 +153,10 @@ abstract class Player {
   ///
   /// [args] - Command and arguments as a list of strings.
   Future<void> command(List<String> args);
+
+  /// Prime native display matching from server metadata before the decoder
+  /// emits stream properties. Unsupported platforms ignore this.
+  Future<void> setDisplayCriteria(MediaDisplayCriteria? criteria);
 
   /// Configure subtitle fonts for libass rendering.
   ///

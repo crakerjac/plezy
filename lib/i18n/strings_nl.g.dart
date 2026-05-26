@@ -49,6 +49,7 @@ class TranslationsNl extends Translations with BaseTranslations<AppLocale, Trans
 	@override late final _TranslationsHotkeysNl hotkeys = _TranslationsHotkeysNl._(_root);
 	@override late final _TranslationsFileInfoNl fileInfo = _TranslationsFileInfoNl._(_root);
 	@override late final _TranslationsMediaMenuNl mediaMenu = _TranslationsMediaMenuNl._(_root);
+	@override late final _TranslationsRateSheetNl rateSheet = _TranslationsRateSheetNl._(_root);
 	@override late final _TranslationsAccessibilityNl accessibility = _TranslationsAccessibilityNl._(_root);
 	@override late final _TranslationsTooltipsNl tooltips = _TranslationsTooltipsNl._(_root);
 	@override late final _TranslationsVideoControlsNl videoControls = _TranslationsVideoControlsNl._(_root);
@@ -375,6 +376,12 @@ class _TranslationsSettingsNl extends TranslationsSettingsEn {
 	@override String get displaySwitchDelay => 'Vertraging bij schermwisseling';
 	@override String get tunneledPlayback => 'Getunnelde weergave';
 	@override String get tunneledPlaybackDescription => 'Gebruik videotunneling. Schakel uit als HDR-afspelen zwart beeld geeft.';
+	@override String get dvConversionMode => 'Dolby Vision-conversie';
+	@override String get dvConversionModeDescription => 'Kies hoe ExoPlayer Dolby Vision Profile 7-bestanden verwerkt.';
+	@override String get dvConversionAuto => 'Auto';
+	@override String get dvConversionNative => 'Native / uitgeschakeld';
+	@override String get dvConversionDv81 => 'P7 → P8.1';
+	@override String get dvConversionHevcStrip => 'P7 → HEVC';
 	@override String get requireProfileSelectionOnOpen => 'Vraag om profiel bij openen';
 	@override String get requireProfileSelectionOnOpenDescription => 'Toon profielselectie telkens wanneer de app wordt geopend';
 	@override String get forceTvMode => 'TV-modus forceren';
@@ -481,6 +488,26 @@ class _TranslationsMediaMenuNl extends TranslationsMediaMenuEn {
 	@override String get playVersion => 'Versie afspelen...';
 }
 
+// Path: rateSheet
+class _TranslationsRateSheetNl extends TranslationsRateSheetEn {
+	_TranslationsRateSheetNl._(TranslationsNl root) : this._root = root, super.internal(root);
+
+	final TranslationsNl _root; // ignore: unused_field
+
+	// Translations
+	@override String get title => 'Beoordelen';
+	@override String get server => 'Server';
+	@override String starValue({required Object rating}) => '${rating} / 5';
+	@override String scoreValue({required Object score}) => '${score} / 10';
+	@override String get setScore => 'Score instellen';
+	@override String get notRated => 'Niet beoordeeld';
+	@override String get liked => 'Geliket';
+	@override String get notLiked => 'Niet geliket';
+	@override String get saved => 'Opgeslagen';
+	@override String get notAvailable => 'Geen match gevonden';
+	@override String get noConnectedTrackers => 'Verbind een tracker in Instellingen om daar te beoordelen.';
+}
+
 // Path: accessibility
 class _TranslationsAccessibilityNl extends TranslationsAccessibilityEn {
 	_TranslationsAccessibilityNl._(TranslationsNl root) : this._root = root, super.internal(root);
@@ -548,7 +575,7 @@ class _TranslationsVideoControlsNl extends TranslationsVideoControlsEn {
 	@override String get nextChapterButton => 'Volgend hoofdstuk';
 	@override String get muteButton => 'Dempen';
 	@override String get unmuteButton => 'Dempen opheffen';
-	@override String get settingsButton => 'Video-instellingen';
+	@override String get settingsButton => 'Afspeelinstellingen';
 	@override String get tracksButton => 'Audio en ondertitels';
 	@override String get chaptersButton => 'Hoofdstukken';
 	@override String get versionsButton => 'Videoversies';
@@ -574,6 +601,7 @@ class _TranslationsVideoControlsNl extends TranslationsVideoControlsEn {
 	@override String endsAt({required Object time}) => 'Eindigt om ${time}';
 	@override String get pipActive => 'Afspelen in beeld-in-beeld';
 	@override String get pipFailed => 'Beeld-in-beeld kon niet worden gestart';
+	@override String get screenshotSaved => 'Schermafbeelding opgeslagen';
 	@override late final _TranslationsVideoControlsPipErrorsNl pipErrors = _TranslationsVideoControlsPipErrorsNl._(_root);
 	@override String get chapters => 'Hoofdstukken';
 	@override String get noChaptersAvailable => 'Geen hoofdstukken beschikbaar';
@@ -1274,7 +1302,6 @@ class _TranslationsVideoSettingsNl extends TranslationsVideoSettingsEn {
 	final TranslationsNl _root; // ignore: unused_field
 
 	// Translations
-	@override String get playbackSettings => 'Afspeelinstellingen';
 	@override String get playbackSpeed => 'Afspeelsnelheid';
 	@override String get sleepTimer => 'Slaaptimer';
 	@override String get audioSync => 'Audio synchronisatie';
@@ -1535,6 +1562,7 @@ class _TranslationsHotkeysActionsNl extends TranslationsHotkeysActionsEn {
 	@override String get subSeekPrev => 'Naar vorige ondertitel';
 	@override String get shaderToggle => 'Shaders aan/uit';
 	@override String get skipMarker => 'Intro/aftiteling overslaan';
+	@override String get screenshot => 'Schermafbeelding maken';
 }
 
 // Path: videoControls.pipErrors
@@ -1606,8 +1634,18 @@ class _TranslationsLibrariesSortLabelsNl extends TranslationsLibrariesSortLabels
 	@override String get dateAdded => 'Toegevoegd op';
 	@override String get releaseDate => 'Uitgavedatum';
 	@override String get rating => 'Beoordeling';
+	@override String get communityRating => 'Communitybeoordeling';
+	@override String get criticRating => 'Criticusbeoordeling';
 	@override String get lastPlayed => 'Laatst afgespeeld';
+	@override String get datePlayed => 'Afspeeldatum';
 	@override String get playCount => 'Aantal afspelingen';
+	@override String get productionYear => 'Productiejaar';
+	@override String get runtime => 'Speelduur';
+	@override String get officialRating => 'Officiële beoordeling';
+	@override String get premiereDate => 'Premièredatum';
+	@override String get startDate => 'Begindatum';
+	@override String get airTime => 'Uitzendtijd';
+	@override String get studio => 'Studio';
 	@override String get random => 'Willekeurig';
 	@override String get dateShared => 'Gedeeld op';
 	@override String get latestEpisodeAirDate => 'Laatste afleveringsuitzending';
@@ -2000,6 +2038,12 @@ extension on TranslationsNl {
 			'settings.displaySwitchDelay' => 'Vertraging bij schermwisseling',
 			'settings.tunneledPlayback' => 'Getunnelde weergave',
 			'settings.tunneledPlaybackDescription' => 'Gebruik videotunneling. Schakel uit als HDR-afspelen zwart beeld geeft.',
+			'settings.dvConversionMode' => 'Dolby Vision-conversie',
+			'settings.dvConversionModeDescription' => 'Kies hoe ExoPlayer Dolby Vision Profile 7-bestanden verwerkt.',
+			'settings.dvConversionAuto' => 'Auto',
+			'settings.dvConversionNative' => 'Native / uitgeschakeld',
+			'settings.dvConversionDv81' => 'P7 → P8.1',
+			'settings.dvConversionHevcStrip' => 'P7 → HEVC',
 			'settings.requireProfileSelectionOnOpen' => 'Vraag om profiel bij openen',
 			'settings.requireProfileSelectionOnOpenDescription' => 'Toon profielselectie telkens wanneer de app wordt geopend',
 			'settings.forceTvMode' => 'TV-modus forceren',
@@ -2048,6 +2092,7 @@ extension on TranslationsNl {
 			'hotkeys.actions.subSeekPrev' => 'Naar vorige ondertitel',
 			'hotkeys.actions.shaderToggle' => 'Shaders aan/uit',
 			'hotkeys.actions.skipMarker' => 'Intro/aftiteling overslaan',
+			'hotkeys.actions.screenshot' => 'Schermafbeelding maken',
 			'fileInfo.title' => 'Bestand info',
 			'fileInfo.video' => 'Video',
 			'fileInfo.audio' => 'Audio',
@@ -2088,6 +2133,17 @@ extension on TranslationsNl {
 			'mediaMenu.rate' => 'Beoordelen',
 			'mediaMenu.playFromBeginning' => 'Afspelen vanaf het begin',
 			'mediaMenu.playVersion' => 'Versie afspelen...',
+			'rateSheet.title' => 'Beoordelen',
+			'rateSheet.server' => 'Server',
+			'rateSheet.starValue' => ({required Object rating}) => '${rating} / 5',
+			'rateSheet.scoreValue' => ({required Object score}) => '${score} / 10',
+			'rateSheet.setScore' => 'Score instellen',
+			'rateSheet.notRated' => 'Niet beoordeeld',
+			'rateSheet.liked' => 'Geliket',
+			'rateSheet.notLiked' => 'Niet geliket',
+			'rateSheet.saved' => 'Opgeslagen',
+			'rateSheet.notAvailable' => 'Geen match gevonden',
+			'rateSheet.noConnectedTrackers' => 'Verbind een tracker in Instellingen om daar te beoordelen.',
 			'accessibility.mediaCardMovie' => ({required Object title}) => '${title}, film',
 			'accessibility.mediaCardShow' => ({required Object title}) => '${title}, TV-serie',
 			'accessibility.mediaCardEpisode' => ({required Object title, required Object episodeInfo}) => '${title}, ${episodeInfo}',
@@ -2130,7 +2186,7 @@ extension on TranslationsNl {
 			'videoControls.nextChapterButton' => 'Volgend hoofdstuk',
 			'videoControls.muteButton' => 'Dempen',
 			'videoControls.unmuteButton' => 'Dempen opheffen',
-			'videoControls.settingsButton' => 'Video-instellingen',
+			'videoControls.settingsButton' => 'Afspeelinstellingen',
 			'videoControls.tracksButton' => 'Audio en ondertitels',
 			'videoControls.chaptersButton' => 'Hoofdstukken',
 			'videoControls.versionsButton' => 'Videoversies',
@@ -2156,6 +2212,7 @@ extension on TranslationsNl {
 			'videoControls.endsAt' => ({required Object time}) => 'Eindigt om ${time}',
 			'videoControls.pipActive' => 'Afspelen in beeld-in-beeld',
 			'videoControls.pipFailed' => 'Beeld-in-beeld kon niet worden gestart',
+			'videoControls.screenshotSaved' => 'Schermafbeelding opgeslagen',
 			'videoControls.pipErrors.androidVersion' => 'Vereist Android 8.0 of nieuwer',
 			'videoControls.pipErrors.iosVersion' => 'Vereist iOS 15.0 of nieuwer',
 			'videoControls.pipErrors.permissionDisabled' => 'Picture-in-picture is uitgeschakeld. Schakel het in via systeeminstellingen.',
@@ -2255,6 +2312,8 @@ extension on TranslationsNl {
 			'profiles.signOut' => 'Afmelden',
 			'profiles.signOutPlexTitle' => 'Afmelden bij Plex?',
 			'profiles.signOutPlexMessage' => ({required Object displayName}) => '${displayName} en alle Plex Home-gebruikers verwijderen? Je kunt altijd opnieuw inloggen.',
+			_ => null,
+		} ?? switch (path) {
 			'profiles.signedOutPlex' => 'Afgemeld bij Plex.',
 			'profiles.signOutFailed' => 'Afmelden mislukt.',
 			'profiles.sectionTitle' => 'Profielen',
@@ -2274,8 +2333,6 @@ extension on TranslationsNl {
 			'profiles.confirmPinTitle' => 'PIN bevestigen',
 			'profiles.pinSet' => 'PIN ingesteld',
 			'profiles.changePin' => 'Wijzigen',
-			_ => null,
-		} ?? switch (path) {
 			'profiles.removePin' => 'Verwijderen',
 			'profiles.connectionsLabel' => 'Verbindingen',
 			'profiles.add' => 'Toevoegen',
@@ -2400,8 +2457,18 @@ extension on TranslationsNl {
 			'libraries.sortLabels.dateAdded' => 'Toegevoegd op',
 			'libraries.sortLabels.releaseDate' => 'Uitgavedatum',
 			'libraries.sortLabels.rating' => 'Beoordeling',
+			'libraries.sortLabels.communityRating' => 'Communitybeoordeling',
+			'libraries.sortLabels.criticRating' => 'Criticusbeoordeling',
 			'libraries.sortLabels.lastPlayed' => 'Laatst afgespeeld',
+			'libraries.sortLabels.datePlayed' => 'Afspeeldatum',
 			'libraries.sortLabels.playCount' => 'Aantal afspelingen',
+			'libraries.sortLabels.productionYear' => 'Productiejaar',
+			'libraries.sortLabels.runtime' => 'Speelduur',
+			'libraries.sortLabels.officialRating' => 'Officiële beoordeling',
+			'libraries.sortLabels.premiereDate' => 'Premièredatum',
+			'libraries.sortLabels.startDate' => 'Begindatum',
+			'libraries.sortLabels.airTime' => 'Uitzendtijd',
+			'libraries.sortLabels.studio' => 'Studio',
 			'libraries.sortLabels.random' => 'Willekeurig',
 			'libraries.sortLabels.dateShared' => 'Gedeeld op',
 			'libraries.sortLabels.latestEpisodeAirDate' => 'Laatste afleveringsuitzending',
@@ -2719,7 +2786,6 @@ extension on TranslationsNl {
 			'companionRemote.remote.subtitles' => 'Ondertitels',
 			'companionRemote.remote.audio' => 'Audio',
 			'companionRemote.remote.searchHint' => 'Zoeken op desktop...',
-			'videoSettings.playbackSettings' => 'Afspeelinstellingen',
 			'videoSettings.playbackSpeed' => 'Afspeelsnelheid',
 			'videoSettings.sleepTimer' => 'Slaaptimer',
 			'videoSettings.audioSync' => 'Audio synchronisatie',
@@ -2760,6 +2826,8 @@ extension on TranslationsNl {
 			'metadataEdit.poster' => 'Poster',
 			'metadataEdit.background' => 'Achtergrond',
 			'metadataEdit.logo' => 'Logo',
+			_ => null,
+		} ?? switch (path) {
 			'metadataEdit.squareArt' => 'Vierkante afbeelding',
 			'metadataEdit.selectPoster' => 'Poster selecteren',
 			'metadataEdit.selectBackground' => 'Achtergrond selecteren',
@@ -2788,8 +2856,6 @@ extension on TranslationsNl {
 			'metadataEdit.episodesAddedPastDays' => ({required Object count}) => 'Afleveringen toegevoegd in de afgelopen ${count} dagen',
 			'metadataEdit.deleteAfterPlaying' => 'Afleveringen verwijderen na afspelen',
 			'metadataEdit.never' => 'Nooit',
-			_ => null,
-		} ?? switch (path) {
 			'metadataEdit.afterADay' => 'Na een dag',
 			'metadataEdit.afterAWeek' => 'Na een week',
 			'metadataEdit.afterAMonth' => 'Na een maand',

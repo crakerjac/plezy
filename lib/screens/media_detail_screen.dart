@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:cached_network_image_ce/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
+import '../main.dart' show routeObserver;
 import '../services/image_cache_service.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:flutter/services.dart';
@@ -19,7 +20,6 @@ import '../focus/focusable_wrapper.dart';
 import '../focus/key_event_utils.dart';
 import '../focus/input_mode_tracker.dart';
 import '../widgets/focus_builders.dart';
-import '../exceptions/media_server_exceptions.dart';
 import '../media/media_backend.dart';
 import '../media/media_hub.dart';
 import '../utils/provider_extensions.dart';
@@ -42,8 +42,10 @@ import '../services/download_storage_service.dart';
 import '../utils/download_version_utils.dart';
 import '../utils/download_utils.dart';
 import '../services/settings_service.dart';
+import '../services/trackers/tracker_coordinator.dart';
 import '../widgets/settings_builder.dart';
 import '../utils/grid_size_calculator.dart';
+import '../utils/layout_constants.dart';
 import '../providers/download_provider.dart';
 import '../providers/offline_watch_provider.dart';
 import '../theme/mono_tokens.dart';
@@ -65,13 +67,26 @@ import '../mixins/mounted_set_state_mixin.dart';
 import '../mixins/server_bound_media_mixin.dart';
 import '../utils/watch_state_notifier.dart';
 import '../utils/deletion_notifier.dart';
+import '../utils/global_key_utils.dart';
 import '../widgets/episode_card.dart';
+import '../widgets/fitting_title_text.dart';
 import 'actor_media_screen.dart';
 import '../widgets/focusable_tab_chip.dart';
 import '../widgets/hub_section.dart';
+import '../widgets/ios_status_bar_tap_scroll_to_top.dart';
 import '../widgets/loading_indicator_box.dart';
+import '../widgets/tv_browse_rail.dart';
+import '../widgets/tv_spotlight_background.dart';
 
 part 'media_detail/action_buttons.dart';
+
+const double _tvDetailTallPosterScale = TvBrowseRailLayout.compactTallPosterScale;
+const double _tvDetailEpisodeThumbnailScale = TvBrowseRailLayout.compactEpisodeThumbnailScale;
+const double _tvDetailActionSize = 46;
+const double _tvDetailActionRailGap = 4;
+const String _tvDetailSeasonHubIdPrefix = 'detail_season_';
+const String _tvDetailActorsHubId = 'detail_actors';
+const String _tvDetailActorPersonIdRawKey = 'tvDetailActorPersonId';
 
 enum _SyncRuleAction { edit, remove, delete }
 
@@ -89,8 +104,26 @@ class MediaDetailScreen extends StatefulWidget {
   State<MediaDetailScreen> createState() => _MediaDetailScreenState();
 }
 
+PageRoute<bool> mediaDetailRoute({required MediaItem metadata, bool isOffline = false, int? initialSeasonIndex}) {
+  final page = MediaDetailScreen(metadata: metadata, isOffline: isOffline, initialSeasonIndex: initialSeasonIndex);
+  if (!PlatformDetector.isTV()) return MaterialPageRoute<bool>(builder: (_) => page);
+
+  return PageRouteBuilder<bool>(
+    opaque: false,
+    pageBuilder: (_, _, _) => page,
+    transitionsBuilder: (_, animation, _, child) {
+      return FadeTransition(
+        opacity: CurvedAnimation(parent: animation, curve: Curves.easeOutCubic, reverseCurve: Curves.easeInCubic),
+        child: child,
+      );
+    },
+    transitionDuration: AppDurations.animMedium,
+    reverseTransitionDuration: AppDurations.animMedium,
+  );
+}
+
 class _MediaDetailScreenState extends State<MediaDetailScreen>
-    with WatchStateAware, DeletionAware, MountedSetStateMixin, ServerBoundMediaMixin {
+    with WatchStateAware, DeletionAware, MountedSetStateMixin, ServerBoundMediaMixin, RouteAware {
   /// Public input alias — used as the live source of truth until the detail
   /// fetch returns. Holds backend-neutral [MediaItem] data.
   MediaItem get _metadata => _fullMetadata ?? widget.metadata;
@@ -99,6 +132,9 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
   Completer<void>? _seasonsCompleter;
   List<MediaItem> _episodes = [];
   bool _isLoadingEpisodes = false;
+  bool _isLoadingAllEpisodes = false;
+  int _episodesLoadGeneration = 0;
+  int _tvSeasonEpisodeCacheWarmGeneration = 0;
   bool _showEpisodesDirectly = false;
   MediaItem? _fullMetadata;
   MediaItem? _onDeckEpisode;
@@ -107,20 +143,43 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
   List<MediaItem>? _extras;
   List<MediaHub> _relatedHubs = [];
   List<GlobalKey<HubSectionState>> _relatedHubKeys = [];
+  bool _hasLoadedExtras = false;
+  bool _hasLoadedRelatedHubs = false;
+  final _tvDetailRailKey = GlobalKey<TvBrowseRailState>();
+  PageRoute<dynamic>? _route;
   late final ScrollController _scrollController;
   final ScrollController _extrasScrollController = ScrollController();
   bool _watchStateChanged = false;
   final ValueNotifier<double> _scrollOffset = ValueNotifier<double>(0);
+  bool _suppressBackAfterPop = false;
+  bool _tvDetailRevealed = false;
+  bool _tvDetailRevealScheduled = false;
+  bool _hasLoadedSeasons = false;
+  bool _hasLoadedEpisodes = false;
+  double? _tvDetailPendingRailHeight;
+  double? _tvDetailStableRailHeight;
+  MediaItem? _tvDetailFocusedEpisode;
+  bool _tvDetailActionRowHasFocus = false;
 
   // Inline season tabs
   int _selectedSeasonIndex = 0;
   final Map<String, List<MediaItem>> _episodeCache = {};
+  final Set<String> _seasonEpisodeLoadsInFlight = {};
   bool _isLoadingSeasonEpisodes = false;
   List<FocusNode> _seasonTabFocusNodes = [];
+
+  MediaItem _withFallbackLibrary(MediaItem item, MediaItem fallback) {
+    return item.copyWith(
+      libraryId: item.libraryId ?? fallback.libraryId,
+      libraryTitle: item.libraryTitle ?? fallback.libraryTitle,
+    );
+  }
+
   final Map<int, GlobalKey<MediaContextMenuState>> _seasonContextMenuKeys = {};
   final ScrollController _seasonTabsScrollController = ScrollController();
   final FocusNode _firstEpisodeFocusNode = FocusNode(debugLabel: 'first_episode');
   final FocusNode _lastEpisodeFocusNode = FocusNode(debugLabel: 'last_episode');
+  static const int _episodesPageSize = 200;
 
   late final FocusNode _playButtonFocusNode;
   late final FocusNode _ratingChipFocusNode;
@@ -229,29 +288,152 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
   void _patchWatchedStateFromEvent(WatchStateEvent event, {required int epIndex, required bool clearWatchedProgress}) {
     final isWatched = event.isNowWatched;
     if (isWatched == null) return;
-    final viewOffsetMs = isWatched && !clearWatchedProgress ? null : 0;
-    MediaItem patchItem(MediaItem item) {
-      final updated = item.copyWith(viewCount: isWatched ? 1 : 0);
-      return viewOffsetMs == null ? updated : updated.copyWith(viewOffsetMs: viewOffsetMs);
-    }
 
     setStateIfMounted(() {
       final base = _fullMetadata ?? widget.metadata;
+      final episodeDelta = epIndex == -1 ? 0 : _watchStateDelta(_episodes[epIndex], isWatched);
+
       if (base.id == event.itemId) {
-        _fullMetadata = patchItem(base);
+        _fullMetadata = _withWatchedPatch(base, isWatched, clearWatchedProgress: clearWatchedProgress);
       }
 
       final onDeckEpisode = _onDeckEpisode;
       if (onDeckEpisode != null && onDeckEpisode.id == event.itemId) {
-        _onDeckEpisode = patchItem(onDeckEpisode);
+        _onDeckEpisode = _withWatchedPatch(onDeckEpisode, isWatched, clearWatchedProgress: clearWatchedProgress);
       }
 
-      if (epIndex != -1) {
-        final updated = patchItem(_episodes[epIndex]);
-        _episodes[epIndex] = updated;
-        _syncEpisodeToCache(epIndex, updated);
+      _patchWatchedInListWhere(
+        _seasons,
+        (item) => item.id == event.itemId,
+        isWatched,
+        clearWatchedProgress: clearWatchedProgress,
+      );
+      _patchWatchedInListWhere(
+        _episodes,
+        (item) => item.id == event.itemId,
+        isWatched,
+        clearWatchedProgress: clearWatchedProgress,
+      );
+      for (final cached in _episodeCache.values) {
+        _patchWatchedInListWhere(
+          cached,
+          (item) => item.id == event.itemId,
+          isWatched,
+          clearWatchedProgress: clearWatchedProgress,
+        );
+      }
+      final extras = _extras;
+      if (extras != null) {
+        _patchWatchedInListWhere(
+          extras,
+          (item) => item.id == event.itemId,
+          isWatched,
+          clearWatchedProgress: clearWatchedProgress,
+        );
+      }
+      _relatedHubs = _patchWatchedInHubs(
+        _relatedHubs,
+        (item) => item.id == event.itemId,
+        isWatched,
+        clearWatchedProgress: clearWatchedProgress,
+      );
+
+      if (base.id == event.itemId || _seasons.any((season) => season.id == event.itemId)) {
+        _patchLoadedDescendantsOf(event.itemId, isWatched, clearWatchedProgress: clearWatchedProgress);
+      } else if (episodeDelta != 0) {
+        _adjustParentWatchCounts(event.parentChain, episodeDelta);
       }
     });
+  }
+
+  MediaItem _withWatchedPatch(MediaItem item, bool isWatched, {required bool clearWatchedProgress}) {
+    final viewOffsetMs = isWatched && !clearWatchedProgress ? null : 0;
+    var updated = item.copyWith(viewCount: isWatched ? 1 : 0);
+    if (item.leafCount != null || item.viewedLeafCount != null) {
+      updated = updated.copyWith(viewedLeafCount: isWatched ? (item.leafCount ?? item.viewedLeafCount ?? 1) : 0);
+    }
+    return viewOffsetMs == null ? updated : updated.copyWith(viewOffsetMs: viewOffsetMs);
+  }
+
+  int _watchStateDelta(MediaItem item, bool isWatched) {
+    if (item.isWatched == isWatched) return 0;
+    return isWatched ? 1 : -1;
+  }
+
+  void _patchWatchedInListWhere(
+    List<MediaItem> items,
+    bool Function(MediaItem item) test,
+    bool isWatched, {
+    required bool clearWatchedProgress,
+  }) {
+    for (var i = 0; i < items.length; i++) {
+      if (test(items[i])) {
+        items[i] = _withWatchedPatch(items[i], isWatched, clearWatchedProgress: clearWatchedProgress);
+      }
+    }
+  }
+
+  List<MediaHub> _patchWatchedInHubs(
+    List<MediaHub> hubs,
+    bool Function(MediaItem item) test,
+    bool isWatched, {
+    required bool clearWatchedProgress,
+  }) {
+    var changed = false;
+    final updatedHubs = <MediaHub>[];
+    for (final hub in hubs) {
+      var hubChanged = false;
+      final items = List<MediaItem>.of(hub.items);
+      _patchWatchedInListWhere(
+        items,
+        (item) {
+          final matches = test(item);
+          hubChanged = hubChanged || matches;
+          return matches;
+        },
+        isWatched,
+        clearWatchedProgress: clearWatchedProgress,
+      );
+      changed = changed || hubChanged;
+      updatedHubs.add(hubChanged ? hub.copyWith(items: items) : hub);
+    }
+    return changed ? updatedHubs : hubs;
+  }
+
+  void _patchLoadedDescendantsOf(String parentId, bool isWatched, {required bool clearWatchedProgress}) {
+    bool isDescendant(MediaItem item) => item.parentChain.contains(parentId);
+    _patchWatchedInListWhere(_seasons, isDescendant, isWatched, clearWatchedProgress: clearWatchedProgress);
+    _patchWatchedInListWhere(_episodes, isDescendant, isWatched, clearWatchedProgress: clearWatchedProgress);
+    for (final entry in _episodeCache.entries) {
+      _patchWatchedInListWhere(
+        entry.value,
+        (item) => entry.key == parentId || isDescendant(item),
+        isWatched,
+        clearWatchedProgress: clearWatchedProgress,
+      );
+    }
+  }
+
+  void _adjustParentWatchCounts(List<String> parentIds, int delta) {
+    if (parentIds.isEmpty) return;
+    final parentIdSet = parentIds.toSet();
+    final base = _fullMetadata ?? widget.metadata;
+    if (parentIdSet.contains(base.id)) {
+      _fullMetadata = _withAdjustedViewedLeafCount(base, delta);
+    }
+    for (var i = 0; i < _seasons.length; i++) {
+      if (parentIdSet.contains(_seasons[i].id)) {
+        _seasons[i] = _withAdjustedViewedLeafCount(_seasons[i], delta);
+      }
+    }
+  }
+
+  MediaItem _withAdjustedViewedLeafCount(MediaItem item, int delta) {
+    final viewedLeafCount = item.viewedLeafCount;
+    if (viewedLeafCount == null) return item;
+    final max = item.leafCount ?? (1 << 30);
+    final next = (viewedLeafCount + delta).clamp(0, max).toInt();
+    return item.copyWith(viewedLeafCount: next);
   }
 
   void _patchLocalProgress(String itemId, int viewOffset, {int? epIndex}) {
@@ -279,6 +461,83 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
   MediaItem _applyLocalProgress(MediaItem item) {
     if (!_localProgressById.containsKey(item.id)) return item;
     return item.copyWith(viewOffsetMs: _localProgressById[item.id]!);
+  }
+
+  MediaItem _normalizeRefreshedItem(MediaItem item, MediaItem fallback) {
+    return _applyLocalProgress(
+      _withFallbackLibrary(
+        item.copyWith(
+          serverId: item.serverId ?? fallback.serverId ?? _metadata.serverId,
+          serverName: item.serverName ?? fallback.serverName ?? _metadata.serverName,
+        ),
+        fallback,
+      ),
+    );
+  }
+
+  void _patchItemEverywhere(MediaItem item) {
+    final base = _fullMetadata ?? widget.metadata;
+    if (base.id == item.id) {
+      _fullMetadata = _normalizeRefreshedItem(item, base);
+    }
+
+    final onDeckEpisode = _onDeckEpisode;
+    if (onDeckEpisode != null && onDeckEpisode.id == item.id) {
+      _onDeckEpisode = _normalizeRefreshedItem(item, onDeckEpisode);
+    }
+
+    _patchItemInList(_seasons, item);
+    _patchItemInList(_episodes, item);
+    for (final cached in _episodeCache.values) {
+      _patchItemInList(cached, item);
+    }
+    final extras = _extras;
+    if (extras != null) {
+      _patchItemInList(extras, item);
+    }
+
+    _relatedHubs = _patchItemInHubs(_relatedHubs, item);
+  }
+
+  void _patchItemInList(List<MediaItem> items, MediaItem item) {
+    for (var i = 0; i < items.length; i++) {
+      if (items[i].id == item.id) {
+        items[i] = _normalizeRefreshedItem(item, items[i]);
+      }
+    }
+  }
+
+  List<MediaHub> _patchItemInHubs(List<MediaHub> hubs, MediaItem item) {
+    var changed = false;
+    final updatedHubs = <MediaHub>[];
+    for (final hub in hubs) {
+      var hubChanged = false;
+      final items = List<MediaItem>.of(hub.items);
+      for (var i = 0; i < items.length; i++) {
+        if (items[i].id == item.id) {
+          items[i] = _normalizeRefreshedItem(item, items[i]);
+          hubChanged = true;
+        }
+      }
+      changed = changed || hubChanged;
+      updatedHubs.add(hubChanged ? hub.copyWith(items: items) : hub);
+    }
+    return changed ? updatedHubs : hubs;
+  }
+
+  Future<void> _refreshItemInPlace(String itemId) async {
+    final client = _getMediaClientForMetadata(context);
+    if (client == null) return;
+
+    try {
+      final refreshed = await client.fetchItem(itemId);
+      if (refreshed == null || !mounted) return;
+      setStateIfMounted(() {
+        _patchItemEverywhere(refreshed);
+      });
+    } catch (e) {
+      appLogger.d('Item refresh failed for $itemId', error: e);
+    }
   }
 
   @override
@@ -400,35 +659,29 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
       final metadata = result.item;
       final onDeckEpisode = result.onDeckEpisode;
       if (metadata != null) {
-        setStateIfMounted(() {
-          _fullMetadata = _applyLocalProgress(
+        final refreshedMetadata = _applyLocalProgress(
+          _withFallbackLibrary(
             metadata.copyWith(serverId: serverId, serverName: serverName ?? metadata.serverName),
-          );
-          _onDeckEpisode = onDeckEpisode == null
-              ? null
-              : _applyLocalProgress(
+            _metadata,
+          ),
+        );
+        final refreshedOnDeck = onDeckEpisode == null
+            ? null
+            : _applyLocalProgress(
+                _withFallbackLibrary(
                   onDeckEpisode.copyWith(serverId: serverId, serverName: serverName ?? onDeckEpisode.serverName),
-                );
+                  refreshedMetadata,
+                ),
+              );
+        setStateIfMounted(() {
+          _fullMetadata = refreshedMetadata;
+          _onDeckEpisode = refreshedOnDeck;
         });
       }
 
-      if (_metadata.isShow) {
-        final seasons = await mediaClient.fetchChildren(_metadata.id);
-        _episodeCache.clear();
-        setStateIfMounted(() {
-          _seasons = seasons
-              .map((s) => s.copyWith(serverId: serverId, serverName: serverName ?? s.serverName))
-              .toList();
-        });
-        if (_showEpisodesDirectly) {
-          await _fetchAllEpisodes();
-        } else if (_seasons.isNotEmpty) {
-          unawaited(_fetchSeasonEpisodes(_selectedSeasonIndex));
-        }
-      } else if (_metadata.isSeason) {
-        _episodeCache.clear();
-        await _fetchAllEpisodes();
-      }
+      // Do not refresh seasons/episodes here. The watch event has already
+      // patched loaded rows, and rebuilding those lists causes visible rail
+      // churn on TV/detail layouts.
     } catch (e) {
       appLogger.d('Watch-state refresh failed', error: e);
     }
@@ -440,6 +693,7 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
     _scrollController = ScrollController();
     _scrollController.addListener(_onScroll);
     _extrasFocusNode = FocusNode(debugLabel: 'extras_row');
+    _extrasFocusNode.addListener(_handleExtrasFocusChange);
     _playButtonFocusNode = FocusNode(debugLabel: 'play_button');
     _ratingChipFocusNode = FocusNode(debugLabel: 'rating_chip');
     _overviewFocusNode = FocusNode(debugLabel: 'overview');
@@ -453,10 +707,123 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final route = ModalRoute.of(context);
+    if (route is! PageRoute<dynamic> || route == _route) return;
+    if (_route != null) routeObserver.unsubscribe(this);
+    _route = route;
+    routeObserver.subscribe(this, route);
+  }
+
+  @override
+  void didPopNext() {
+    _suppressBackAfterPop = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _suppressBackAfterPop = false;
+      });
+    });
+  }
+
+  bool _consumeBackAfterChildPop(KeyEvent event) {
+    if (!_suppressBackAfterPop || !event.logicalKey.isBackKey) return false;
+    if (event is KeyUpEvent) _suppressBackAfterPop = false;
+    return true;
+  }
+
+  KeyEventResult _handleMediaDetailBackKey(FocusNode _, KeyEvent event) {
+    if (_consumeBackAfterChildPop(event)) return KeyEventResult.handled;
+    return handleBackKeyNavigation(context, event, result: _watchStateChanged);
+  }
+
+  void _popMediaDetailIfBackNotSuppressed() {
+    if (_suppressBackAfterPop) {
+      _suppressBackAfterPop = false;
+      return;
+    }
+    Navigator.pop(context, _watchStateChanged);
+  }
+
+  bool _isTvDetailReadyToReveal(MediaItem metadata) {
+    if (_isLoadingMetadata) return false;
+    if (!_hasLoadedTvDetailSupplementalSections(metadata)) return false;
+
+    if (metadata.isShow) {
+      if (_isLoadingSeasons || (!_hasLoadedSeasons && _seasons.isEmpty)) return false;
+      if (_showEpisodesDirectly) return _hasLoadedEpisodes && !_isLoadingEpisodes;
+      if (_seasons.isEmpty) return true;
+      if (_selectedSeasonIndex < 0 || _selectedSeasonIndex >= _seasons.length) return false;
+      return !_isLoadingSeasonEpisodes && _episodeCache.containsKey(_seasons[_selectedSeasonIndex].id);
+    }
+
+    if (metadata.isSeason) {
+      return _hasLoadedEpisodes && !_isLoadingEpisodes;
+    }
+
+    return true;
+  }
+
+  bool _hasLoadedTvDetailSupplementalSections(MediaItem metadata) {
+    if (widget.isOffline || (!metadata.isMovie && !metadata.isShow)) return true;
+    return _hasLoadedExtras && _hasLoadedRelatedHubs;
+  }
+
+  void _scheduleTvDetailReveal(double railHeight, {required bool focusPrimaryAction}) {
+    final pendingRailHeight = _tvDetailPendingRailHeight;
+    if (pendingRailHeight == null || railHeight > pendingRailHeight) {
+      _tvDetailPendingRailHeight = railHeight;
+    }
+    if (_tvDetailRevealed || _tvDetailRevealScheduled) return;
+
+    _tvDetailRevealScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        setState(() {
+          _tvDetailStableRailHeight = _tvDetailPendingRailHeight ?? railHeight;
+          _tvDetailRevealScheduled = false;
+          _tvDetailRevealed = true;
+        });
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted) return;
+          if (focusPrimaryAction) {
+            _playButtonFocusNode.requestFocus();
+          } else {
+            _tvDetailRailKey.currentState?.requestFocus();
+          }
+        });
+      });
+    });
+  }
+
+  Widget _buildTvDetailRevealGate(Widget child, KeyEventResult Function(FocusNode, KeyEvent) handleBack) {
+    final revealed = _tvDetailRevealed;
+    return Focus(
+      canRequestFocus: !revealed,
+      onKeyEvent: revealed ? null : handleBack,
+      child: ExcludeFocus(
+        excluding: !revealed,
+        child: IgnorePointer(
+          ignoring: !revealed,
+          child: AnimatedOpacity(
+            opacity: revealed ? 1 : 0,
+            duration: const Duration(milliseconds: 160),
+            curve: Curves.easeOutCubic,
+            child: child,
+          ),
+        ),
+      ),
+    );
+  }
+
+  @override
   void dispose() {
+    routeObserver.unsubscribe(this);
     _scrollController.dispose();
     _scrollOffset.dispose();
     _extrasScrollController.dispose();
+    _extrasFocusNode.removeListener(_handleExtrasFocusChange);
     _extrasFocusNode.dispose();
     _playButtonFocusNode.dispose();
     _ratingChipFocusNode.dispose();
@@ -474,30 +841,32 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
     super.dispose();
   }
 
-  /// Build title text widget for clear logo fallback
-  Widget _buildTitleText(BuildContext context, String title) {
-    return Align(
-      alignment: Alignment.centerLeft,
-      child: Text(
-        title,
-        style: Theme.of(context).textTheme.displaySmall?.copyWith(
-          color: Colors.white,
-          fontWeight: FontWeight.bold,
-          shadows: [Shadow(color: Colors.black.withValues(alpha: 0.5), blurRadius: 8)],
-        ),
-        maxLines: 2,
-        overflow: TextOverflow.ellipsis,
-      ),
+  /// Build title text widget for clear logo fallback.
+  Widget _buildDetailTitle(
+    BuildContext context,
+    String title, {
+    double? fontSize,
+    FontWeight fontWeight = FontWeight.bold,
+    double shadowBlur = 8,
+  }) {
+    final baseStyle = (Theme.of(context).textTheme.displaySmall ?? const TextStyle()).copyWith(
+      color: Colors.white,
+      fontWeight: fontWeight,
+      fontSize: fontSize,
+      shadows: [Shadow(color: Colors.black.withValues(alpha: 0.5), blurRadius: shadowBlur)],
     );
+
+    return FittingTitleText(title, style: baseStyle);
   }
 
   /// Build radial progress indicator for download button
   /// If progressPercent is null or 0, shows indeterminate spinner
   Widget _buildRadialProgress(double? progressPercent) {
     final colorScheme = Theme.of(context).colorScheme;
+    final size = PlatformDetector.isTV() ? 26.0 : 20.0;
     return SizedBox(
-      width: 20,
-      height: 20,
+      width: size,
+      height: size,
       child: Stack(
         alignment: Alignment.center,
         children: [
@@ -523,15 +892,16 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
   /// Build a metadata chip with optional leading icon or widget
   Widget _buildMetadataChip(String text, {IconData? icon, Widget? leading}) {
     final colorScheme = Theme.of(context).colorScheme;
+    final isTv = PlatformDetector.isTV();
     final textWidget = Text(
       text,
-      style: TextStyle(color: colorScheme.onSecondaryContainer, fontSize: 13, fontWeight: FontWeight.w500),
+      style: TextStyle(color: colorScheme.onSecondaryContainer, fontSize: isTv ? 16 : 13, fontWeight: FontWeight.w600),
     );
 
     final hasLeading = leading != null || icon != null;
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      padding: EdgeInsets.symmetric(horizontal: isTv ? 14 : 12, vertical: isTv ? 8 : 6),
       decoration: BoxDecoration(
         color: colorScheme.secondaryContainer.withValues(alpha: 0.8),
         borderRadius: const BorderRadius.all(Radius.circular(100)),
@@ -543,8 +913,8 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
                 if (leading != null)
                   leading
                 else
-                  AppIcon(icon!, fill: 1, color: colorScheme.onSecondaryContainer, size: 16),
-                const SizedBox(width: 4),
+                  AppIcon(icon!, fill: 1, color: colorScheme.onSecondaryContainer, size: isTv ? 20 : 16),
+                SizedBox(width: isTv ? 6 : 4),
                 textWidget,
               ],
             )
@@ -617,9 +987,7 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
     return ListenableBuilder(
       listenable: _ratingChipFocusNode,
       builder: (context, _) {
-        final activate = isNumeric
-            ? () => _showRatingDialog(context, metadata, starValue)
-            : () => _toggleLike(metadata);
+        void activate() => _showRatingDialog(context, metadata);
         final colorScheme = Theme.of(context).colorScheme;
         final isKeyboardMode = InputModeTracker.isKeyboardMode(context);
         final showFocus = _ratingChipFocusNode.hasFocus && isKeyboardMode;
@@ -674,57 +1042,16 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
     );
   }
 
-  /// Like/unlike toggle for backends that only support binary ratings
-  /// (Jellyfin). Maps to [MediaServerClient.rate] with 10 (like) or -1
-  /// (clear) — the Jellyfin client routes those through POST/DELETE on
-  /// `/UserItems/{id}/Rating`.
-  Future<void> _toggleLike(MediaItem metadata) async {
-    final client = _getMediaClientForMetadata(context);
-    if (client == null) return;
-    final wasLiked = metadata.userRating != null && metadata.userRating! >= 6;
-    final newRating = wasLiked ? -1.0 : 10.0;
-    try {
-      await client.rate(metadata, newRating);
-      setStateIfMounted(() {
-        _fullMetadata = _fullMetadata?.copyWith(userRating: wasLiked ? 0 : 10);
-      });
-    } on MediaServerHttpException catch (e) {
-      appLogger.w('Failed to toggle rating', error: e);
-      if (mounted) showErrorSnackBar(context, t.errors.failedToRate);
-    }
-  }
-
-  void _showRatingDialog(BuildContext sheetContext, MediaItem metadata, double currentStarValue) {
+  void _showRatingDialog(BuildContext sheetContext, MediaItem metadata) {
     OverlaySheetController.showAdaptive(
       sheetContext,
       builder: (context) => RatingBottomSheet(
-        currentRating: currentStarValue,
-        onRate: (stars) async {
-          final client = _getMediaClientForMetadata(this.context);
-          if (client == null) return;
-          final plexRating = stars * 2.0; // Convert 0-5 stars to 0-10 scale
-          try {
-            await client.rate(metadata, plexRating);
-            setStateIfMounted(() {
-              _fullMetadata = _fullMetadata?.copyWith(userRating: plexRating);
-            });
-          } on MediaServerHttpException catch (e) {
-            appLogger.w('Failed to set rating', error: e);
-            if (mounted) showErrorSnackBar(this.context, t.errors.failedToRate);
-          }
-        },
-        onClear: () async {
-          final client = _getMediaClientForMetadata(this.context);
-          if (client == null) return;
-          try {
-            await client.rate(metadata, -1);
-            setStateIfMounted(() {
-              _fullMetadata = _fullMetadata?.copyWith(userRating: 0);
-            });
-          } on MediaServerHttpException catch (e) {
-            appLogger.w('Failed to clear rating', error: e);
-            if (mounted) showErrorSnackBar(this.context, t.errors.failedToRate);
-          }
+        item: metadata,
+        serverClient: _getMediaClientForMetadata(this.context),
+        onServerRatingChanged: (rating) {
+          setStateIfMounted(() {
+            _fullMetadata = (_fullMetadata ?? widget.metadata).copyWith(userRating: rating);
+          });
         },
       ),
     );
@@ -778,10 +1105,9 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
   }) {
     if (!widget.isOffline || _metadata.serverId == null) return null;
 
-    final downloadProvider = context.read<DownloadProvider>();
     for (final artworkPath in artworkPaths) {
-      final localPath = downloadProvider.getArtworkLocalPath(_metadata.serverId!, artworkPath);
-      if (localPath == null || !File(localPath).existsSync()) continue;
+      final localPath = _offlineArtworkLocalPath(context, artworkPath);
+      if (localPath == null) continue;
 
       return OptimizedMediaImage(
         client: null,
@@ -795,6 +1121,13 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
     }
 
     return null;
+  }
+
+  String? _offlineArtworkLocalPath(BuildContext context, String? artworkPath) {
+    if (!widget.isOffline || _metadata.serverId == null) return null;
+    final localPath = context.read<DownloadProvider>().getArtworkLocalPath(_metadata.serverId!, artworkPath);
+    if (localPath == null || !File(localPath).existsSync()) return null;
+    return localPath;
   }
 
   Widget _buildHeroNetworkArtwork(
@@ -949,6 +1282,8 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
   Future<void> _loadFullMetadata() async {
     setState(() {
       _isLoadingMetadata = true;
+      _hasLoadedExtras = false;
+      _hasLoadedRelatedHubs = false;
     });
 
     // Offline mode: try to load full metadata from cache (has clearLogo, summary, etc.)
@@ -961,6 +1296,8 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
       setState(() {
         _fullMetadata = _applyLocalProgress(cachedMetadata ?? _metadata);
         _isLoadingMetadata = false;
+        _hasLoadedExtras = true;
+        _hasLoadedRelatedHubs = true;
       });
 
       if (_metadata.isShow) {
@@ -987,6 +1324,10 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
         setState(() {
           _fullMetadata = _applyLocalProgress(_metadata);
           _isLoadingMetadata = false;
+          _hasLoadedSeasons = true;
+          _hasLoadedEpisodes = true;
+          _hasLoadedExtras = true;
+          _hasLoadedRelatedHubs = true;
         });
         return;
       }
@@ -1002,14 +1343,20 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
       final serverName = _metadata.serverName;
       final source = metadata ?? _metadata;
       final base = _applyLocalProgress(
-        source.copyWith(serverId: serverId ?? source.serverId, serverName: serverName ?? source.serverName),
+        _withFallbackLibrary(
+          source.copyWith(serverId: serverId ?? source.serverId, serverName: serverName ?? source.serverName),
+          _metadata,
+        ),
       );
       final onDeckWithServerId = onDeckEpisode == null
           ? null
           : _applyLocalProgress(
-              onDeckEpisode.copyWith(
-                serverId: serverId ?? onDeckEpisode.serverId,
-                serverName: serverName ?? onDeckEpisode.serverName,
+              _withFallbackLibrary(
+                onDeckEpisode.copyWith(
+                  serverId: serverId ?? onDeckEpisode.serverId,
+                  serverName: serverName ?? onDeckEpisode.serverName,
+                ),
+                base,
               ),
             );
 
@@ -1037,6 +1384,8 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
       setState(() {
         _fullMetadata = _applyLocalProgress(_metadata);
         _isLoadingMetadata = false;
+        _hasLoadedExtras = true;
+        _hasLoadedRelatedHubs = true;
       });
 
       if (_metadata.isShow) {
@@ -1053,12 +1402,16 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
     _seasonsCompleter = Completer<void>();
     setStateIfMounted(() {
       _isLoadingSeasons = true;
+      _hasLoadedSeasons = false;
     });
 
     final serverId = _metadata.serverId;
     final client = serverId == null ? null : context.tryGetMediaClientForServer(serverId);
     if (client == null) {
-      setStateIfMounted(() => _isLoadingSeasons = false);
+      setStateIfMounted(() {
+        _isLoadingSeasons = false;
+        _hasLoadedSeasons = true;
+      });
       if (!(_seasonsCompleter?.isCompleted ?? true)) _seasonsCompleter?.complete();
       return;
     }
@@ -1081,7 +1434,12 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
 
       // Preserve serverId for each season.
       final seasonsWithServerId = seasons
-          .map((season) => season.copyWith(serverId: serverId, serverName: _metadata.serverName ?? season.serverName))
+          .map(
+            (season) => _withFallbackLibrary(
+              season.copyWith(serverId: serverId, serverName: _metadata.serverName ?? season.serverName),
+              _metadata,
+            ),
+          )
           .toList();
 
       // Plex can override the library season mode per show; Jellyfin falls
@@ -1106,6 +1464,7 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
       setStateIfMounted(() {
         _seasons = seasonsWithServerId;
         _isLoadingSeasons = false;
+        _hasLoadedSeasons = true;
         _showEpisodesDirectly = shouldShowEpisodesDirectly;
         _selectedSeasonIndex = onDeckSeasonIndex;
       });
@@ -1113,13 +1472,19 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
       if (shouldShowEpisodesDirectly) {
         await _fetchAllEpisodes();
       } else if (seasonsWithServerId.isNotEmpty) {
-        // Fetch episodes for the auto-selected season
-        unawaited(_fetchSeasonEpisodes(onDeckSeasonIndex));
+        if (PlatformDetector.isTV()) {
+          await _fetchSeasonEpisodes(onDeckSeasonIndex);
+          unawaited(_warmTvSeasonEpisodeCaches(onDeckSeasonIndex));
+        } else {
+          // Fetch episodes for the auto-selected season
+          unawaited(_fetchSeasonEpisodes(onDeckSeasonIndex));
+        }
       }
     } catch (e, st) {
       appLogger.w('Seasons load failed', error: e, stackTrace: st);
       setStateIfMounted(() {
         _isLoadingSeasons = false;
+        _hasLoadedSeasons = true;
       });
     } finally {
       if (!(_seasonsCompleter?.isCompleted ?? true)) {
@@ -1148,8 +1513,23 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
     // Create synthetic season MediaItems from the grouped episodes.
     final seasons = seasonMap.entries.map((entry) {
       final firstEp = entry.value.first;
+      final seasonId = firstEp.parentId ?? '';
+      final seasonGlobalKey = _metadata.serverId == null || seasonId.isEmpty
+          ? null
+          : buildGlobalKey(_metadata.serverId!, seasonId);
+      final storedSeason = seasonGlobalKey == null ? null : downloadProvider.getMetadata(seasonGlobalKey);
+      if (storedSeason != null && storedSeason.isSeason) {
+        return _withFallbackLibrary(
+          storedSeason.copyWith(
+            serverId: _metadata.serverId,
+            serverName: _metadata.serverName ?? storedSeason.serverName,
+            leafCount: storedSeason.leafCount ?? entry.value.length,
+          ),
+          _metadata,
+        );
+      }
       return MediaItem(
-        id: firstEp.parentId ?? '',
+        id: seasonId,
         backend: _metadata.backend,
         kind: MediaKind.season,
         title: firstEp.parentTitle ?? 'Season ${entry.key}',
@@ -1157,6 +1537,8 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
         leafCount: entry.value.length,
         thumbPath: firstEp.parentThumbPath,
         parentId: firstEp.grandparentId,
+        libraryId: firstEp.libraryId ?? _metadata.libraryId,
+        libraryTitle: firstEp.libraryTitle ?? _metadata.libraryTitle,
         serverId: _metadata.serverId,
         serverName: _metadata.serverName,
       );
@@ -1174,6 +1556,7 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
     setState(() {
       _seasons = seasons;
       _isLoadingSeasons = false;
+      _hasLoadedSeasons = true;
       _selectedSeasonIndex = onDeckSeasonIndex;
     });
 
@@ -1197,6 +1580,7 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
     setState(() {
       _episodes = seasonEpisodes.map(_applyLocalProgress).toList();
       _isLoadingEpisodes = false;
+      _hasLoadedEpisodes = true;
     });
   }
 
@@ -1233,18 +1617,30 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
   Future<void> _fetchSeasonEpisodes(int seasonIndex) async {
     if (seasonIndex < 0 || seasonIndex >= _seasons.length) return;
     final season = _seasons[seasonIndex];
+    final seasonId = season.id;
 
     // Check cache first
-    final cached = _episodeCache[season.id];
+    final cached = _episodeCache[seasonId];
     if (cached != null) {
       setStateIfMounted(() {
-        _episodes = cached.map(_applyLocalProgress).toList();
-        _isLoadingSeasonEpisodes = false;
+        if (_isSelectedSeason(seasonIndex, seasonId)) {
+          _episodes = cached.map(_applyLocalProgress).toList();
+          _isLoadingSeasonEpisodes = false;
+        }
       });
       return;
     }
 
-    setStateIfMounted(() => _isLoadingSeasonEpisodes = true);
+    if (!_seasonEpisodeLoadsInFlight.add(seasonId)) {
+      setStateIfMounted(() {
+        if (_isSelectedSeason(seasonIndex, seasonId)) _isLoadingSeasonEpisodes = true;
+      });
+      return;
+    }
+
+    setStateIfMounted(() {
+      if (_isSelectedSeason(seasonIndex, seasonId)) _isLoadingSeasonEpisodes = true;
+    });
 
     try {
       if (widget.isOffline) {
@@ -1253,61 +1649,214 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
         final allEpisodes = downloadProvider.getDownloadedEpisodesForShow(_metadata.id);
         final seasonEpisodes = allEpisodes.where((ep) => ep.parentIndex == season.index).toList()
           ..sort((a, b) => (a.index ?? 0).compareTo(b.index ?? 0));
-        _episodeCache[season.id] = seasonEpisodes;
-        setStateIfMounted(() {
-          _episodes = seasonEpisodes.map(_applyLocalProgress).toList();
-          _isLoadingSeasonEpisodes = false;
-        });
+        _completeSeasonEpisodesLoad(
+          seasonIndex: seasonIndex,
+          seasonId: seasonId,
+          episodes: seasonEpisodes.map(_applyLocalProgress).toList(),
+        );
       } else {
         // Resolve the right backend client so Jellyfin (where the typed
         // PlexClient helper returns null) loads episodes too.
         final serverId = _metadata.serverId;
         final mediaClient = serverId == null ? null : context.tryGetMediaClientForServer(serverId);
         if (serverId == null || mediaClient == null) {
-          setStateIfMounted(() => _isLoadingSeasonEpisodes = false);
+          _completeSeasonEpisodesLoad(seasonIndex: seasonIndex, seasonId: seasonId, episodes: const <MediaItem>[]);
           return;
         }
         final episodes = await mediaClient.fetchChildren(season.id);
         final episodesWithServerId = episodes
             .map(
-              (e) => e.copyWith(
-                serverId: _metadata.serverId ?? e.serverId,
-                serverName: _metadata.serverName ?? e.serverName,
-                grandparentId: _metadata.id,
-                grandparentTitle: _metadata.title ?? e.grandparentTitle,
+              (e) => _withFallbackLibrary(
+                e.copyWith(
+                  serverId: _metadata.serverId ?? e.serverId,
+                  serverName: _metadata.serverName ?? e.serverName,
+                  grandparentId: _metadata.id,
+                  grandparentTitle: _metadata.title ?? e.grandparentTitle,
+                ),
+                season.libraryId != null ? season : _metadata,
               ),
             )
             .map(_applyLocalProgress)
             .toList();
-        _episodeCache[season.id] = episodesWithServerId;
-        setStateIfMounted(() {
-          _episodes = List.of(episodesWithServerId);
-          _isLoadingSeasonEpisodes = false;
-        });
+        _completeSeasonEpisodesLoad(seasonIndex: seasonIndex, seasonId: seasonId, episodes: episodesWithServerId);
       }
     } catch (e) {
-      setStateIfMounted(() => _isLoadingSeasonEpisodes = false);
+      _completeSeasonEpisodesLoad(seasonIndex: seasonIndex, seasonId: seasonId, episodes: const <MediaItem>[]);
+    } finally {
+      _seasonEpisodeLoadsInFlight.remove(seasonId);
     }
+  }
+
+  bool _isSelectedSeason(int seasonIndex, String seasonId) {
+    return _selectedSeasonIndex == seasonIndex &&
+        seasonIndex >= 0 &&
+        seasonIndex < _seasons.length &&
+        _seasons[seasonIndex].id == seasonId;
+  }
+
+  Future<void> _warmTvSeasonEpisodeCaches(int selectedSeasonIndex) async {
+    if (widget.isOffline || _showEpisodesDirectly || _seasons.isEmpty) return;
+    final generation = ++_tvSeasonEpisodeCacheWarmGeneration;
+    final seasons = List<MediaItem>.of(_seasons);
+    final seasonIdsToWarm = {
+      for (var i = 0; i < seasons.length; i++)
+        if (i != selectedSeasonIndex && !_episodeCache.containsKey(seasons[i].id)) seasons[i].id,
+    };
+    if (seasonIdsToWarm.isEmpty) return;
+
+    final serverId = _metadata.serverId;
+    final client = serverId == null ? null : context.tryGetMediaClientForServer(serverId);
+    if (serverId == null || client == null) return;
+
+    final seasonsById = {for (final season in seasons) season.id: season};
+    final seasonsByIndex = <int, MediaItem>{
+      for (final season in seasons)
+        if (season.index != null) season.index!: season,
+    };
+    final episodesBySeasonId = {
+      for (final season in seasons)
+        if (seasonIdsToWarm.contains(season.id)) season.id: <MediaItem>[],
+    };
+
+    try {
+      var offset = 0;
+      var total = 0;
+      do {
+        final page = await client.fetchPlayableDescendantsPage(_metadata.id, start: offset, size: _episodesPageSize);
+        if (!mounted || generation != _tvSeasonEpisodeCacheWarmGeneration) return;
+        if (page.items.isEmpty) break;
+
+        final enriched = _enrichPlayableEpisodes(page.items, serverId);
+        for (final episode in enriched) {
+          final seasonId = _seasonIdForEpisode(episode, seasonsById: seasonsById, seasonsByIndex: seasonsByIndex);
+          if (seasonId == null || !seasonIdsToWarm.contains(seasonId)) continue;
+          episodesBySeasonId[seasonId]?.add(episode);
+        }
+
+        offset += page.items.length;
+        total = page.totalCount;
+      } while (offset < total && total > 0);
+
+      _completeWarmedTvSeasonEpisodeCaches(seasons, episodesBySeasonId, generation);
+    } catch (e, st) {
+      appLogger.w('Failed to load TV season episode caches', error: e, stackTrace: st);
+      await _warmTvSeasonEpisodeCachesBySeason(seasons, seasonIdsToWarm, client, serverId, generation);
+    }
+  }
+
+  Future<void> _warmTvSeasonEpisodeCachesBySeason(
+    List<MediaItem> seasons,
+    Set<String> seasonIdsToWarm,
+    MediaServerClient client,
+    String serverId,
+    int generation,
+  ) async {
+    final episodesBySeasonId = <String, List<MediaItem>>{};
+
+    for (final season in seasons) {
+      if (!seasonIdsToWarm.contains(season.id) || _episodeCache.containsKey(season.id)) continue;
+      if (!mounted || generation != _tvSeasonEpisodeCacheWarmGeneration) return;
+      try {
+        final episodes = await client.fetchChildren(season.id);
+        if (!mounted || generation != _tvSeasonEpisodeCacheWarmGeneration) return;
+        episodesBySeasonId[season.id] = episodes
+            .map(
+              (episode) => _withFallbackLibrary(
+                episode.copyWith(
+                  serverId: serverId,
+                  serverName: _metadata.serverName ?? episode.serverName,
+                  grandparentId: _metadata.id,
+                  grandparentTitle: _metadata.title ?? episode.grandparentTitle,
+                  parentId: season.id,
+                  parentIndex: season.index ?? episode.parentIndex,
+                ),
+                season.libraryId != null ? season : _metadata,
+              ),
+            )
+            .map(_applyLocalProgress)
+            .toList();
+      } catch (e, st) {
+        appLogger.w('Failed to load TV season episodes for ${season.id}', error: e, stackTrace: st);
+        episodesBySeasonId[season.id] = const <MediaItem>[];
+      }
+    }
+
+    _completeWarmedTvSeasonEpisodeCaches(seasons, episodesBySeasonId, generation);
+  }
+
+  String? _seasonIdForEpisode(
+    MediaItem episode, {
+    required Map<String, MediaItem> seasonsById,
+    required Map<int, MediaItem> seasonsByIndex,
+  }) {
+    final parentId = episode.parentId;
+    if (parentId != null && seasonsById.containsKey(parentId)) return parentId;
+
+    final parentIndex = episode.parentIndex;
+    if (parentIndex != null) return seasonsByIndex[parentIndex]?.id;
+
+    return null;
+  }
+
+  void _completeWarmedTvSeasonEpisodeCaches(
+    List<MediaItem> seasons,
+    Map<String, List<MediaItem>> episodesBySeasonId,
+    int generation,
+  ) {
+    if (!mounted || generation != _tvSeasonEpisodeCacheWarmGeneration) return;
+    final currentSeasonIds = _seasons.map((season) => season.id).toSet();
+    setStateIfMounted(() {
+      for (final season in seasons) {
+        if (!currentSeasonIds.contains(season.id) || _episodeCache.containsKey(season.id)) continue;
+        _episodeCache[season.id] = List.of(episodesBySeasonId[season.id] ?? const <MediaItem>[]);
+      }
+    });
+  }
+
+  void _completeSeasonEpisodesLoad({
+    required int seasonIndex,
+    required String seasonId,
+    required List<MediaItem> episodes,
+  }) {
+    setStateIfMounted(() {
+      _episodeCache[seasonId] = episodes;
+      if (_isSelectedSeason(seasonIndex, seasonId)) {
+        _episodes = List.of(episodes);
+        _isLoadingSeasonEpisodes = false;
+      }
+    });
   }
 
   /// Load extras (trailers, behind-the-scenes, etc.). Plex-only — Jellyfin
   /// has no equivalent of `fetchExtras`.
   Future<void> _loadExtras() async {
+    void markLoaded() {
+      setStateIfMounted(() {
+        _hasLoadedExtras = true;
+      });
+    }
+
     // Only load extras for movies and shows
     if (!_metadata.isMovie && !_metadata.isShow) {
+      markLoaded();
       return;
     }
 
     // Skip in offline mode (no server available)
     if (widget.isOffline) {
+      markLoaded();
       return;
     }
 
-    if (_metadata.backend != MediaBackend.plex) return;
+    if (_metadata.backend != MediaBackend.plex) {
+      markLoaded();
+      return;
+    }
 
     try {
       final client = getServerBoundPlexClient(context);
       if (client == null) {
+        markLoaded();
         return;
       }
 
@@ -1325,9 +1874,11 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
 
       setStateIfMounted(() {
         _extras = extrasWithServerId;
+        _hasLoadedExtras = true;
       });
     } catch (e) {
       // Silently fail - extras section won't appear if fetch fails
+      markLoaded();
     }
   }
 
@@ -1335,17 +1886,28 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
   /// Backend-neutral — both Plex and Jellyfin implement
   /// [MediaServerClient.fetchRelatedHubs].
   Future<void> _loadRelatedHubs() async {
+    void markLoaded() {
+      setStateIfMounted(() {
+        _hasLoadedRelatedHubs = true;
+      });
+    }
+
     if (!_metadata.isMovie && !_metadata.isShow) {
+      markLoaded();
       return;
     }
 
     if (widget.isOffline) {
+      markLoaded();
       return;
     }
 
     final serverId = _metadata.serverId;
     final client = serverId == null ? null : context.tryGetMediaClientForServer(serverId);
-    if (client == null) return;
+    if (client == null) {
+      markLoaded();
+      return;
+    }
 
     try {
       final relatedHubs = await client.fetchRelatedHubs(_metadata.id);
@@ -1353,9 +1915,11 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
       setStateIfMounted(() {
         _relatedHubs = relatedHubs;
         _relatedHubKeys = List.generate(relatedHubs.length, (_) => GlobalKey<HubSectionState>());
+        _hasLoadedRelatedHubs = true;
       });
     } catch (e) {
       // Silently fail - related sections won't appear if fetch fails
+      markLoaded();
     }
   }
 
@@ -1366,7 +1930,7 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
     if (metadata.isShow && !_showEpisodesDirectly && _seasons.isNotEmpty && _seasonTabFocusNodes.isNotEmpty) {
       _seasonTabFocusNodes[_selectedSeasonIndex].requestFocus();
       _scrollSectionIntoView(_seasonsSectionKey);
-    } else if (metadata.summary != null && metadata.summary!.isNotEmpty) {
+    } else if (!PlatformDetector.isTV() && metadata.summary != null && metadata.summary!.isNotEmpty) {
       _overviewFocusNode.requestFocus();
       _scrollSectionIntoView(_overviewSectionKey);
     } else {
@@ -1418,6 +1982,11 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
   KeyEventResult _handlePlayButtonKeyEvent(FocusNode _, KeyEvent event) {
     final key = event.logicalKey;
     if (!event.isActionable) return KeyEventResult.ignored;
+    final isTv = PlatformDetector.isTV();
+
+    if (isTv && key.isUpKey) {
+      return KeyEventResult.handled;
+    }
 
     // UP: focus the rating chip if available
     if (key.isUpKey) {
@@ -1432,8 +2001,13 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
 
     final metadata = _fullMetadata ?? _metadata;
 
+    if (isTv) {
+      _tvDetailRailKey.currentState?.requestFocus();
+      return KeyEventResult.handled;
+    }
+
     // DOWN order: overview → seasons → cast → extras
-    if (metadata.summary != null && metadata.summary!.isNotEmpty) {
+    if (!PlatformDetector.isTV() && metadata.summary != null && metadata.summary!.isNotEmpty) {
       _overviewFocusNode.requestFocus();
       _scrollSectionIntoView(_overviewSectionKey);
       return KeyEventResult.handled;
@@ -1552,6 +2126,8 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
   }
 
   Widget _buildSeasonTabsContent(BuildContext context, bool showPosters) {
+    final showSeasonPosters = showPosters && !PlatformDetector.isTV();
+
     return HorizontalScrollWithArrows(
       controller: _seasonTabsScrollController,
       builder: (scrollController) => SingleChildScrollView(
@@ -1564,35 +2140,50 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
             Offset? tapPosition;
             final posterPath = season.thumbPath;
             Widget? topImage;
-            if (showPosters && posterPath != null && posterPath.isNotEmpty) {
+            if (showSeasonPosters && posterPath != null && posterPath.isNotEmpty) {
               const posterWidth = 72.0;
               const posterHeight = 108.0;
-              final dpr = MediaImageHelper.effectiveDevicePixelRatio(context);
-              final client = _getMediaClientForMetadata(context);
-              final imageUrl = MediaImageHelper.getOptimizedImageUrl(
-                client: client,
-                thumbPath: posterPath,
-                maxWidth: posterWidth,
-                maxHeight: posterHeight,
-                devicePixelRatio: dpr,
+              final localArtwork = _buildOfflineArtworkIfAvailable(
+                context,
+                artworkPaths: [posterPath],
+                fit: BoxFit.cover,
                 imageType: ImageType.poster,
-              );
-              final (memWidth, _) = MediaImageHelper.getMemCacheDimensions(
-                displayWidth: (posterWidth * dpr).round(),
-                displayHeight: (posterHeight * dpr).round(),
-                imageType: ImageType.poster,
+                errorWidget: (context, url, error) => const PlaceholderContainer(),
               );
               topImage = SizedBox(
                 width: posterWidth,
                 height: posterHeight,
-                child: CachedNetworkImage(
-                  imageUrl: imageUrl,
-                  cacheManager: PlexImageCacheManager.instance,
-                  fit: BoxFit.cover,
-                  memCacheWidth: memWidth,
-                  placeholder: (context, url) => const PlaceholderContainer(),
-                  errorBuilder: (context, error, stackTrace) => const PlaceholderContainer(),
-                ),
+                child:
+                    localArtwork ??
+                    (widget.isOffline
+                        ? const PlaceholderContainer()
+                        : Builder(
+                            builder: (context) {
+                              final dpr = MediaImageHelper.effectiveDevicePixelRatio(context);
+                              final client = _getMediaClientForMetadata(context);
+                              final imageUrl = MediaImageHelper.getOptimizedImageUrl(
+                                client: client,
+                                thumbPath: posterPath,
+                                maxWidth: posterWidth,
+                                maxHeight: posterHeight,
+                                devicePixelRatio: dpr,
+                                imageType: ImageType.poster,
+                              );
+                              final (memWidth, _) = MediaImageHelper.getMemCacheDimensions(
+                                displayWidth: (posterWidth * dpr).round(),
+                                displayHeight: (posterHeight * dpr).round(),
+                                imageType: ImageType.poster,
+                              );
+                              return CachedNetworkImage(
+                                imageUrl: imageUrl,
+                                cacheManager: PlexImageCacheManager.instance,
+                                fit: BoxFit.cover,
+                                memCacheWidth: memWidth,
+                                placeholder: (context, url) => const PlaceholderContainer(),
+                                errorBuilder: (context, error, stackTrace) => const PlaceholderContainer(),
+                              );
+                            },
+                          )),
               );
             }
             return Padding(
@@ -1600,8 +2191,9 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
               child: MediaContextMenu(
                 key: contextMenuKey,
                 item: season,
-                onRefresh: (_) {
+                onRefresh: (itemId) {
                   _watchStateChanged = true;
+                  unawaited(_refreshItemInPlace(itemId));
                 },
                 onListRefresh: () {
                   if (widget.isOffline) {
@@ -1644,6 +2236,10 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
                           }
                         : null,
                     onNavigateDown: () {
+                      if (PlatformDetector.isTV()) {
+                        _tvDetailRailKey.currentState?.requestFocus();
+                        return;
+                      }
                       _firstEpisodeFocusNode.requestFocus();
                     },
                     onLongPress: () => _showSeasonTabContextMenu(index),
@@ -1744,6 +2340,16 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
     }
 
     return KeyEventResult.ignored;
+  }
+
+  void _handleExtrasFocusChange() {
+    if (!_extrasFocusNode.hasFocus) _resetExtrasLongPressState();
+  }
+
+  void _resetExtrasLongPressState() {
+    _selectKeyTimer?.cancel();
+    _isSelectKeyDown = false;
+    _longPressTriggered = false;
   }
 
   /// Handle key events for the cast row (locked focus pattern)
@@ -1888,8 +2494,14 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
       padding: EdgeInsets.zero,
-      itemCount: _episodes.length,
+      itemCount: _episodes.length + (_isLoadingAllEpisodes ? 1 : 0),
       itemBuilder: (context, index) {
+        if (index == _episodes.length) {
+          return const Padding(
+            padding: EdgeInsets.all(24),
+            child: Center(child: CircularProgressIndicator()),
+          );
+        }
         final episode = _episodes[index];
         String? localPosterPath;
         if (widget.isOffline && episode.serverId != null) {
@@ -1910,7 +2522,7 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
               ? () {
                   if (!_showEpisodesDirectly) {
                     _focusSelectedSeasonTab();
-                  } else if ((_fullMetadata ?? _metadata).summary?.isNotEmpty == true) {
+                  } else if (!PlatformDetector.isTV() && (_fullMetadata ?? _metadata).summary?.isNotEmpty == true) {
                     _overviewFocusNode.requestFocus();
                     _scrollSectionIntoView(_overviewSectionKey);
                   } else {
@@ -1937,21 +2549,7 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
               },
             );
           },
-          onRefresh: widget.isOffline
-              ? null
-              : (ratingKey) async {
-                  final refreshed = await client?.fetchItem(ratingKey);
-                  if (refreshed != null) {
-                    setStateIfMounted(() {
-                      final i = _episodes.indexWhere((e) => e.id == ratingKey);
-                      if (i != -1) {
-                        final updated = _applyLocalProgress(refreshed);
-                        _episodes[i] = updated;
-                        _syncEpisodeToCache(i, updated);
-                      }
-                    });
-                  }
-                },
+          onRefresh: widget.isOffline ? null : _refreshItemInPlace,
           onListRefresh: widget.isOffline ? null : _refreshCurrentEpisodes,
         );
       },
@@ -1982,42 +2580,114 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
   }
 
   Future<void> _fetchAllEpisodes() async {
-    if (_seasons.isEmpty) return;
+    final generation = ++_episodesLoadGeneration;
+    if (_seasons.isEmpty) {
+      setStateIfMounted(() {
+        _isLoadingEpisodes = false;
+        _isLoadingAllEpisodes = false;
+        _hasLoadedEpisodes = true;
+      });
+      return;
+    }
     final serverId = _metadata.serverId;
-    if (serverId == null) return;
+    if (serverId == null) {
+      setStateIfMounted(() {
+        _isLoadingEpisodes = false;
+        _isLoadingAllEpisodes = false;
+        _hasLoadedEpisodes = true;
+      });
+      return;
+    }
     final client = context.tryGetMediaClientForServer(serverId);
-    if (client == null) return;
-    setStateIfMounted(() => _isLoadingEpisodes = true);
+    if (client == null) {
+      setStateIfMounted(() {
+        _isLoadingEpisodes = false;
+        _isLoadingAllEpisodes = false;
+        _hasLoadedEpisodes = true;
+      });
+      return;
+    }
+    setStateIfMounted(() {
+      _isLoadingEpisodes = true;
+      _isLoadingAllEpisodes = false;
+      _hasLoadedEpisodes = false;
+    });
     try {
-      // One-shot recursive expansion — Plex `/grandchildren`, Jellyfin
-      // Recursive=true. Replaces the previous per-season fan-out so a
-      // many-season show flatten doesn't fan out N parallel HTTP calls.
-      // Enrich each episode with serverId/serverName/grandparent fields —
-      // Jellyfin's recursive query doesn't always populate them, and the
-      // copy is a no-op for Plex where the mapper already does.
-      final episodes = await client.fetchPlayableDescendants(_metadata.id);
-      final fallbackGrandparentId = _metadata.isSeason ? (_metadata.grandparentId ?? _metadata.parentId) : _metadata.id;
-      final fallbackGrandparentTitle = _metadata.isSeason
-          ? (_metadata.grandparentTitle ?? _metadata.parentTitle)
-          : _metadata.title;
-      final enriched = episodes
-          .map(
-            (e) => e.copyWith(
+      final firstPage = await client.fetchPlayableDescendantsPage(_metadata.id, start: 0, size: _episodesPageSize);
+      if (!mounted || generation != _episodesLoadGeneration) return;
+      final enriched = _enrichPlayableEpisodes(firstPage.items, serverId);
+      setStateIfMounted(() {
+        _episodes = enriched;
+        _isLoadingEpisodes = false;
+        _isLoadingAllEpisodes = firstPage.items.length < firstPage.totalCount;
+        _hasLoadedEpisodes = true;
+      });
+      if (firstPage.items.length < firstPage.totalCount) {
+        unawaited(_fetchRemainingEpisodes(client, serverId, generation, firstPage.items.length, firstPage.totalCount));
+      }
+    } catch (e, st) {
+      appLogger.w('Failed to load episodes for all seasons', error: e, stackTrace: st);
+      setStateIfMounted(() {
+        _isLoadingEpisodes = false;
+        _isLoadingAllEpisodes = false;
+        _hasLoadedEpisodes = true;
+      });
+    }
+  }
+
+  List<MediaItem> _enrichPlayableEpisodes(List<MediaItem> episodes, String serverId) {
+    // Enrich each episode with serverId/serverName/grandparent fields —
+    // Jellyfin's recursive query doesn't always populate them, and the copy is
+    // a no-op for Plex where the mapper already does.
+    final fallbackGrandparentId = _metadata.isSeason ? (_metadata.grandparentId ?? _metadata.parentId) : _metadata.id;
+    final fallbackGrandparentTitle = _metadata.isSeason
+        ? (_metadata.grandparentTitle ?? _metadata.parentTitle)
+        : _metadata.title;
+    return episodes
+        .map(
+          (e) => _withFallbackLibrary(
+            e.copyWith(
               serverId: serverId,
               serverName: _metadata.serverName ?? e.serverName,
               grandparentId: e.grandparentId ?? fallbackGrandparentId,
               grandparentTitle: e.grandparentTitle ?? fallbackGrandparentTitle,
             ),
-          )
-          .map(_applyLocalProgress)
-          .toList();
-      setStateIfMounted(() {
-        _episodes = enriched;
-        _isLoadingEpisodes = false;
-      });
+            _metadata,
+          ),
+        )
+        .map(_applyLocalProgress)
+        .toList();
+  }
+
+  Future<void> _fetchRemainingEpisodes(
+    MediaServerClient client,
+    String serverId,
+    int generation,
+    int startOffset,
+    int totalCount,
+  ) async {
+    var offset = startOffset;
+    var total = totalCount;
+    try {
+      while (offset < total) {
+        final page = await client.fetchPlayableDescendantsPage(_metadata.id, start: offset, size: _episodesPageSize);
+        if (!mounted || generation != _episodesLoadGeneration) return;
+        if (page.items.isEmpty) break;
+        final enriched = _enrichPlayableEpisodes(page.items, serverId);
+        setStateIfMounted(() {
+          _episodes.addAll(enriched);
+        });
+        offset += page.items.length;
+        total = page.totalCount;
+      }
     } catch (e, st) {
-      appLogger.w('Failed to load episodes for all seasons', error: e, stackTrace: st);
-      setStateIfMounted(() => _isLoadingEpisodes = false);
+      appLogger.w('Failed to finish loading all episodes', error: e, stackTrace: st);
+    } finally {
+      if (mounted && generation == _episodesLoadGeneration) {
+        setStateIfMounted(() {
+          _isLoadingAllEpisodes = false;
+        });
+      }
     }
   }
 
@@ -2092,6 +2762,8 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
       final episodeWithServerId = firstEpisode.copyWith(
         serverId: _metadata.serverId ?? firstEpisode.serverId,
         serverName: _metadata.serverName ?? firstEpisode.serverName,
+        libraryId: firstEpisode.libraryId ?? _metadata.libraryId,
+        libraryTitle: firstEpisode.libraryTitle ?? _metadata.libraryTitle,
       );
       if (mounted) {
         appLogger.d('Playing first episode: ${episodeWithServerId.title}');
@@ -2135,14 +2807,15 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
     final isMobile = PlatformDetector.isMobile(context);
     final isTv = PlatformDetector.isTV();
     final theme = Theme.of(context);
-
-    KeyEventResult handleBack(FocusNode _, KeyEvent event) =>
-        handleBackKeyNavigation(context, event, result: _watchStateChanged);
+    final sectionTitleStyle = theme.textTheme.titleLarge?.copyWith(
+      fontWeight: FontWeight.bold,
+      fontSize: isTv ? 28 : null,
+    );
 
     // Show loading state while fetching full metadata
     if (_isLoadingMetadata) {
       final loading = Focus(
-        onKeyEvent: handleBack,
+        onKeyEvent: _handleMediaDetailBackKey,
         child: Scaffold(
           appBar: AppBar(),
           body: const Center(child: CircularProgressIndicator()),
@@ -2162,223 +2835,220 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
 
     // Determine header height based on screen size
     final size = MediaQuery.sizeOf(context);
-    final headerHeight = size.height * 0.6;
+    final headerHeight = size.height * (isTv ? 1.0 : 0.6);
 
-    final content = OverlaySheetHost(
-      child: Focus(
-        onKeyEvent: handleBack,
-        child: Scaffold(
-          body: Stack(
-            children: [
-              CustomScrollView(
-                controller: _scrollController,
-                slivers: [
-                  // Hero header with background art
-                  SliverToBoxAdapter(child: _buildHeroHeader(context, metadata, size, headerHeight, theme)),
+    if (isTv) {
+      return _buildTvDetailScreen(context, metadata, _handleMediaDetailBackKey);
+    }
 
-                  // Main content
-                  SliverToBoxAdapter(
-                    child: Padding(
-                      padding: const EdgeInsets.all(16),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          // Summary
-                          if (metadata.summary != null && metadata.summary!.isNotEmpty) ...[
-                            Text(
-                              key: _overviewSectionKey,
-                              t.discover.overview,
-                              style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
-                            ),
-                            const SizedBox(height: 12),
-                            Focus(
-                              focusNode: _overviewFocusNode,
-                              onKeyEvent: _handleOverviewKeyEvent,
-                              child: ListenableBuilder(
-                                listenable: _overviewFocusNode,
-                                builder: (context, _) {
-                                  final showFocus =
-                                      _overviewFocusNode.hasFocus && InputModeTracker.isKeyboardMode(context);
-                                  return AnimatedContainer(
-                                    duration: const Duration(milliseconds: 150),
-                                    padding: const EdgeInsets.all(4),
-                                    decoration: BoxDecoration(
-                                      borderRadius: const BorderRadius.all(Radius.circular(8)),
-                                      border: Border.all(
-                                        color: showFocus
-                                            ? theme.colorScheme.primary.withValues(alpha: 0.5)
-                                            : Colors.transparent,
-                                        width: 2,
-                                      ),
-                                    ),
-                                    child: () {
-                                      final summaryStyle = theme.textTheme.bodyLarge?.copyWith(height: 1.6);
-                                      if (isTv) {
-                                        return Text(metadata.summary!, style: summaryStyle);
-                                      }
-                                      return CollapsibleText(
-                                        text: metadata.summary!,
-                                        maxLines: isMobile ? 6 : 4,
-                                        style: summaryStyle,
+    final content = PrimaryScrollController(
+      controller: _scrollController,
+      child: IosStatusBarTapScrollToTop(
+        controller: _scrollController,
+        child: OverlaySheetHost(
+          child: Focus(
+            onKeyEvent: _handleMediaDetailBackKey,
+            child: Scaffold(
+              body: Stack(
+                children: [
+                  CustomScrollView(
+                    primary: true,
+                    slivers: [
+                      // Hero header with background art
+                      SliverToBoxAdapter(child: _buildHeroHeader(context, metadata, size, headerHeight)),
+
+                      // Main content
+                      SliverToBoxAdapter(
+                        child: Padding(
+                          padding: EdgeInsets.symmetric(
+                            horizontal: isTv ? TvLayoutConstants.horizontalInset : 16,
+                            vertical: isTv ? 8 : 16,
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              // Summary
+                              if (!isTv && metadata.summary != null && metadata.summary!.isNotEmpty) ...[
+                                Text(key: _overviewSectionKey, t.discover.overview, style: sectionTitleStyle),
+                                const SizedBox(height: 12),
+                                Focus(
+                                  focusNode: _overviewFocusNode,
+                                  onKeyEvent: _handleOverviewKeyEvent,
+                                  child: ListenableBuilder(
+                                    listenable: _overviewFocusNode,
+                                    builder: (context, _) {
+                                      final showFocus =
+                                          _overviewFocusNode.hasFocus && InputModeTracker.isKeyboardMode(context);
+                                      return AnimatedContainer(
+                                        duration: const Duration(milliseconds: 150),
+                                        padding: const EdgeInsets.all(4),
+                                        decoration: BoxDecoration(
+                                          borderRadius: const BorderRadius.all(Radius.circular(8)),
+                                          border: Border.all(
+                                            color: showFocus
+                                                ? theme.colorScheme.primary.withValues(alpha: 0.5)
+                                                : Colors.transparent,
+                                            width: 2,
+                                          ),
+                                        ),
+                                        child: () {
+                                          final summaryStyle = theme.textTheme.bodyLarge?.copyWith(height: 1.6);
+                                          if (isTv) {
+                                            return Text(metadata.summary!, style: summaryStyle);
+                                          }
+                                          return CollapsibleText(
+                                            text: metadata.summary!,
+                                            maxLines: isMobile ? 6 : 4,
+                                            style: summaryStyle,
+                                          );
+                                        }(),
                                       );
-                                    }(),
-                                  );
-                                },
-                              ),
-                            ),
-                            const SizedBox(height: 24),
-                          ],
+                                    },
+                                  ),
+                                ),
+                                const SizedBox(height: 24),
+                              ],
 
-                          // Seasons / Episodes (for TV shows and seasons)
-                          if (isShow && !_showEpisodesDirectly) ...[
-                            // Season tabs + inline episodes
-                            if (_isLoadingSeasons)
-                              _sectionLoading
-                            else if (_seasons.isEmpty)
-                              _sectionEmpty(context, t.messages.noSeasonsFound)
-                            else ...[
-                              Text(
-                                key: _seasonsSectionKey,
-                                t.libraries.groupings.episodes,
-                                style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
-                              ),
-                              const SizedBox(height: 12),
-                              _buildSeasonTabs(),
-                              const SizedBox(height: 16),
-                              if (_isLoadingSeasonEpisodes)
-                                _sectionLoading
-                              else if (_episodes.isNotEmpty)
-                                _buildEpisodesList()
-                              else
-                                _sectionEmpty(context, t.messages.noEpisodesFoundGeneral),
-                            ],
-                            const SizedBox(height: 24),
-                          ] else if ((isShow && _showEpisodesDirectly) || metadata.isSeason) ...[
-                            // Server says flatten — existing behavior unchanged
-                            Text(
-                              key: _seasonsSectionKey,
-                              t.libraries.groupings.episodes,
-                              style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
-                            ),
-                            const SizedBox(height: 12),
-                            if (_isLoadingSeasons || _isLoadingEpisodes)
-                              _sectionLoading
-                            else if (_episodes.isNotEmpty)
-                              _buildEpisodesList()
-                            else
-                              _sectionEmpty(context, t.messages.noEpisodesFoundGeneral),
-                            const SizedBox(height: 24),
-                          ],
-
-                          // Cast
-                          if (metadata.roles != null && metadata.roles!.isNotEmpty) ...[
-                            Text(
-                              key: _castSectionKey,
-                              t.discover.cast,
-                              style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
-                            ),
-                            const SizedBox(height: 12),
-                            _buildCastSection(metadata),
-                            const SizedBox(height: 24),
-                          ],
-
-                          // Trailers & Extras Section
-                          if (!widget.isOffline && _extras != null && _extras!.isNotEmpty) ...[
-                            Text(
-                              key: _extrasSectionKey,
-                              t.discover.extras,
-                              style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
-                            ),
-                            const SizedBox(height: 12),
-                            _buildExtrasSection(),
-                            const SizedBox(height: 24),
-                          ],
-
-                          // Related Hubs (Collections, Similar, More From...)
-                          for (int i = 0; i < _relatedHubs.length; i++) ...[
-                            HubSection(
-                              key: _relatedHubKeys[i],
-                              hub: _relatedHubs[i],
-                              icon: _getRelatedHubIcon(_relatedHubs[i]),
-                              inset: true,
-                              onVerticalNavigation: (isUp) => _handleRelatedHubNavigation(i, isUp),
-                            ),
-                            const SizedBox(height: 8),
-                          ],
-
-                          // Additional info — wrapped in Focus so DPAD DOWN from the
-                          // last focusable section lands here and scrolls it into view.
-                          if (_hasInfoRows)
-                            Focus(
-                              focusNode: _infoRowsFocusNode,
-                              onKeyEvent: _handleInfoRowsKeyEvent,
-                              child: Column(
-                                key: _infoRowsSectionKey,
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  if (metadata.studio != null) ...[
-                                    _buildInfoRow(t.discover.studio, metadata.studio!),
-                                    const SizedBox(height: 12),
-                                  ],
-                                  if (metadata.contentRating != null) ...[
-                                    _buildInfoRow(t.discover.rating, formatContentRating(metadata.contentRating!)),
-                                    const SizedBox(height: 12),
-                                  ],
+                              // Seasons / Episodes (for TV shows and seasons)
+                              if (isShow && !_showEpisodesDirectly) ...[
+                                // Season tabs + inline episodes
+                                if (_isLoadingSeasons)
+                                  _sectionLoading
+                                else if (_seasons.isEmpty)
+                                  _sectionEmpty(context, t.messages.noSeasonsFound)
+                                else ...[
+                                  Text(
+                                    key: _seasonsSectionKey,
+                                    t.libraries.groupings.episodes,
+                                    style: sectionTitleStyle,
+                                  ),
+                                  const SizedBox(height: 12),
+                                  _buildSeasonTabs(),
+                                  const SizedBox(height: 16),
+                                  if (_isLoadingSeasonEpisodes)
+                                    _sectionLoading
+                                  else if (_episodes.isNotEmpty)
+                                    _buildEpisodesList()
+                                  else
+                                    _sectionEmpty(context, t.messages.noEpisodesFoundGeneral),
                                 ],
-                              ),
-                            ),
-                        ],
+                                const SizedBox(height: 24),
+                              ] else if ((isShow && _showEpisodesDirectly) || metadata.isSeason) ...[
+                                // Server says flatten — existing behavior unchanged
+                                Text(key: _seasonsSectionKey, t.libraries.groupings.episodes, style: sectionTitleStyle),
+                                const SizedBox(height: 12),
+                                if (_isLoadingSeasons || _isLoadingEpisodes)
+                                  _sectionLoading
+                                else if (_episodes.isNotEmpty)
+                                  _buildEpisodesList()
+                                else
+                                  _sectionEmpty(context, t.messages.noEpisodesFoundGeneral),
+                                const SizedBox(height: 24),
+                              ],
+
+                              // Cast
+                              if (metadata.roles != null && metadata.roles!.isNotEmpty) ...[
+                                Text(key: _castSectionKey, t.discover.cast, style: sectionTitleStyle),
+                                const SizedBox(height: 12),
+                                _buildCastSection(metadata),
+                                const SizedBox(height: 24),
+                              ],
+
+                              // Trailers & Extras Section
+                              if (!widget.isOffline && _extras != null && _extras!.isNotEmpty) ...[
+                                Text(key: _extrasSectionKey, t.discover.extras, style: sectionTitleStyle),
+                                const SizedBox(height: 12),
+                                _buildExtrasSection(),
+                                const SizedBox(height: 24),
+                              ],
+
+                              // Related Hubs (Collections, Similar, More From...)
+                              for (int i = 0; i < _relatedHubs.length; i++) ...[
+                                HubSection(
+                                  key: _relatedHubKeys[i],
+                                  hub: _relatedHubs[i],
+                                  icon: _getRelatedHubIcon(_relatedHubs[i]),
+                                  inset: true,
+                                  onVerticalNavigation: (isUp) => _handleRelatedHubNavigation(i, isUp),
+                                ),
+                                SizedBox(height: isTv ? 28 : 8),
+                              ],
+
+                              // Additional info — wrapped in Focus so DPAD DOWN from the
+                              // last focusable section lands here and scrolls it into view.
+                              if (_hasInfoRows)
+                                Focus(
+                                  focusNode: _infoRowsFocusNode,
+                                  onKeyEvent: _handleInfoRowsKeyEvent,
+                                  child: Column(
+                                    key: _infoRowsSectionKey,
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      if (metadata.studio != null) ...[
+                                        _buildInfoRow(t.discover.studio, metadata.studio!),
+                                        const SizedBox(height: 12),
+                                      ],
+                                      if (metadata.contentRating != null) ...[
+                                        _buildInfoRow(t.discover.rating, formatContentRating(metadata.contentRating!)),
+                                        const SizedBox(height: 12),
+                                      ],
+                                    ],
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      SliverPadding(padding: EdgeInsets.only(bottom: MediaQuery.paddingOf(context).bottom)),
+                    ],
+                  ),
+                  // Sticky top bar with fading background
+                  Positioned(
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    child: ValueListenableBuilder<double>(
+                      valueListenable: _scrollOffset,
+                      builder: (context, offset, child) => IgnorePointer(
+                        ignoring: offset < 50,
+                        child: AnimatedOpacity(
+                          opacity: (offset / 100).clamp(0.0, 1.0),
+                          duration: const Duration(milliseconds: 150),
+                          child: child!,
+                        ),
+                      ),
+                      child: Container(
+                        height: MediaQuery.paddingOf(context).top + 58,
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: Alignment.topCenter,
+                            end: Alignment.bottomCenter,
+                            colors: [
+                              theme.scaffoldBackgroundColor.withValues(alpha: 0.8),
+                              theme.scaffoldBackgroundColor.withValues(alpha: 0.5),
+                              theme.scaffoldBackgroundColor.withValues(alpha: 0),
+                            ],
+                            stops: const [0.0, 0.3, 1.0],
+                          ),
+                        ),
                       ),
                     ),
                   ),
-                  SliverPadding(padding: EdgeInsets.only(bottom: MediaQuery.paddingOf(context).bottom)),
+                  // Back button (always visible)
+                  Positioned(
+                    top: 0,
+                    left: 0,
+                    child: DesktopAppBarHelper.buildAdjustedLeading(
+                      AppBarBackButton(
+                        style: BackButtonStyle.circular,
+                        onPressed: () => Navigator.pop(context, _watchStateChanged),
+                      ),
+                      context: context,
+                    )!,
+                  ),
                 ],
               ),
-              // Sticky top bar with fading background
-              Positioned(
-                top: 0,
-                left: 0,
-                right: 0,
-                child: ValueListenableBuilder<double>(
-                  valueListenable: _scrollOffset,
-                  builder: (context, offset, child) => IgnorePointer(
-                    ignoring: offset < 50,
-                    child: AnimatedOpacity(
-                      opacity: (offset / 100).clamp(0.0, 1.0),
-                      duration: const Duration(milliseconds: 150),
-                      child: child!,
-                    ),
-                  ),
-                  child: Container(
-                    height: MediaQuery.paddingOf(context).top + 58,
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                        colors: [
-                          theme.scaffoldBackgroundColor.withValues(alpha: 0.8),
-                          theme.scaffoldBackgroundColor.withValues(alpha: 0.5),
-                          theme.scaffoldBackgroundColor.withValues(alpha: 0),
-                        ],
-                        stops: const [0.0, 0.3, 1.0],
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-              // Back button (always visible)
-              Positioned(
-                top: 0,
-                left: 0,
-                child: DesktopAppBarHelper.buildAdjustedLeading(
-                  AppBarBackButton(
-                    style: BackButtonStyle.circular,
-                    onPressed: () => Navigator.pop(context, _watchStateChanged),
-                  ),
-                  context: context,
-                )!,
-              ),
-            ],
+            ),
           ),
         ),
       ),
@@ -2397,7 +3067,565 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
     );
   }
 
-  Widget _buildHeroHeader(BuildContext context, MediaItem metadata, Size size, double headerHeight, ThemeData theme) {
+  Widget _buildTvDetailScreen(
+    BuildContext context,
+    MediaItem metadata,
+    KeyEventResult Function(FocusNode, KeyEvent) handleBack,
+  ) {
+    final size = MediaQuery.sizeOf(context);
+    final detailHubs = _tvDetailHubs(metadata);
+    final hideSpoilers = SettingsService.instanceOrNull!.read(SettingsService.hideSpoilers);
+    final detailScale = TvLayoutConstants.scaleForSize(size);
+    final spotlightTop = (size.height * 0.08).clamp(44.0 * detailScale, 110.0 * detailScale).toDouble();
+    final rawRailHeight = _estimateTvDetailRailHeight(size, detailHubs);
+    if (!_tvDetailRevealed && _isTvDetailReadyToReveal(metadata)) {
+      _scheduleTvDetailReveal(rawRailHeight, focusPrimaryAction: metadata.isMovie);
+    }
+    final stableRailHeight = _tvDetailStableRailHeight;
+    final railHeight = stableRailHeight == null || rawRailHeight > stableRailHeight ? rawRailHeight : stableRailHeight;
+    final railTopPadding = 12 * detailScale;
+    final foregroundBottom = (railHeight - railTopPadding) + (_tvDetailActionRailGap * detailScale);
+    final spotlightLeft = (24 * detailScale).clamp(18.0, 40.0).toDouble();
+
+    final revealContent = Stack(
+      fit: StackFit.expand,
+      children: [
+        Positioned(
+          left: spotlightLeft,
+          right: size.width * 0.43,
+          top: spotlightTop,
+          bottom: foregroundBottom,
+          child: _buildTvDetailForeground(context, metadata, hideSpoilers: hideSpoilers, scale: detailScale),
+        ),
+        Positioned(
+          top: 0,
+          left: 0,
+          child: DesktopAppBarHelper.buildAdjustedLeading(
+            AppBarBackButton(
+              style: BackButtonStyle.circular,
+              onPressed: () => Navigator.pop(context, _watchStateChanged),
+            ),
+            context: context,
+          )!,
+        ),
+        if (detailHubs.isNotEmpty)
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 0,
+            child: TvBrowseRail(
+              key: _tvDetailRailKey,
+              hubs: detailHubs,
+              iconForHub: _getTvDetailHubIcon,
+              onFocusedHubItemChanged: _handleTvDetailFocusedRailItemChanged,
+              onRefresh: (itemId) => unawaited(_refreshItemInPlace(itemId)),
+              onActiveHubChanged: _handleTvDetailHubChanged,
+              onActivateItem: _handleTvDetailRailItemActivated,
+              onNavigateUp: _focusTvDetailActionRow,
+              onBack: _popMediaDetailIfBackNotSuppressed,
+              tallPosterScale: _tvDetailTallPosterScale,
+              widePosterScaleForHub: _tvDetailWidePosterScaleForHub,
+              initialHubId: _tvDetailInitialHubId(metadata),
+              initialItemId: _tvDetailInitialItemId(metadata),
+              episodePosterModeForHub: _tvDetailEpisodePosterModeForHub,
+            ),
+          ),
+      ],
+    );
+
+    final content = OverlaySheetHost(
+      child: Focus(
+        onKeyEvent: handleBack,
+        child: Scaffold(
+          body: Stack(
+            children: [
+              TvSpotlightBackground(
+                item: metadata,
+                client: _getArtworkMediaClient(context),
+                showInfo: false,
+                localArtworkPathResolver: widget.isOffline ? (path) => _offlineArtworkLocalPath(context, path) : null,
+              ),
+              _buildTvDetailRevealGate(revealContent, handleBack),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    final blockSystemBack = Platform.isAndroid && InputModeTracker.isKeyboardMode(context);
+    if (!blockSystemBack) return content;
+    return PopScope(
+      canPop: false,
+      // ignore: no-empty-block - required callback, blocks system back on Android TV
+      onPopInvokedWithResult: (didPop, result) {},
+      child: content,
+    );
+  }
+
+  Widget _buildTvDetailForeground(
+    BuildContext context,
+    MediaItem metadata, {
+    required bool hideSpoilers,
+    required double scale,
+  }) {
+    final theme = Theme.of(context);
+    final description = _tvDetailDescription(metadata, hideSpoilers: hideSpoilers);
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        if (constraints.maxHeight <= 0 || constraints.maxWidth <= 0) return const SizedBox.shrink();
+
+        final availableHeight = constraints.maxHeight.isFinite ? constraints.maxHeight : 264.0;
+        final desiredLogoHeight = 220 * scale;
+        final minLogoHeight = 72 * scale;
+        final desiredLogoWidth = 790 * scale;
+        final metadataLineHeight = 22 * scale;
+        final logoMetadataGap = 10 * scale;
+        final summaryGap = 10 * scale;
+        final summaryFontSize = availableHeight < 260 * scale ? 16.2 * scale : 18 * scale;
+        final summaryLineHeight = summaryFontSize * 1.35;
+        final actionHeight = _tvDetailActionSize * scale;
+        final actionGap = 12 * scale;
+        final hasDescription = description != null && description.isNotEmpty;
+        var summaryMaxLines = 0;
+        var logoHeight = 0.0;
+
+        for (var lines = hasDescription ? 3 : 0; lines >= 0; lines--) {
+          final descriptionHeight = lines > 0 ? summaryGap + (summaryLineHeight * lines) : 0.0;
+          final reservedHeight = logoMetadataGap + metadataLineHeight + descriptionHeight + actionGap + actionHeight;
+          final remainingForLogo = availableHeight - reservedHeight;
+          if (remainingForLogo >= minLogoHeight || lines == 0) {
+            summaryMaxLines = lines;
+            logoHeight = remainingForLogo <= 0 ? 0 : remainingForLogo.clamp(0, desiredLogoHeight).toDouble();
+            break;
+          }
+        }
+
+        final showLogo = logoHeight > 0;
+        final descriptionHeight = summaryMaxLines > 0 ? summaryGap + (summaryLineHeight * summaryMaxLines) : 0.0;
+        final contentHeight =
+            (showLogo ? logoHeight + logoMetadataGap : 0) +
+            metadataLineHeight +
+            descriptionHeight +
+            actionGap +
+            actionHeight;
+        final logoWidth = desiredLogoWidth < constraints.maxWidth ? desiredLogoWidth : constraints.maxWidth;
+
+        return ClipRect(
+          child: SizedBox(
+            height: availableHeight,
+            child: Align(
+              alignment: Alignment.bottomLeft,
+              child: SizedBox(
+                height: contentHeight <= availableHeight ? contentHeight : availableHeight,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (showLogo) ...[
+                      _buildDetailLogoOrTitle(
+                        context,
+                        metadata,
+                        width: logoWidth,
+                        height: logoHeight,
+                        titleBuilder: (context, title) => _buildDetailTitle(
+                          context,
+                          title,
+                          fontSize: 56 * scale,
+                          fontWeight: FontWeight.w800,
+                          shadowBlur: 12,
+                        ),
+                      ),
+                      SizedBox(height: logoMetadataGap),
+                    ],
+                    SizedBox(
+                      height: metadataLineHeight,
+                      child: Align(
+                        alignment: Alignment.centerLeft,
+                        child: _buildTvDetailMetadataLine(context, metadata, scale),
+                      ),
+                    ),
+                    if (hasDescription && summaryMaxLines > 0) ...[
+                      SizedBox(height: summaryGap),
+                      SizedBox(
+                        height: summaryLineHeight * summaryMaxLines,
+                        child: Text(
+                          description,
+                          maxLines: summaryMaxLines,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.bodyLarge?.copyWith(
+                            color: Colors.white.withValues(alpha: 0.78),
+                            fontSize: summaryFontSize,
+                            height: 1.35,
+                          ),
+                        ),
+                      ),
+                    ],
+                    SizedBox(height: actionGap),
+                    SizedBox(height: actionHeight, child: _buildActionButtons(metadata)),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildDetailLogoOrTitle(
+    BuildContext context,
+    MediaItem metadata, {
+    required double width,
+    required double height,
+    required Widget Function(BuildContext context, String title) titleBuilder,
+  }) {
+    Widget titleFallback(BuildContext context) => titleBuilder(context, metadata.displayTitle);
+
+    if (metadata.clearLogoPath == null) {
+      return SizedBox(width: width, height: height, child: titleFallback(context));
+    }
+
+    return SizedBox(
+      width: width,
+      height: height,
+      child: Builder(
+        builder: (context) {
+          final localArtwork = _buildOfflineArtworkIfAvailable(
+            context,
+            artworkPaths: [metadata.clearLogoPath],
+            fit: BoxFit.contain,
+            alignment: Alignment.centerLeft,
+            imageType: ImageType.logo,
+            errorWidget: (context, url, error) => titleFallback(context),
+          );
+          if (localArtwork != null) return localArtwork;
+
+          final client = _getArtworkMediaClient(context);
+          final dpr = MediaImageHelper.effectiveDevicePixelRatio(context);
+          final logoUrl = MediaImageHelper.getOptimizedImageUrl(
+            client: client,
+            thumbPath: metadata.clearLogoPath,
+            maxWidth: width,
+            maxHeight: height,
+            devicePixelRatio: dpr,
+            imageType: ImageType.logo,
+          );
+
+          if (logoUrl.isEmpty) return titleFallback(context);
+
+          return blurArtwork(
+            CachedNetworkImage(
+              imageUrl: logoUrl,
+              cacheManager: PlexImageCacheManager.instance,
+              filterQuality: FilterQuality.medium,
+              fit: BoxFit.contain,
+              alignment: Alignment.centerLeft,
+              memCacheWidth: (width * dpr).clamp(200, 1000).round(),
+              placeholder: (context, url) => const SizedBox.shrink(),
+              errorBuilder: (context, error, stackTrace) => titleFallback(context),
+            ),
+            sigma: 10,
+            clip: false,
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildTvDetailMetadataLine(BuildContext context, MediaItem metadata, double scale) {
+    final lineMetadata = _tvDetailFocusedEpisode ?? metadata;
+    final episodeLabel = formatSeasonEpisodeLabel(lineMetadata.parentIndex, lineMetadata.index);
+    final parts = [
+      if (lineMetadata.isEpisode && episodeLabel != null) episodeLabel,
+      if (lineMetadata.isMovie) t.discover.movie else if (lineMetadata.isShow) t.discover.tvShow,
+      if (lineMetadata.rating != null) '★ ${formatRating(lineMetadata.rating!)}',
+      if (lineMetadata.contentRating != null) formatContentRating(lineMetadata.contentRating!),
+      if (lineMetadata.durationMs != null) formatDurationTextual(lineMetadata.durationMs!),
+      if (lineMetadata.isEpisode && lineMetadata.originallyAvailableAt != null)
+        formatFullDate(lineMetadata.originallyAvailableAt!)
+      else if (lineMetadata.year != null)
+        lineMetadata.year.toString(),
+    ];
+
+    return Text(
+      parts.join('  •  '),
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      style: TextStyle(color: Colors.white, fontSize: 18 * scale, fontWeight: FontWeight.w700, letterSpacing: 0.1),
+    );
+  }
+
+  String? _tvDetailDescription(MediaItem metadata, {required bool hideSpoilers}) {
+    final focusedEpisode = _tvDetailFocusedEpisode;
+    if (focusedEpisode == null) return _tvDetailItemDescription(metadata, hideSpoilers: hideSpoilers);
+
+    final episodeDescription = _tvDetailItemDescription(
+      focusedEpisode,
+      hideSpoilers: hideSpoilers,
+      showSpoilerFallback: false,
+    );
+    if (episodeDescription != null) return episodeDescription;
+
+    final season = _tvDetailSeasonForEpisode(focusedEpisode, metadata);
+    final seasonDescription = season == null ? null : _tvDetailItemDescription(season, hideSpoilers: hideSpoilers);
+    if (seasonDescription != null) return seasonDescription;
+
+    final showDescription = _tvDetailItemDescription(metadata, hideSpoilers: hideSpoilers);
+    if (showDescription != null) return showDescription;
+
+    if (hideSpoilers && focusedEpisode.shouldHideSpoiler) return focusedEpisode.title;
+    return null;
+  }
+
+  String? _tvDetailItemDescription(MediaItem item, {required bool hideSpoilers, bool showSpoilerFallback = true}) {
+    final shouldHideSpoiler = hideSpoilers && item.shouldHideSpoiler;
+    final summary = shouldHideSpoiler ? null : item.summary;
+    if (summary != null && summary.isNotEmpty) return summary;
+    if (showSpoilerFallback && shouldHideSpoiler && item.isEpisode) return item.title;
+    return null;
+  }
+
+  MediaItem? _tvDetailSeasonForEpisode(MediaItem episode, MediaItem metadata) {
+    for (final season in _seasons) {
+      if (episode.parentId != null && season.id == episode.parentId) return season;
+      if (episode.parentIndex != null && season.index == episode.parentIndex) return season;
+    }
+    if (metadata.isSeason &&
+        ((episode.parentId != null && metadata.id == episode.parentId) ||
+            (episode.parentIndex != null && metadata.index == episode.parentIndex))) {
+      return metadata;
+    }
+    return null;
+  }
+
+  double _estimateTvBrowseRailHeight(Size size, List<MediaHub> hubs) {
+    final svc = SettingsService.instanceOrNull!;
+    return TvBrowseRailLayout.estimateHeight(
+      size: size,
+      hubs: hubs,
+      density: svc.read(SettingsService.libraryDensity),
+      episodePosterMode: svc.read(SettingsService.episodePosterMode),
+      episodePosterModeForHub: _tvDetailEpisodePosterModeForHub,
+      widePosterScaleForHub: _tvDetailWidePosterScaleForHub,
+      tallPosterScale: _tvDetailTallPosterScale,
+    );
+  }
+
+  double _estimateTvDetailRailHeight(Size size, List<MediaHub> hubs) {
+    final hubRailHeight = _estimateTvBrowseRailHeight(size, hubs);
+    if (hubRailHeight > 0) return hubRailHeight;
+    return _estimateTvDetailEmptyRailReserveHeight(size);
+  }
+
+  double _estimateTvDetailEmptyRailReserveHeight(Size size) {
+    final svc = SettingsService.instanceOrNull!;
+    final scale = TvBrowseRailLayout.scaleForSize(size);
+    final availableWidth = size.width - TvBrowseRailLayout.horizontalInsetForScale(scale);
+    if (availableWidth <= 0) return 0;
+
+    final metrics = TvBrowseRailLayout.metricsForHub(
+      hub: MediaHub(
+        id: 'detail_empty_rail_reserve',
+        title: '',
+        type: 'movie',
+        items: [MediaItem(id: 'detail_empty_rail_reserve_item', backend: _metadata.backend, kind: MediaKind.movie)],
+      ),
+      availableWidth: availableWidth,
+      density: svc.read(SettingsService.libraryDensity),
+      episodePosterMode: svc.read(SettingsService.episodePosterMode),
+      scale: scale,
+      tallPosterScale: _tvDetailTallPosterScale,
+      widePosterScale: 1.0,
+    );
+    final sectionHeight = TvBrowseRailLayout.hubSectionHeightFor(scale: scale, activeRailHeight: metrics.height);
+    return TvBrowseRailLayout.railTopPaddingForScale(scale) +
+        TvBrowseRailLayout.viewportHeightFor(hubCount: 1, scale: scale, sectionHeight: sectionHeight) +
+        TvBrowseRailLayout.railBottomPaddingForScale(scale);
+  }
+
+  bool _isTvDetailEpisodeHub(MediaHub hub) {
+    return hub.id.startsWith(_tvDetailSeasonHubIdPrefix) || hub.id == 'detail_episodes';
+  }
+
+  EpisodePosterMode _tvDetailEpisodePosterModeForHub(MediaHub hub) {
+    if (_isTvDetailEpisodeHub(hub)) return EpisodePosterMode.episodeThumbnail;
+    return SettingsService.instanceOrNull!.read(SettingsService.episodePosterMode);
+  }
+
+  double _tvDetailWidePosterScaleForHub(MediaHub hub) {
+    return _isTvDetailEpisodeHub(hub) ? _tvDetailEpisodeThumbnailScale : 1.0;
+  }
+
+  List<MediaHub> _tvDetailHubs(MediaItem metadata) {
+    final hubs = <MediaHub>[];
+    if (metadata.isShow && !_showEpisodesDirectly && _seasons.isNotEmpty) {
+      for (var i = 0; i < _seasons.length; i++) {
+        final season = _seasons[i];
+        final cachedEpisodes = _episodeCache[season.id];
+        if (cachedEpisodes == null) continue;
+        final episodes = i == _selectedSeasonIndex ? _episodes : cachedEpisodes;
+        hubs.add(
+          MediaHub(
+            id: '$_tvDetailSeasonHubIdPrefix$i',
+            title: season.title?.isNotEmpty == true ? season.title! : (season.displaySubtitle ?? season.displayTitle),
+            type: 'episode',
+            items: episodes,
+            size: episodes.length,
+          ),
+        );
+      }
+    } else if (_episodes.isNotEmpty) {
+      hubs.add(
+        MediaHub(
+          id: 'detail_episodes',
+          title: t.libraries.groupings.episodes,
+          type: 'episode',
+          items: _episodes,
+          size: _episodes.length,
+        ),
+      );
+    }
+    final actors = _tvDetailActorItems(metadata);
+    if (actors.isNotEmpty) {
+      hubs.add(
+        MediaHub(id: _tvDetailActorsHubId, title: t.discover.cast, type: 'person', items: actors, size: actors.length),
+      );
+    }
+    if (_extras != null && _extras!.isNotEmpty) {
+      hubs.add(
+        MediaHub(id: 'detail_extras', title: t.discover.extras, type: 'clip', items: _extras!, size: _extras!.length),
+      );
+    }
+    hubs.addAll(_relatedHubs.where((hub) => hub.items.isNotEmpty));
+    return hubs;
+  }
+
+  String? _tvDetailInitialHubId(MediaItem metadata) {
+    if (metadata.isShow && !_showEpisodesDirectly && _seasons.isNotEmpty) {
+      return '$_tvDetailSeasonHubIdPrefix$_selectedSeasonIndex';
+    }
+    if ((metadata.isShow && _showEpisodesDirectly) || metadata.isSeason) {
+      return 'detail_episodes';
+    }
+    return null;
+  }
+
+  String? _tvDetailInitialItemId(MediaItem metadata) {
+    if (!metadata.isShow) return null;
+    return _onDeckEpisode?.id;
+  }
+
+  List<MediaItem> _tvDetailActorItems(MediaItem metadata) {
+    final roles = metadata.roles;
+    if (roles == null || roles.isEmpty) return const [];
+
+    return [
+      for (var i = 0; i < roles.length; i++)
+        if (roles[i].tag.trim().isNotEmpty) _tvDetailActorItem(metadata, roles[i], i),
+    ];
+  }
+
+  MediaItem _tvDetailActorItem(MediaItem metadata, MediaRole actor, int index) {
+    final personId = actor.id?.trim();
+    return MediaItem(
+      id: personId != null && personId.isNotEmpty ? '${metadata.id}_actor_$personId' : '${metadata.id}_actor_$index',
+      backend: metadata.backend,
+      kind: MediaKind.unknown,
+      title: actor.tag,
+      parentTitle: actor.role,
+      thumbPath: actor.thumbPath,
+      serverId: metadata.serverId,
+      serverName: metadata.serverName,
+      raw: {if (personId != null && personId.isNotEmpty) _tvDetailActorPersonIdRawKey: personId},
+    );
+  }
+
+  bool _handleTvDetailRailItemActivated(MediaHub hub, MediaItem item) {
+    if (hub.id != _tvDetailActorsHubId) return false;
+    final personId = item.raw?[_tvDetailActorPersonIdRawKey];
+    if (personId is String && personId.isNotEmpty) {
+      _navigateToActorMedia(
+        MediaRole(id: personId, tag: item.displayTitle, role: item.parentTitle, thumbPath: item.thumbPath),
+      );
+    }
+    return true;
+  }
+
+  void _clearTvDetailFocusedEpisode() {
+    if (_tvDetailFocusedEpisode == null) return;
+    setStateIfMounted(() {
+      _tvDetailFocusedEpisode = null;
+    });
+  }
+
+  void _setTvDetailActionRowFocus(bool hasFocus) {
+    _tvDetailActionRowHasFocus = hasFocus;
+    if (hasFocus) _clearTvDetailFocusedEpisode();
+  }
+
+  void _focusTvDetailActionRow() {
+    _tvDetailActionRowHasFocus = true;
+    _clearTvDetailFocusedEpisode();
+    _playButtonFocusNode.requestFocus();
+  }
+
+  void _handleTvDetailFocusedRailItemChanged(MediaHub hub, MediaItem item) {
+    if (_tvDetailActionRowHasFocus) {
+      _clearTvDetailFocusedEpisode();
+      return;
+    }
+    if (!_isTvDetailEpisodeHub(hub) || !item.isEpisode) {
+      _clearTvDetailFocusedEpisode();
+      return;
+    }
+    if (_tvDetailFocusedEpisode?.id == item.id) return;
+    setStateIfMounted(() {
+      _tvDetailFocusedEpisode = item;
+    });
+  }
+
+  void _handleTvDetailHubChanged(MediaHub hub, int index) {
+    if (!_isTvDetailEpisodeHub(hub)) {
+      _clearTvDetailFocusedEpisode();
+      return;
+    }
+    if (hub.items.isEmpty) _clearTvDetailFocusedEpisode();
+    if (!hub.id.startsWith(_tvDetailSeasonHubIdPrefix)) return;
+    final seasonIndex = int.tryParse(hub.id.substring(_tvDetailSeasonHubIdPrefix.length));
+    if (seasonIndex == null || seasonIndex < 0 || seasonIndex >= _seasons.length) return;
+    final season = _seasons[seasonIndex];
+    final cached = _episodeCache[season.id];
+    if (_selectedSeasonIndex == seasonIndex && (cached != null || _episodes.isNotEmpty || _isLoadingSeasonEpisodes)) {
+      return;
+    }
+
+    if (cached != null) {
+      setStateIfMounted(() {
+        _selectedSeasonIndex = seasonIndex;
+        _episodes = cached.map(_applyLocalProgress).toList();
+        _isLoadingSeasonEpisodes = false;
+      });
+      return;
+    }
+
+    setStateIfMounted(() {
+      _selectedSeasonIndex = seasonIndex;
+      _episodes = const <MediaItem>[];
+      _isLoadingSeasonEpisodes = true;
+    });
+    unawaited(_fetchSeasonEpisodes(seasonIndex));
+  }
+
+  IconData _getTvDetailHubIcon(MediaHub hub, int index) {
+    if (hub.id.startsWith(_tvDetailSeasonHubIdPrefix)) return Symbols.tv_rounded;
+    if (hub.id == 'detail_episodes') return Symbols.tv_rounded;
+    if (hub.id == 'detail_extras') return Symbols.theaters_rounded;
+    if (hub.id == _tvDetailActorsHubId) return Symbols.group_rounded;
+    return _getRelatedHubIcon(hub);
+  }
+
+  Widget _buildHeroHeader(BuildContext context, MediaItem metadata, Size size, double headerHeight) {
     return Stack(
       children: [
         // Background Art (fixed height, no parallax)
@@ -2424,7 +3652,7 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
               final dpr = MediaImageHelper.effectiveDevicePixelRatio(context);
               final (_, memHeight) = MediaImageHelper.getMemCacheDimensions(
                 displayWidth: (mqSize.width * dpr).round(),
-                displayHeight: (mqSize.height * 0.6 * dpr).round(),
+                displayHeight: (headerHeight * dpr).round(),
                 imageType: ImageType.art,
               );
 
@@ -2467,97 +3695,109 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
 
         // Content at bottom
         Positioned(
+          top: 0,
           bottom: 16,
           left: 0,
           right: 0,
           child: SafeArea(
+            top: false,
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  // Clear logo or title
-                  if (metadata.clearLogoPath != null)
-                    SizedBox(
-                      height: 120,
-                      width: 400,
-                      child: Builder(
-                        builder: (context) {
-                          final localArtwork = _buildOfflineArtworkIfAvailable(
-                            context,
-                            artworkPaths: [metadata.clearLogoPath],
-                            fit: BoxFit.contain,
-                            alignment: Alignment.centerLeft,
-                            imageType: ImageType.logo,
-                            errorWidget: (context, url, error) => _buildTitleText(context, metadata.displayTitle),
-                          );
-                          if (localArtwork != null) return localArtwork;
-
-                          final client = _getArtworkMediaClient(context);
-                          final dpr = MediaImageHelper.effectiveDevicePixelRatio(context);
-                          final logoUrl = MediaImageHelper.getOptimizedImageUrl(
-                            client: client,
-                            thumbPath: metadata.clearLogoPath,
-                            maxWidth: 400,
-                            maxHeight: 120,
-                            devicePixelRatio: dpr,
-                            imageType: ImageType.logo,
-                          );
-
-                          return blurArtwork(
-                            CachedNetworkImage(
-                              imageUrl: logoUrl,
-                              cacheManager: PlexImageCacheManager.instance,
-                              filterQuality: FilterQuality.medium,
-                              fit: BoxFit.contain,
-                              alignment: Alignment.centerLeft,
-                              memCacheWidth: (400 * dpr).clamp(200, 800).round(),
-                              placeholder: (context, url) => const SizedBox.shrink(),
-                              errorBuilder: (context, error, stackTrace) =>
-                                  _buildTitleText(context, metadata.displayTitle),
-                            ),
-                            sigma: 10,
-                            clip: false,
-                          );
-                        },
-                      ),
-                    )
-                  else
-                    Text(
-                      metadata.displayTitle,
-                      style: theme.textTheme.displaySmall?.copyWith(
-                        color: Colors.white,
-                        fontWeight: FontWeight.bold,
-                        shadows: [Shadow(color: Colors.black.withValues(alpha: 0.5), blurRadius: 8)],
-                      ),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  const SizedBox(height: 12),
-
-                  // Metadata chips
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: [
-                      if (metadata.year != null) _buildMetadataChip('${metadata.year}'),
-                      if (metadata case PlexMediaItem(:final editionTitle?)) _buildMetadataChip(editionTitle),
-                      if (metadata.contentRating != null)
-                        _buildMetadataChip(formatContentRating(metadata.contentRating!)),
-                      if (metadata.durationMs != null) _buildMetadataChip(formatDurationTextual(metadata.durationMs!)),
-                      ..._buildRatingChips(metadata),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-                  // Action buttons
-                  _buildActionButtons(metadata),
-                ],
-              ),
+              child: _buildHeroHeaderContent(context, metadata),
             ),
           ),
         ),
       ],
+    );
+  }
+
+  Widget _buildHeroHeaderContent(BuildContext context, MediaItem metadata) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        if (constraints.maxHeight <= 0 || constraints.maxWidth <= 0) return const SizedBox.shrink();
+
+        final availableHeight = constraints.maxHeight.isFinite ? constraints.maxHeight : 264.0;
+        const desiredLogoHeight = 120.0;
+        const desiredLogoWidth = 400.0;
+        const actionHeight = 48.0;
+        final chips = <Widget>[
+          if (metadata.year != null) _buildMetadataChip('${metadata.year}'),
+          if (metadata case PlexMediaItem(:final editionTitle?)) _buildMetadataChip(editionTitle),
+          if (metadata.contentRating != null) _buildMetadataChip(formatContentRating(metadata.contentRating!)),
+          if (metadata.durationMs != null) _buildMetadataChip(formatDurationTextual(metadata.durationMs!)),
+          ..._buildRatingChips(metadata),
+        ];
+
+        final showActions = availableHeight >= actionHeight;
+        final remainingAfterActions = availableHeight - (showActions ? actionHeight : 0);
+        final showChips = chips.isNotEmpty && remainingAfterActions >= 88;
+        final chipHeight = showChips ? (remainingAfterActions >= 170 ? 68.0 : 32.0) : 0.0;
+        final chipActionGap = showChips && showActions ? (availableHeight < 180 ? 8.0 : 16.0) : 0.0;
+        final remainingForLogo = remainingAfterActions - chipHeight - chipActionGap;
+        final logoGap = remainingForLogo >= 52 && (showChips || showActions)
+            ? (availableHeight < 180 ? 8.0 : 12.0)
+            : 0.0;
+        final logoHeight = (remainingForLogo - logoGap).clamp(0.0, desiredLogoHeight).toDouble();
+        final showLogo = logoHeight >= 24;
+        final effectiveLogoGap = showLogo ? logoGap : 0.0;
+        final logoWidth = desiredLogoWidth.clamp(0.0, constraints.maxWidth).toDouble();
+        final titleFontSize = (logoHeight * 0.38).clamp(24.0, 40.0).toDouble();
+        final contentHeight =
+            (showLogo ? logoHeight + effectiveLogoGap : 0.0) +
+            chipHeight +
+            chipActionGap +
+            (showActions ? actionHeight : 0.0);
+
+        return ClipRect(
+          child: SizedBox(
+            height: availableHeight,
+            child: Align(
+              alignment: Alignment.bottomLeft,
+              child: SizedBox(
+                height: contentHeight.clamp(0.0, availableHeight).toDouble(),
+                child: Align(
+                  alignment: Alignment.bottomLeft,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (showLogo) ...[
+                        _buildDetailLogoOrTitle(
+                          context,
+                          metadata,
+                          width: logoWidth,
+                          height: logoHeight,
+                          titleBuilder: (context, title) => _buildDetailTitle(
+                            context,
+                            title,
+                            fontSize: titleFontSize,
+                            fontWeight: FontWeight.bold,
+                            shadowBlur: 8,
+                          ),
+                        ),
+                        if (effectiveLogoGap > 0) SizedBox(height: effectiveLogoGap),
+                      ],
+                      if (showChips)
+                        ClipRect(
+                          child: ConstrainedBox(
+                            constraints: BoxConstraints(maxHeight: chipHeight),
+                            child: Align(
+                              alignment: Alignment.bottomLeft,
+                              heightFactor: 1,
+                              child: Wrap(spacing: 8, runSpacing: 8, children: chips),
+                            ),
+                          ),
+                        ),
+                      if (chipActionGap > 0) SizedBox(height: chipActionGap),
+                      if (showActions) SizedBox(height: actionHeight, child: _buildActionButtons(metadata)),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+      },
     );
   }
 

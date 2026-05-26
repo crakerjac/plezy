@@ -8,6 +8,7 @@ part of 'fribb_mapping_row.dart';
 
 FribbMappingRow _$FribbMappingRowFromJson(Map<String, dynamic> json) =>
     FribbMappingRow(
+      anidbId: flexibleInt(json['anidb_id']),
       anilistId: flexibleInt(json['anilist_id']),
       imdbId: json['imdb_id'] as String?,
       malId: flexibleInt(json['mal_id']),

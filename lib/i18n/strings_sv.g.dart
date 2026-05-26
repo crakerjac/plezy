@@ -49,6 +49,7 @@ class TranslationsSv extends Translations with BaseTranslations<AppLocale, Trans
 	@override late final _TranslationsHotkeysSv hotkeys = _TranslationsHotkeysSv._(_root);
 	@override late final _TranslationsFileInfoSv fileInfo = _TranslationsFileInfoSv._(_root);
 	@override late final _TranslationsMediaMenuSv mediaMenu = _TranslationsMediaMenuSv._(_root);
+	@override late final _TranslationsRateSheetSv rateSheet = _TranslationsRateSheetSv._(_root);
 	@override late final _TranslationsAccessibilitySv accessibility = _TranslationsAccessibilitySv._(_root);
 	@override late final _TranslationsTooltipsSv tooltips = _TranslationsTooltipsSv._(_root);
 	@override late final _TranslationsVideoControlsSv videoControls = _TranslationsVideoControlsSv._(_root);
@@ -375,6 +376,12 @@ class _TranslationsSettingsSv extends TranslationsSettingsEn {
 	@override String get displaySwitchDelay => 'Fördröjning vid skärmbyte';
 	@override String get tunneledPlayback => 'Tunneluppspelning';
 	@override String get tunneledPlaybackDescription => 'Använd videotunnling. Inaktivera om HDR-uppspelning visar svart video.';
+	@override String get dvConversionMode => 'Dolby Vision-konvertering';
+	@override String get dvConversionModeDescription => 'Välj hur ExoPlayer hanterar Dolby Vision Profile 7-filer.';
+	@override String get dvConversionAuto => 'Auto';
+	@override String get dvConversionNative => 'Inbyggt / inaktiverat';
+	@override String get dvConversionDv81 => 'P7 → P8.1';
+	@override String get dvConversionHevcStrip => 'P7 → HEVC';
 	@override String get requireProfileSelectionOnOpen => 'Fråga efter profil vid appstart';
 	@override String get requireProfileSelectionOnOpenDescription => 'Visa profilval varje gång appen öppnas';
 	@override String get forceTvMode => 'Tvinga TV-läge';
@@ -481,6 +488,26 @@ class _TranslationsMediaMenuSv extends TranslationsMediaMenuEn {
 	@override String get playVersion => 'Spela version...';
 }
 
+// Path: rateSheet
+class _TranslationsRateSheetSv extends TranslationsRateSheetEn {
+	_TranslationsRateSheetSv._(TranslationsSv root) : this._root = root, super.internal(root);
+
+	final TranslationsSv _root; // ignore: unused_field
+
+	// Translations
+	@override String get title => 'Betygsätt';
+	@override String get server => 'Server';
+	@override String starValue({required Object rating}) => '${rating} / 5';
+	@override String scoreValue({required Object score}) => '${score} / 10';
+	@override String get setScore => 'Ange betyg';
+	@override String get notRated => 'Inte betygsatt';
+	@override String get liked => 'Gillad';
+	@override String get notLiked => 'Inte gillad';
+	@override String get saved => 'Sparat';
+	@override String get notAvailable => 'Ingen matchning hittades';
+	@override String get noConnectedTrackers => 'Anslut en spårare i Inställningar för att betygsätta där.';
+}
+
 // Path: accessibility
 class _TranslationsAccessibilitySv extends TranslationsAccessibilityEn {
 	_TranslationsAccessibilitySv._(TranslationsSv root) : this._root = root, super.internal(root);
@@ -548,7 +575,7 @@ class _TranslationsVideoControlsSv extends TranslationsVideoControlsEn {
 	@override String get nextChapterButton => 'Nästa kapitel';
 	@override String get muteButton => 'Tysta';
 	@override String get unmuteButton => 'Slå på ljud';
-	@override String get settingsButton => 'Videoinställningar';
+	@override String get settingsButton => 'Uppspelningsinställningar';
 	@override String get tracksButton => 'Ljud och undertexter';
 	@override String get chaptersButton => 'Kapitel';
 	@override String get versionsButton => 'Videoversioner';
@@ -574,6 +601,7 @@ class _TranslationsVideoControlsSv extends TranslationsVideoControlsEn {
 	@override String endsAt({required Object time}) => 'Slutar ${time}';
 	@override String get pipActive => 'Spelar i bild-i-bild';
 	@override String get pipFailed => 'Bild-i-bild kunde inte starta';
+	@override String get screenshotSaved => 'Skärmbild sparad';
 	@override late final _TranslationsVideoControlsPipErrorsSv pipErrors = _TranslationsVideoControlsPipErrorsSv._(_root);
 	@override String get chapters => 'Kapitel';
 	@override String get noChaptersAvailable => 'Inga kapitel tillgängliga';
@@ -1274,7 +1302,6 @@ class _TranslationsVideoSettingsSv extends TranslationsVideoSettingsEn {
 	final TranslationsSv _root; // ignore: unused_field
 
 	// Translations
-	@override String get playbackSettings => 'Uppspelningsinställningar';
 	@override String get playbackSpeed => 'Uppspelningshastighet';
 	@override String get sleepTimer => 'Sovtimer';
 	@override String get audioSync => 'Ljudsynkronisering';
@@ -1535,6 +1562,7 @@ class _TranslationsHotkeysActionsSv extends TranslationsHotkeysActionsEn {
 	@override String get subSeekPrev => 'Hoppa till föregående undertext';
 	@override String get shaderToggle => 'Växla shaders';
 	@override String get skipMarker => 'Hoppa över intro/eftertexter';
+	@override String get screenshot => 'Ta skärmbild';
 }
 
 // Path: videoControls.pipErrors
@@ -1606,8 +1634,18 @@ class _TranslationsLibrariesSortLabelsSv extends TranslationsLibrariesSortLabels
 	@override String get dateAdded => 'Tillagd';
 	@override String get releaseDate => 'Releasedatum';
 	@override String get rating => 'Betyg';
+	@override String get communityRating => 'Användarbetyg';
+	@override String get criticRating => 'Kritikerbetyg';
 	@override String get lastPlayed => 'Senast spelad';
+	@override String get datePlayed => 'Speldatum';
 	@override String get playCount => 'Antal spelningar';
+	@override String get productionYear => 'Produktionsår';
+	@override String get runtime => 'Speltid';
+	@override String get officialRating => 'Officiell klassificering';
+	@override String get premiereDate => 'Premiärdatum';
+	@override String get startDate => 'Startdatum';
+	@override String get airTime => 'Sändningstid';
+	@override String get studio => 'Studio';
 	@override String get random => 'Slumpmässigt';
 	@override String get dateShared => 'Delningsdatum';
 	@override String get latestEpisodeAirDate => 'Senaste avsnittets sändningsdatum';
@@ -2000,6 +2038,12 @@ extension on TranslationsSv {
 			'settings.displaySwitchDelay' => 'Fördröjning vid skärmbyte',
 			'settings.tunneledPlayback' => 'Tunneluppspelning',
 			'settings.tunneledPlaybackDescription' => 'Använd videotunnling. Inaktivera om HDR-uppspelning visar svart video.',
+			'settings.dvConversionMode' => 'Dolby Vision-konvertering',
+			'settings.dvConversionModeDescription' => 'Välj hur ExoPlayer hanterar Dolby Vision Profile 7-filer.',
+			'settings.dvConversionAuto' => 'Auto',
+			'settings.dvConversionNative' => 'Inbyggt / inaktiverat',
+			'settings.dvConversionDv81' => 'P7 → P8.1',
+			'settings.dvConversionHevcStrip' => 'P7 → HEVC',
 			'settings.requireProfileSelectionOnOpen' => 'Fråga efter profil vid appstart',
 			'settings.requireProfileSelectionOnOpenDescription' => 'Visa profilval varje gång appen öppnas',
 			'settings.forceTvMode' => 'Tvinga TV-läge',
@@ -2048,6 +2092,7 @@ extension on TranslationsSv {
 			'hotkeys.actions.subSeekPrev' => 'Hoppa till föregående undertext',
 			'hotkeys.actions.shaderToggle' => 'Växla shaders',
 			'hotkeys.actions.skipMarker' => 'Hoppa över intro/eftertexter',
+			'hotkeys.actions.screenshot' => 'Ta skärmbild',
 			'fileInfo.title' => 'Filinformation',
 			'fileInfo.video' => 'Video',
 			'fileInfo.audio' => 'Ljud',
@@ -2088,6 +2133,17 @@ extension on TranslationsSv {
 			'mediaMenu.rate' => 'Betygsätt',
 			'mediaMenu.playFromBeginning' => 'Spela från början',
 			'mediaMenu.playVersion' => 'Spela version...',
+			'rateSheet.title' => 'Betygsätt',
+			'rateSheet.server' => 'Server',
+			'rateSheet.starValue' => ({required Object rating}) => '${rating} / 5',
+			'rateSheet.scoreValue' => ({required Object score}) => '${score} / 10',
+			'rateSheet.setScore' => 'Ange betyg',
+			'rateSheet.notRated' => 'Inte betygsatt',
+			'rateSheet.liked' => 'Gillad',
+			'rateSheet.notLiked' => 'Inte gillad',
+			'rateSheet.saved' => 'Sparat',
+			'rateSheet.notAvailable' => 'Ingen matchning hittades',
+			'rateSheet.noConnectedTrackers' => 'Anslut en spårare i Inställningar för att betygsätta där.',
 			'accessibility.mediaCardMovie' => ({required Object title}) => '${title}, film',
 			'accessibility.mediaCardShow' => ({required Object title}) => '${title}, TV-serie',
 			'accessibility.mediaCardEpisode' => ({required Object title, required Object episodeInfo}) => '${title}, ${episodeInfo}',
@@ -2130,7 +2186,7 @@ extension on TranslationsSv {
 			'videoControls.nextChapterButton' => 'Nästa kapitel',
 			'videoControls.muteButton' => 'Tysta',
 			'videoControls.unmuteButton' => 'Slå på ljud',
-			'videoControls.settingsButton' => 'Videoinställningar',
+			'videoControls.settingsButton' => 'Uppspelningsinställningar',
 			'videoControls.tracksButton' => 'Ljud och undertexter',
 			'videoControls.chaptersButton' => 'Kapitel',
 			'videoControls.versionsButton' => 'Videoversioner',
@@ -2156,6 +2212,7 @@ extension on TranslationsSv {
 			'videoControls.endsAt' => ({required Object time}) => 'Slutar ${time}',
 			'videoControls.pipActive' => 'Spelar i bild-i-bild',
 			'videoControls.pipFailed' => 'Bild-i-bild kunde inte starta',
+			'videoControls.screenshotSaved' => 'Skärmbild sparad',
 			'videoControls.pipErrors.androidVersion' => 'Kräver Android 8.0 eller nyare',
 			'videoControls.pipErrors.iosVersion' => 'Kräver iOS 15.0 eller nyare',
 			'videoControls.pipErrors.permissionDisabled' => 'Bild-i-bild är inaktiverat. Aktivera det i systeminställningarna.',
@@ -2255,6 +2312,8 @@ extension on TranslationsSv {
 			'profiles.signOut' => 'Logga ut',
 			'profiles.signOutPlexTitle' => 'Logga ut från Plex?',
 			'profiles.signOutPlexMessage' => ({required Object displayName}) => 'Ta bort ${displayName} och alla Plex Home-användare? Du kan logga in igen när som helst.',
+			_ => null,
+		} ?? switch (path) {
 			'profiles.signedOutPlex' => 'Utloggad från Plex.',
 			'profiles.signOutFailed' => 'Utloggningen misslyckades.',
 			'profiles.sectionTitle' => 'Profiler',
@@ -2274,8 +2333,6 @@ extension on TranslationsSv {
 			'profiles.confirmPinTitle' => 'Bekräfta PIN',
 			'profiles.pinSet' => 'PIN angiven',
 			'profiles.changePin' => 'Ändra',
-			_ => null,
-		} ?? switch (path) {
 			'profiles.removePin' => 'Ta bort',
 			'profiles.connectionsLabel' => 'Anslutningar',
 			'profiles.add' => 'Lägg till',
@@ -2400,8 +2457,18 @@ extension on TranslationsSv {
 			'libraries.sortLabels.dateAdded' => 'Tillagd',
 			'libraries.sortLabels.releaseDate' => 'Releasedatum',
 			'libraries.sortLabels.rating' => 'Betyg',
+			'libraries.sortLabels.communityRating' => 'Användarbetyg',
+			'libraries.sortLabels.criticRating' => 'Kritikerbetyg',
 			'libraries.sortLabels.lastPlayed' => 'Senast spelad',
+			'libraries.sortLabels.datePlayed' => 'Speldatum',
 			'libraries.sortLabels.playCount' => 'Antal spelningar',
+			'libraries.sortLabels.productionYear' => 'Produktionsår',
+			'libraries.sortLabels.runtime' => 'Speltid',
+			'libraries.sortLabels.officialRating' => 'Officiell klassificering',
+			'libraries.sortLabels.premiereDate' => 'Premiärdatum',
+			'libraries.sortLabels.startDate' => 'Startdatum',
+			'libraries.sortLabels.airTime' => 'Sändningstid',
+			'libraries.sortLabels.studio' => 'Studio',
 			'libraries.sortLabels.random' => 'Slumpmässigt',
 			'libraries.sortLabels.dateShared' => 'Delningsdatum',
 			'libraries.sortLabels.latestEpisodeAirDate' => 'Senaste avsnittets sändningsdatum',
@@ -2719,7 +2786,6 @@ extension on TranslationsSv {
 			'companionRemote.remote.subtitles' => 'Undertexter',
 			'companionRemote.remote.audio' => 'Ljud',
 			'companionRemote.remote.searchHint' => 'Sök på datorn...',
-			'videoSettings.playbackSettings' => 'Uppspelningsinställningar',
 			'videoSettings.playbackSpeed' => 'Uppspelningshastighet',
 			'videoSettings.sleepTimer' => 'Sovtimer',
 			'videoSettings.audioSync' => 'Ljudsynkronisering',
@@ -2760,6 +2826,8 @@ extension on TranslationsSv {
 			'metadataEdit.poster' => 'Poster',
 			'metadataEdit.background' => 'Bakgrund',
 			'metadataEdit.logo' => 'Logotyp',
+			_ => null,
+		} ?? switch (path) {
 			'metadataEdit.squareArt' => 'Kvadratisk bild',
 			'metadataEdit.selectPoster' => 'Välj poster',
 			'metadataEdit.selectBackground' => 'Välj bakgrund',
@@ -2788,8 +2856,6 @@ extension on TranslationsSv {
 			'metadataEdit.episodesAddedPastDays' => ({required Object count}) => 'Avsnitt tillagda de senaste ${count} dagarna',
 			'metadataEdit.deleteAfterPlaying' => 'Ta bort avsnitt efter uppspelning',
 			'metadataEdit.never' => 'Aldrig',
-			_ => null,
-		} ?? switch (path) {
 			'metadataEdit.afterADay' => 'Efter en dag',
 			'metadataEdit.afterAWeek' => 'Efter en vecka',
 			'metadataEdit.afterAMonth' => 'Efter en månad',

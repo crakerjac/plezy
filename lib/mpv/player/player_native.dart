@@ -2,6 +2,7 @@ import 'dart:io' show Platform;
 
 import 'package:flutter/services.dart';
 
+import '../../media/media_display_criteria.dart';
 import '../models.dart';
 import 'player_base.dart';
 
@@ -101,10 +102,14 @@ class PlayerNative extends PlayerBase {
     bool play = true,
     bool isLive = false,
     List<SubtitleTrack>? externalSubtitles,
+    Duration timelineOffset = Duration.zero,
+    Duration? timelineDuration,
   }) async {
     if (disposed) return;
     await _ensureInitialized();
     final startPosition = media.start ?? Duration.zero;
+    configureTimeline(offset: timelineOffset, duration: timelineDuration);
+    clearTracks();
     resetPlaybackProgress(startPosition);
     setSeekable(false);
 
@@ -158,7 +163,8 @@ class PlayerNative extends PlayerBase {
 
   @override
   Future<void> seek(Duration position) async {
-    await runSeek(position, () => command(['seek', (position.inMilliseconds / 1000.0).toString(), 'absolute']));
+    final sourcePosition = sourceSeekPosition(position);
+    await runSeek(position, () => command(['seek', (sourcePosition.inMilliseconds / 1000.0).toString(), 'absolute']));
   }
 
   @override
@@ -219,6 +225,13 @@ class PlayerNative extends PlayerBase {
     if (disposed) return;
     await _ensureInitialized();
     await invoke('command', {'args': args});
+  }
+
+  @override
+  Future<void> setDisplayCriteria(MediaDisplayCriteria? criteria) async {
+    if (disposed || !Platform.isIOS) return;
+    await _ensureInitialized();
+    await invoke('setDisplayCriteria', {'criteria': criteria?.toJson()});
   }
 
   @override

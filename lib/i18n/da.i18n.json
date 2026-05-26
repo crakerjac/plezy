@@ -248,6 +248,12 @@
     "displaySwitchDelay": "Forsinkelse ved skærmskift",
     "tunneledPlayback": "Tunneleret afspilning",
     "tunneledPlaybackDescription": "Brug videotunneling. Slå fra, hvis HDR-afspilning viser sort video.",
+    "dvConversionMode": "Dolby Vision-konvertering",
+    "dvConversionModeDescription": "Vælg, hvordan ExoPlayer håndterer Dolby Vision Profile 7-filer.",
+    "dvConversionAuto": "Auto",
+    "dvConversionNative": "Native / deaktiveret",
+    "dvConversionDv81": "P7 → P8.1",
+    "dvConversionHevcStrip": "P7 → HEVC",
     "requireProfileSelectionOnOpen": "Spørg om profil ved åbning",
     "requireProfileSelectionOnOpenDescription": "Vis profilvalg hver gang appen åbnes",
     "forceTvMode": "Gennemtving TV-tilstand",
@@ -300,7 +306,8 @@
       "subSeekNext": "Søg til næste undertekst",
       "subSeekPrev": "Søg til forrige undertekst",
       "shaderToggle": "Skift shadere",
-      "skipMarker": "Spring intro/rulletekster over"
+      "skipMarker": "Spring intro/rulletekster over",
+      "screenshot": "Tag skærmbillede"
     }
   },
   "fileInfo": {
@@ -346,6 +353,19 @@
     "rate": "Bedøm",
     "playFromBeginning": "Afspil fra begyndelsen",
     "playVersion": "Afspil version..."
+  },
+  "rateSheet": {
+    "title": "Bedøm",
+    "server": "Server",
+    "starValue": "${rating} / 5",
+    "scoreValue": "${score} / 10",
+    "setScore": "Angiv en score",
+    "notRated": "Ikke bedømt",
+    "liked": "Synes godt om",
+    "notLiked": "Ikke liket",
+    "saved": "Gemt",
+    "notAvailable": "Intet match fundet",
+    "noConnectedTrackers": "Forbind en tracker i Indstillinger for at bedømme der."
   },
   "accessibility": {
     "mediaCardMovie": "${title}, film",
@@ -394,7 +414,7 @@
     "nextChapterButton": "Næste kapitel",
     "muteButton": "Lydløs",
     "unmuteButton": "Slå lyd til",
-    "settingsButton": "Videoindstillinger",
+    "settingsButton": "Afspilningsindstillinger",
     "tracksButton": "Lyd og undertekster",
     "chaptersButton": "Kapitler",
     "versionsButton": "Videoversioner",
@@ -420,6 +440,7 @@
     "endsAt": "Slutter kl. ${time}",
     "pipActive": "Afspiller i billede-i-billede",
     "pipFailed": "Billede-i-billede kunne ikke starte",
+    "screenshotSaved": "Skærmbillede gemt",
     "pipErrors": {
       "androidVersion": "Kræver Android 8.0 eller nyere",
       "iosVersion": "Kræver iOS 15.0 eller nyere",
@@ -691,8 +712,18 @@
       "dateAdded": "Tilføjet dato",
       "releaseDate": "Udgivelsesdato",
       "rating": "Vurdering",
+      "communityRating": "Fællesskabsvurdering",
+      "criticRating": "Kritikerbedømmelse",
       "lastPlayed": "Sidst afspillet",
+      "datePlayed": "Afspilningsdato",
       "playCount": "Antal afspilninger",
+      "productionYear": "Produktionsår",
+      "runtime": "Spilletid",
+      "officialRating": "Officiel vurdering",
+      "premiereDate": "Premieredato",
+      "startDate": "Startdato",
+      "airTime": "Sendetid",
+      "studio": "Studie",
       "random": "Tilfældig",
       "dateShared": "Delt dato",
       "latestEpisodeAirDate": "Seneste episodes premieredato"
@@ -1045,7 +1076,6 @@
     }
   },
   "videoSettings": {
-    "playbackSettings": "Afspilningsindstillinger",
     "playbackSpeed": "Afspilningshastighed",
     "sleepTimer": "Sove-timer",
     "audioSync": "Lydsynkronisering",

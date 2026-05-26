@@ -50,6 +50,7 @@ class Translations with BaseTranslations<AppLocale, Translations> {
 	late final TranslationsHotkeysEn hotkeys = TranslationsHotkeysEn.internal(_root);
 	late final TranslationsFileInfoEn fileInfo = TranslationsFileInfoEn.internal(_root);
 	late final TranslationsMediaMenuEn mediaMenu = TranslationsMediaMenuEn.internal(_root);
+	late final TranslationsRateSheetEn rateSheet = TranslationsRateSheetEn.internal(_root);
 	late final TranslationsAccessibilityEn accessibility = TranslationsAccessibilityEn.internal(_root);
 	late final TranslationsTooltipsEn tooltips = TranslationsTooltipsEn.internal(_root);
 	late final TranslationsVideoControlsEn videoControls = TranslationsVideoControlsEn.internal(_root);
@@ -853,6 +854,24 @@ class TranslationsSettingsEn {
 	/// en: 'Use video tunneling. Disable if HDR playback shows black video.'
 	String get tunneledPlaybackDescription => 'Use video tunneling. Disable if HDR playback shows black video.';
 
+	/// en: 'Dolby Vision Conversion'
+	String get dvConversionMode => 'Dolby Vision Conversion';
+
+	/// en: 'Choose how ExoPlayer handles Dolby Vision Profile 7 files.'
+	String get dvConversionModeDescription => 'Choose how ExoPlayer handles Dolby Vision Profile 7 files.';
+
+	/// en: 'Auto'
+	String get dvConversionAuto => 'Auto';
+
+	/// en: 'Native / Disabled'
+	String get dvConversionNative => 'Native / Disabled';
+
+	/// en: 'P7 → P8.1'
+	String get dvConversionDv81 => 'P7 → P8.1';
+
+	/// en: 'P7 → HEVC'
+	String get dvConversionHevcStrip => 'P7 → HEVC';
+
 	/// en: 'Ask for profile on app open'
 	String get requireProfileSelectionOnOpen => 'Ask for profile on app open';
 
@@ -1093,6 +1112,48 @@ class TranslationsMediaMenuEn {
 	String get playVersion => 'Play Version...';
 }
 
+// Path: rateSheet
+class TranslationsRateSheetEn {
+	TranslationsRateSheetEn.internal(this._root);
+
+	final Translations _root; // ignore: unused_field
+
+	// Translations
+
+	/// en: 'Rate'
+	String get title => 'Rate';
+
+	/// en: 'Server'
+	String get server => 'Server';
+
+	/// en: '${rating} / 5'
+	String starValue({required Object rating}) => '${rating} / 5';
+
+	/// en: '${score} / 10'
+	String scoreValue({required Object score}) => '${score} / 10';
+
+	/// en: 'Set a score'
+	String get setScore => 'Set a score';
+
+	/// en: 'Not rated'
+	String get notRated => 'Not rated';
+
+	/// en: 'Liked'
+	String get liked => 'Liked';
+
+	/// en: 'Not liked'
+	String get notLiked => 'Not liked';
+
+	/// en: 'Saved'
+	String get saved => 'Saved';
+
+	/// en: 'No match found'
+	String get notAvailable => 'No match found';
+
+	/// en: 'Connect a tracker in Settings to rate there.'
+	String get noConnectedTrackers => 'Connect a tracker in Settings to rate there.';
+}
+
 // Path: accessibility
 class TranslationsAccessibilityEn {
 	TranslationsAccessibilityEn.internal(this._root);
@@ -1245,8 +1306,8 @@ class TranslationsVideoControlsEn {
 	/// en: 'Unmute'
 	String get unmuteButton => 'Unmute';
 
-	/// en: 'Video settings'
-	String get settingsButton => 'Video settings';
+	/// en: 'Playback Settings'
+	String get settingsButton => 'Playback Settings';
 
 	/// en: 'Audio & Subtitles'
 	String get tracksButton => 'Audio & Subtitles';
@@ -1322,6 +1383,9 @@ class TranslationsVideoControlsEn {
 
 	/// en: 'Picture-in-picture failed to start'
 	String get pipFailed => 'Picture-in-picture failed to start';
+
+	/// en: 'Screenshot saved'
+	String get screenshotSaved => 'Screenshot saved';
 
 	late final TranslationsVideoControlsPipErrorsEn pipErrors = TranslationsVideoControlsPipErrorsEn.internal(_root);
 
@@ -2978,9 +3042,6 @@ class TranslationsVideoSettingsEn {
 
 	// Translations
 
-	/// en: 'Playback Settings'
-	String get playbackSettings => 'Playback Settings';
-
 	/// en: 'Playback Speed'
 	String get playbackSpeed => 'Playback Speed';
 
@@ -3609,6 +3670,9 @@ class TranslationsHotkeysActionsEn {
 
 	/// en: 'Skip Intro/Credits'
 	String get skipMarker => 'Skip Intro/Credits';
+
+	/// en: 'Take Screenshot'
+	String get screenshot => 'Take Screenshot';
 }
 
 // Path: videoControls.pipErrors
@@ -3733,11 +3797,41 @@ class TranslationsLibrariesSortLabelsEn {
 	/// en: 'Rating'
 	String get rating => 'Rating';
 
+	/// en: 'Community Rating'
+	String get communityRating => 'Community Rating';
+
+	/// en: 'Critic Rating'
+	String get criticRating => 'Critic Rating';
+
 	/// en: 'Last Played'
 	String get lastPlayed => 'Last Played';
 
+	/// en: 'Date Played'
+	String get datePlayed => 'Date Played';
+
 	/// en: 'Play Count'
 	String get playCount => 'Play Count';
+
+	/// en: 'Production Year'
+	String get productionYear => 'Production Year';
+
+	/// en: 'Runtime'
+	String get runtime => 'Runtime';
+
+	/// en: 'Official Rating'
+	String get officialRating => 'Official Rating';
+
+	/// en: 'Premiere Date'
+	String get premiereDate => 'Premiere Date';
+
+	/// en: 'Start Date'
+	String get startDate => 'Start Date';
+
+	/// en: 'Air Time'
+	String get airTime => 'Air Time';
+
+	/// en: 'Studio'
+	String get studio => 'Studio';
 
 	/// en: 'Random'
 	String get random => 'Random';
@@ -4292,6 +4386,12 @@ extension on Translations {
 			'settings.displaySwitchDelay' => 'Display Switch Delay',
 			'settings.tunneledPlayback' => 'Tunneled Playback',
 			'settings.tunneledPlaybackDescription' => 'Use video tunneling. Disable if HDR playback shows black video.',
+			'settings.dvConversionMode' => 'Dolby Vision Conversion',
+			'settings.dvConversionModeDescription' => 'Choose how ExoPlayer handles Dolby Vision Profile 7 files.',
+			'settings.dvConversionAuto' => 'Auto',
+			'settings.dvConversionNative' => 'Native / Disabled',
+			'settings.dvConversionDv81' => 'P7 → P8.1',
+			'settings.dvConversionHevcStrip' => 'P7 → HEVC',
 			'settings.requireProfileSelectionOnOpen' => 'Ask for profile on app open',
 			'settings.requireProfileSelectionOnOpenDescription' => 'Show profile selection every time the app is opened',
 			'settings.forceTvMode' => 'Force TV mode',
@@ -4340,6 +4440,7 @@ extension on Translations {
 			'hotkeys.actions.subSeekPrev' => 'Seek to Previous Subtitle',
 			'hotkeys.actions.shaderToggle' => 'Toggle Shaders',
 			'hotkeys.actions.skipMarker' => 'Skip Intro/Credits',
+			'hotkeys.actions.screenshot' => 'Take Screenshot',
 			'fileInfo.title' => 'File Info',
 			'fileInfo.video' => 'Video',
 			'fileInfo.audio' => 'Audio',
@@ -4380,6 +4481,17 @@ extension on Translations {
 			'mediaMenu.rate' => 'Rate',
 			'mediaMenu.playFromBeginning' => 'Play from Beginning',
 			'mediaMenu.playVersion' => 'Play Version...',
+			'rateSheet.title' => 'Rate',
+			'rateSheet.server' => 'Server',
+			'rateSheet.starValue' => ({required Object rating}) => '${rating} / 5',
+			'rateSheet.scoreValue' => ({required Object score}) => '${score} / 10',
+			'rateSheet.setScore' => 'Set a score',
+			'rateSheet.notRated' => 'Not rated',
+			'rateSheet.liked' => 'Liked',
+			'rateSheet.notLiked' => 'Not liked',
+			'rateSheet.saved' => 'Saved',
+			'rateSheet.notAvailable' => 'No match found',
+			'rateSheet.noConnectedTrackers' => 'Connect a tracker in Settings to rate there.',
 			'accessibility.mediaCardMovie' => ({required Object title}) => '${title}, movie',
 			'accessibility.mediaCardShow' => ({required Object title}) => '${title}, TV show',
 			'accessibility.mediaCardEpisode' => ({required Object title, required Object episodeInfo}) => '${title}, ${episodeInfo}',
@@ -4422,7 +4534,7 @@ extension on Translations {
 			'videoControls.nextChapterButton' => 'Next chapter',
 			'videoControls.muteButton' => 'Mute',
 			'videoControls.unmuteButton' => 'Unmute',
-			'videoControls.settingsButton' => 'Video settings',
+			'videoControls.settingsButton' => 'Playback Settings',
 			'videoControls.tracksButton' => 'Audio & Subtitles',
 			'videoControls.chaptersButton' => 'Chapters',
 			'videoControls.versionsButton' => 'Video versions',
@@ -4448,6 +4560,7 @@ extension on Translations {
 			'videoControls.endsAt' => ({required Object time}) => 'Ends at ${time}',
 			'videoControls.pipActive' => 'Playing in Picture-in-Picture',
 			'videoControls.pipFailed' => 'Picture-in-picture failed to start',
+			'videoControls.screenshotSaved' => 'Screenshot saved',
 			'videoControls.pipErrors.androidVersion' => 'Requires Android 8.0 or newer',
 			'videoControls.pipErrors.iosVersion' => 'Requires iOS 15.0 or newer',
 			'videoControls.pipErrors.permissionDisabled' => 'Picture-in-picture is disabled. Enable it in system settings.',
@@ -4547,6 +4660,8 @@ extension on Translations {
 			'profiles.signOut' => 'Sign out',
 			'profiles.signOutPlexTitle' => 'Sign out of Plex?',
 			'profiles.signOutPlexMessage' => ({required Object displayName}) => 'Remove ${displayName} and all Plex Home users? Sign back in anytime.',
+			_ => null,
+		} ?? switch (path) {
 			'profiles.signedOutPlex' => 'Signed out of Plex.',
 			'profiles.signOutFailed' => 'Sign out failed.',
 			'profiles.sectionTitle' => 'Profiles',
@@ -4566,8 +4681,6 @@ extension on Translations {
 			'profiles.confirmPinTitle' => 'Confirm PIN',
 			'profiles.pinSet' => 'PIN set',
 			'profiles.changePin' => 'Change',
-			_ => null,
-		} ?? switch (path) {
 			'profiles.removePin' => 'Remove',
 			'profiles.connectionsLabel' => 'Connections',
 			'profiles.add' => 'Add',
@@ -4692,8 +4805,18 @@ extension on Translations {
 			'libraries.sortLabels.dateAdded' => 'Date Added',
 			'libraries.sortLabels.releaseDate' => 'Release Date',
 			'libraries.sortLabels.rating' => 'Rating',
+			'libraries.sortLabels.communityRating' => 'Community Rating',
+			'libraries.sortLabels.criticRating' => 'Critic Rating',
 			'libraries.sortLabels.lastPlayed' => 'Last Played',
+			'libraries.sortLabels.datePlayed' => 'Date Played',
 			'libraries.sortLabels.playCount' => 'Play Count',
+			'libraries.sortLabels.productionYear' => 'Production Year',
+			'libraries.sortLabels.runtime' => 'Runtime',
+			'libraries.sortLabels.officialRating' => 'Official Rating',
+			'libraries.sortLabels.premiereDate' => 'Premiere Date',
+			'libraries.sortLabels.startDate' => 'Start Date',
+			'libraries.sortLabels.airTime' => 'Air Time',
+			'libraries.sortLabels.studio' => 'Studio',
 			'libraries.sortLabels.random' => 'Random',
 			'libraries.sortLabels.dateShared' => 'Date Shared',
 			'libraries.sortLabels.latestEpisodeAirDate' => 'Latest Episode Air Date',
@@ -5011,7 +5134,6 @@ extension on Translations {
 			'companionRemote.remote.subtitles' => 'Subtitles',
 			'companionRemote.remote.audio' => 'Audio',
 			'companionRemote.remote.searchHint' => 'Search on desktop...',
-			'videoSettings.playbackSettings' => 'Playback Settings',
 			'videoSettings.playbackSpeed' => 'Playback Speed',
 			'videoSettings.sleepTimer' => 'Sleep Timer',
 			'videoSettings.audioSync' => 'Audio Sync',
@@ -5052,6 +5174,8 @@ extension on Translations {
 			'metadataEdit.poster' => 'Poster',
 			'metadataEdit.background' => 'Background',
 			'metadataEdit.logo' => 'Logo',
+			_ => null,
+		} ?? switch (path) {
 			'metadataEdit.squareArt' => 'Square Art',
 			'metadataEdit.selectPoster' => 'Select Poster',
 			'metadataEdit.selectBackground' => 'Select Background',
@@ -5080,8 +5204,6 @@ extension on Translations {
 			'metadataEdit.episodesAddedPastDays' => ({required Object count}) => 'Episodes added in the past ${count} days',
 			'metadataEdit.deleteAfterPlaying' => 'Delete Episodes After Playing',
 			'metadataEdit.never' => 'Never',
-			_ => null,
-		} ?? switch (path) {
 			'metadataEdit.afterADay' => 'After a day',
 			'metadataEdit.afterAWeek' => 'After a week',
 			'metadataEdit.afterAMonth' => 'After a month',

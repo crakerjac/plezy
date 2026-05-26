@@ -10,6 +10,7 @@ import '../../i18n/strings.g.dart';
 import '../../mixins/controller_disposer_mixin.dart';
 import '../../utils/platform_detector.dart';
 import '../../widgets/app_icon.dart';
+import '../../widgets/clickable_cursor.dart';
 
 /// Dialog for entering a 4-digit PIN to access a protected profile.
 class PinEntryDialog extends StatefulWidget {
@@ -27,6 +28,7 @@ class _PinEntryDialogState extends State<PinEntryDialog> with SingleTickerProvid
   late Animation<double> _shakeAnimation;
   final _pinInputKey = GlobalKey<_TvPinInputState>();
   final _cancelFocusNode = FocusNode(debugLabel: 'PinCancelButton');
+  bool _completed = false;
 
   @override
   void initState() {
@@ -56,11 +58,15 @@ class _PinEntryDialogState extends State<PinEntryDialog> with SingleTickerProvid
   }
 
   void _submit(String pin) {
-    Navigator.of(context).pop(pin);
+    if (_completed) return;
+    _completed = true;
+    Navigator.of(context).pop<String>(pin);
   }
 
   void _cancel() {
-    Navigator.of(context).pop(null);
+    if (_completed) return;
+    _completed = true;
+    Navigator.of(context).pop<String>();
   }
 
   void _focusPinInput() {
@@ -505,23 +511,25 @@ class _TvPinInputState extends State<_TvPinInput> with ControllerDisposerMixin {
     final background = selected ? colorScheme.primary : colorScheme.surfaceContainerHighest.withValues(alpha: 0.88);
     final foreground = selected ? colorScheme.onPrimary : colorScheme.onSurface;
 
-    return GestureDetector(
-      onTap: () {
-        setState(() {
-          _row = row;
-          _column = column;
-        });
-        _activate(key);
-      },
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 120),
-        width: _keySize,
-        height: _keySize,
-        alignment: Alignment.center,
-        decoration: BoxDecoration(color: background, borderRadius: BorderRadius.circular(16)),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 4),
-          child: _buildKeyContent(context, key, foreground),
+    return ClickableCursor(
+      child: GestureDetector(
+        onTap: () {
+          setState(() {
+            _row = row;
+            _column = column;
+          });
+          _activate(key);
+        },
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 120),
+          width: _keySize,
+          height: _keySize,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(color: background, borderRadius: BorderRadius.circular(16)),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4),
+            child: _buildKeyContent(context, key, foreground),
+          ),
         ),
       ),
     );

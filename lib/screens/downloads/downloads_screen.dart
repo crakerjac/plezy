@@ -38,6 +38,7 @@ class DownloadsScreenState extends State<DownloadsScreen>
   final _tvShowsTabChipFocusNode = FocusNode(debugLabel: 'tab_chip_tv_shows');
   final _moviesTabChipFocusNode = FocusNode(debugLabel: 'tab_chip_movies');
   final _actionBarKey = GlobalKey<FocusableActionBarState>();
+  bool _isImporting = false;
 
   @override
   List<FocusNode> get tabChipFocusNodes => [_queueTabChipFocusNode, _tvShowsTabChipFocusNode, _moviesTabChipFocusNode];
@@ -51,76 +52,64 @@ class DownloadsScreenState extends State<DownloadsScreen>
     WidgetsBinding.instance.addPostFrameCallback((_) => _autoCheckManifest());
   }
 
-  // PlexSyncer: silently scan if manifest has been updated since last import.
+  // PlexSyncer: notify-only check on nav — shows a snackbar if manifest has
+  // been updated since last import, letting the user decide when to import.
   Future<void> _autoCheckManifest() async {
     if (!mounted) return;
     try {
       final hasUpdate = await ManifestImportService.instance.checkForUpdates();
       if (!mounted || !hasUpdate) return;
-      appLogger.i('PlexSyncer: manifest updated — running auto-scan');
-      await _importFromManifest(silent: true);
+      appLogger.i('PlexSyncer: manifest updated — notifying user');
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: const Text('PlexSyncer folder updated — tap to import'),
+        duration: const Duration(seconds: 8),
+        action: SnackBarAction(
+          label: 'Import',
+          onPressed: _importFromManifest,
+        ),
+      ));
     } catch (e) {
       appLogger.d('PlexSyncer: auto-check failed: $e');
     }
   }
 
-  // PlexSyncer: import synced files from the PlexSyncer manifest.json
-  // silent=true skips the loading dialog (used by auto-scan on nav).
-  Future<void> _importFromManifest({bool silent = false}) async {
-    if (!mounted) return;
+  // PlexSyncer: import synced files from the PlexSyncer manifest.json.
+  // Button spins and is disabled while running; no blocking dialog.
+  Future<void> _importFromManifest() async {
+    if (!mounted || _isImporting) return;
+    setState(() => _isImporting = true);
 
-    if (!silent) {
-      showDialog<void>(
-        context: context,
-        barrierDismissible: false,
-        builder: (_) => const AlertDialog(
-          content: Row(children: [
-            CircularProgressIndicator(),
-            SizedBox(width: 16),
-            Expanded(child: Text('Scanning sync folder…')),
-          ]),
-        ),
+    try {
+      final serverProvider = context.read<MultiServerProvider>();
+      final summary = await context.read<DownloadProvider>().importFromManifest(
+        clientResolver: (id) => serverProvider.serverManager.getClient(id),
       );
-    }
 
-    final serverProvider = context.read<MultiServerProvider>();
-    final summary = await context.read<DownloadProvider>().importFromManifest(
-      clientResolver: (id) => serverProvider.serverManager.getClient(id),
-    );
+      if (!mounted) return;
 
-    if (!silent && mounted) Navigator.of(context, rootNavigator: true).pop();
-    if (!mounted) return;
-
-    if (summary.hasError) {
-      showDialog<void>(
-        context: context,
-        builder: (_) => AlertDialog(
-          title: const Text('Scan failed'),
-          content: Text(summary.error!),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('OK'),
-            ),
-          ],
-        ),
-      );
-      return;
-    }
-
-    if (silent) {
-      // Auto-scan: only notify if something actually changed
-      if (summary.imported > 0 || summary.pruned > 0) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text('PlexSyncer: ${summary.toUserMessage()}'),
-          duration: const Duration(seconds: 4),
-        ));
+      if (summary.hasError) {
+        showDialog<void>(
+          context: context,
+          builder: (_) => AlertDialog(
+            title: const Text('Scan failed'),
+            content: Text(summary.error!),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('OK'),
+              ),
+            ],
+          ),
+        );
+        return;
       }
-    } else {
+
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
         content: Text(summary.toUserMessage()),
         duration: const Duration(seconds: 5),
       ));
+    } finally {
+      if (mounted) setState(() => _isImporting = false);
     }
   }
 
@@ -244,6 +233,7 @@ class DownloadsScreenState extends State<DownloadsScreen>
                 key: _actionBarKey,
                 onNavigateLeft: () => getTabChipFocusNode(tabCount - 1).requestFocus(),
                 onNavigateDown: _focusCurrentTab,
+                // PlexSyncer + upstream: both actions in one FocusableActionBar
                 actions: [
                   FocusableAction(
                     icon: Symbols.rule_settings,
@@ -251,11 +241,18 @@ class DownloadsScreenState extends State<DownloadsScreen>
                     onPressed: () =>
                         Navigator.push(context, MaterialPageRoute(builder: (_) => const SyncRulesScreen())),
                   ),
-                  // PlexSyncer: scan button
+                  // PlexSyncer: scan button — spins and disables while importing
                   FocusableAction(
                     icon: Icons.drive_file_move_rtl_outlined,
                     tooltip: 'Scan PlexSyncer folder',
-                    onPressed: _importFromManifest,
+                    onPressed: _isImporting ? null : _importFromManifest,
+                    child: _isImporting
+                        ? const SizedBox(
+                            width: 24,
+                            height: 24,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : null,
                   ),
                 ],
               ),
@@ -317,7 +314,7 @@ class DownloadsScreenState extends State<DownloadsScreen>
                             },
                             onCancel: downloadProvider.cancelDownload,
                             onDelete: downloadProvider.deleteDownload,
-                            onNavigateLeft: () => MainScreenFocusScope.of(context)?.focusSidebar(),
+                            onNavigateLeft: () => MainScreenFocusScope.of(context, listen: false)?.focusSidebar(),
                             onBack: focusTabBar,
                             suppressAutoFocus: suppressAutoFocus,
                           );
@@ -383,7 +380,7 @@ class _DownloadsGridContentState extends State<_DownloadsGridContent> {
 
   /// Navigate focus to the sidebar
   void _navigateToSidebar() {
-    MainScreenFocusScope.of(context)?.focusSidebar();
+    MainScreenFocusScope.of(context, listen: false)?.focusSidebar();
   }
 
   @override

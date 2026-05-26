@@ -248,6 +248,12 @@
     "displaySwitchDelay": "Délai de changement d'affichage",
     "tunneledPlayback": "Lecture tunnelée",
     "tunneledPlaybackDescription": "Utiliser le tunneling vidéo. Désactivez si la lecture HDR affiche un écran noir.",
+    "dvConversionMode": "Conversion Dolby Vision",
+    "dvConversionModeDescription": "Choisissez comment ExoPlayer gère les fichiers Dolby Vision Profile 7.",
+    "dvConversionAuto": "Auto",
+    "dvConversionNative": "Natif / désactivé",
+    "dvConversionDv81": "P7 → P8.1",
+    "dvConversionHevcStrip": "P7 → HEVC",
     "requireProfileSelectionOnOpen": "Demander le profil à l'ouverture",
     "requireProfileSelectionOnOpenDescription": "Afficher la sélection de profil à chaque ouverture de l'application",
     "forceTvMode": "Forcer le mode TV",
@@ -300,7 +306,8 @@
       "subSeekNext": "Rechercher le sous-titre suivant",
       "subSeekPrev": "Rechercher le sous-titre précédent",
       "shaderToggle": "Activer/désactiver les shaders",
-      "skipMarker": "Passer l'intro/le générique"
+      "skipMarker": "Passer l'intro/le générique",
+      "screenshot": "Prendre une capture d'écran"
     }
   },
   "fileInfo": {
@@ -346,6 +353,19 @@
     "rate": "Noter",
     "playFromBeginning": "Lire depuis le début",
     "playVersion": "Lire la version..."
+  },
+  "rateSheet": {
+    "title": "Noter",
+    "server": "Serveur",
+    "starValue": "${rating} / 5",
+    "scoreValue": "${score} / 10",
+    "setScore": "Définir une note",
+    "notRated": "Non noté",
+    "liked": "Aimé",
+    "notLiked": "Non aimé",
+    "saved": "Enregistré",
+    "notAvailable": "Aucune correspondance trouvée",
+    "noConnectedTrackers": "Connectez un tracker dans Paramètres pour y noter."
   },
   "accessibility": {
     "mediaCardMovie": "${title}, film",
@@ -394,7 +414,7 @@
     "nextChapterButton": "Chapitre suivant",
     "muteButton": "Mute",
     "unmuteButton": "Dé-mute",
-    "settingsButton": "Paramètres vidéo",
+    "settingsButton": "Paramètres de lecture",
     "tracksButton": "Audio et sous-titres",
     "chaptersButton": "Chapitres",
     "versionsButton": "Versions vidéo",
@@ -420,6 +440,7 @@
     "endsAt": "Fin à ${time}",
     "pipActive": "Lecture en mode image dans l'image",
     "pipFailed": "Échec du démarrage du mode image dans l'image",
+    "screenshotSaved": "Capture d'écran enregistrée",
     "pipErrors": {
       "androidVersion": "Nécessite Android 8.0 ou plus récent",
       "iosVersion": "Nécessite iOS 15.0 ou plus récent",
@@ -691,8 +712,18 @@
       "dateAdded": "Date d'ajout",
       "releaseDate": "Date de sortie",
       "rating": "Note",
+      "communityRating": "Note communautaire",
+      "criticRating": "Note critique",
       "lastPlayed": "Dernière lecture",
+      "datePlayed": "Date de lecture",
       "playCount": "Lectures",
+      "productionYear": "Année de production",
+      "runtime": "Durée",
+      "officialRating": "Classification officielle",
+      "premiereDate": "Date de première",
+      "startDate": "Date de début",
+      "airTime": "Heure de diffusion",
+      "studio": "Studio",
       "random": "Aléatoire",
       "dateShared": "Date de partage",
       "latestEpisodeAirDate": "Dernière date de diffusion"
@@ -1045,7 +1076,6 @@
     }
   },
   "videoSettings": {
-    "playbackSettings": "Paramètres de lecture",
     "playbackSpeed": "Vitesse de lecture",
     "sleepTimer": "Minuterie de mise en veille",
     "audioSync": "Synchronisation audio",

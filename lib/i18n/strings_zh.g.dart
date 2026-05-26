@@ -49,6 +49,7 @@ class TranslationsZh extends Translations with BaseTranslations<AppLocale, Trans
 	@override late final _TranslationsHotkeysZh hotkeys = _TranslationsHotkeysZh._(_root);
 	@override late final _TranslationsFileInfoZh fileInfo = _TranslationsFileInfoZh._(_root);
 	@override late final _TranslationsMediaMenuZh mediaMenu = _TranslationsMediaMenuZh._(_root);
+	@override late final _TranslationsRateSheetZh rateSheet = _TranslationsRateSheetZh._(_root);
 	@override late final _TranslationsAccessibilityZh accessibility = _TranslationsAccessibilityZh._(_root);
 	@override late final _TranslationsTooltipsZh tooltips = _TranslationsTooltipsZh._(_root);
 	@override late final _TranslationsVideoControlsZh videoControls = _TranslationsVideoControlsZh._(_root);
@@ -375,6 +376,12 @@ class _TranslationsSettingsZh extends TranslationsSettingsEn {
 	@override String get displaySwitchDelay => '显示切换延迟';
 	@override String get tunneledPlayback => '通道化播放';
 	@override String get tunneledPlaybackDescription => '使用视频隧道。若 HDR 播放出现黑屏，请禁用。';
+	@override String get dvConversionMode => 'Dolby Vision 转换';
+	@override String get dvConversionModeDescription => '选择 ExoPlayer 如何处理 Dolby Vision Profile 7 文件。';
+	@override String get dvConversionAuto => '自动';
+	@override String get dvConversionNative => '原生 / 禁用';
+	@override String get dvConversionDv81 => 'P7 → P8.1';
+	@override String get dvConversionHevcStrip => 'P7 → HEVC';
 	@override String get requireProfileSelectionOnOpen => '打开应用时询问配置文件';
 	@override String get requireProfileSelectionOnOpenDescription => '每次打开应用时显示配置文件选择';
 	@override String get forceTvMode => '强制 TV 模式';
@@ -481,6 +488,26 @@ class _TranslationsMediaMenuZh extends TranslationsMediaMenuEn {
 	@override String get playVersion => '播放版本...';
 }
 
+// Path: rateSheet
+class _TranslationsRateSheetZh extends TranslationsRateSheetEn {
+	_TranslationsRateSheetZh._(TranslationsZh root) : this._root = root, super.internal(root);
+
+	final TranslationsZh _root; // ignore: unused_field
+
+	// Translations
+	@override String get title => '评分';
+	@override String get server => '服务器';
+	@override String starValue({required Object rating}) => '${rating} / 5';
+	@override String scoreValue({required Object score}) => '${score} / 10';
+	@override String get setScore => '设置分数';
+	@override String get notRated => '未评分';
+	@override String get liked => '已喜欢';
+	@override String get notLiked => '未喜欢';
+	@override String get saved => '已保存';
+	@override String get notAvailable => '未找到匹配项';
+	@override String get noConnectedTrackers => '在设置中连接跟踪器即可在那里评分。';
+}
+
 // Path: accessibility
 class _TranslationsAccessibilityZh extends TranslationsAccessibilityEn {
 	_TranslationsAccessibilityZh._(TranslationsZh root) : this._root = root, super.internal(root);
@@ -548,7 +575,7 @@ class _TranslationsVideoControlsZh extends TranslationsVideoControlsEn {
 	@override String get nextChapterButton => '下一章节';
 	@override String get muteButton => '静音';
 	@override String get unmuteButton => '取消静音';
-	@override String get settingsButton => '视频设置';
+	@override String get settingsButton => '播放设置';
 	@override String get tracksButton => '音频和字幕';
 	@override String get chaptersButton => '章节';
 	@override String get versionsButton => '视频版本';
@@ -574,6 +601,7 @@ class _TranslationsVideoControlsZh extends TranslationsVideoControlsEn {
 	@override String endsAt({required Object time}) => '${time} 结束';
 	@override String get pipActive => '正在画中画模式中播放';
 	@override String get pipFailed => '画中画启动失败';
+	@override String get screenshotSaved => '截图已保存';
 	@override late final _TranslationsVideoControlsPipErrorsZh pipErrors = _TranslationsVideoControlsPipErrorsZh._(_root);
 	@override String get chapters => '章节';
 	@override String get noChaptersAvailable => '没有可用的章节';
@@ -1274,7 +1302,6 @@ class _TranslationsVideoSettingsZh extends TranslationsVideoSettingsEn {
 	final TranslationsZh _root; // ignore: unused_field
 
 	// Translations
-	@override String get playbackSettings => '播放设置';
 	@override String get playbackSpeed => '播放速度';
 	@override String get sleepTimer => '睡眠定时器';
 	@override String get audioSync => '音频同步';
@@ -1535,6 +1562,7 @@ class _TranslationsHotkeysActionsZh extends TranslationsHotkeysActionsEn {
 	@override String get subSeekPrev => '跳转到上一字幕';
 	@override String get shaderToggle => '切换着色器';
 	@override String get skipMarker => '跳过片头/片尾';
+	@override String get screenshot => '截图';
 }
 
 // Path: videoControls.pipErrors
@@ -1606,8 +1634,18 @@ class _TranslationsLibrariesSortLabelsZh extends TranslationsLibrariesSortLabels
 	@override String get dateAdded => '添加日期';
 	@override String get releaseDate => '发行日期';
 	@override String get rating => '评分';
+	@override String get communityRating => '社区评分';
+	@override String get criticRating => '影评人评分';
 	@override String get lastPlayed => '最近播放';
+	@override String get datePlayed => '播放日期';
 	@override String get playCount => '播放次数';
+	@override String get productionYear => '制作年份';
+	@override String get runtime => '时长';
+	@override String get officialRating => '官方分级';
+	@override String get premiereDate => '首映日期';
+	@override String get startDate => '开始日期';
+	@override String get airTime => '播出时间';
+	@override String get studio => '工作室';
 	@override String get random => '随机';
 	@override String get dateShared => '共享日期';
 	@override String get latestEpisodeAirDate => '最新一集播出日期';
@@ -2000,6 +2038,12 @@ extension on TranslationsZh {
 			'settings.displaySwitchDelay' => '显示切换延迟',
 			'settings.tunneledPlayback' => '通道化播放',
 			'settings.tunneledPlaybackDescription' => '使用视频隧道。若 HDR 播放出现黑屏，请禁用。',
+			'settings.dvConversionMode' => 'Dolby Vision 转换',
+			'settings.dvConversionModeDescription' => '选择 ExoPlayer 如何处理 Dolby Vision Profile 7 文件。',
+			'settings.dvConversionAuto' => '自动',
+			'settings.dvConversionNative' => '原生 / 禁用',
+			'settings.dvConversionDv81' => 'P7 → P8.1',
+			'settings.dvConversionHevcStrip' => 'P7 → HEVC',
 			'settings.requireProfileSelectionOnOpen' => '打开应用时询问配置文件',
 			'settings.requireProfileSelectionOnOpenDescription' => '每次打开应用时显示配置文件选择',
 			'settings.forceTvMode' => '强制 TV 模式',
@@ -2048,6 +2092,7 @@ extension on TranslationsZh {
 			'hotkeys.actions.subSeekPrev' => '跳转到上一字幕',
 			'hotkeys.actions.shaderToggle' => '切换着色器',
 			'hotkeys.actions.skipMarker' => '跳过片头/片尾',
+			'hotkeys.actions.screenshot' => '截图',
 			'fileInfo.title' => '文件信息',
 			'fileInfo.video' => '视频',
 			'fileInfo.audio' => '音频',
@@ -2088,6 +2133,17 @@ extension on TranslationsZh {
 			'mediaMenu.rate' => '评分',
 			'mediaMenu.playFromBeginning' => '从头播放',
 			'mediaMenu.playVersion' => '播放版本...',
+			'rateSheet.title' => '评分',
+			'rateSheet.server' => '服务器',
+			'rateSheet.starValue' => ({required Object rating}) => '${rating} / 5',
+			'rateSheet.scoreValue' => ({required Object score}) => '${score} / 10',
+			'rateSheet.setScore' => '设置分数',
+			'rateSheet.notRated' => '未评分',
+			'rateSheet.liked' => '已喜欢',
+			'rateSheet.notLiked' => '未喜欢',
+			'rateSheet.saved' => '已保存',
+			'rateSheet.notAvailable' => '未找到匹配项',
+			'rateSheet.noConnectedTrackers' => '在设置中连接跟踪器即可在那里评分。',
 			'accessibility.mediaCardMovie' => ({required Object title}) => '${title}, 电影',
 			'accessibility.mediaCardShow' => ({required Object title}) => '${title}, 电视剧',
 			'accessibility.mediaCardEpisode' => ({required Object title, required Object episodeInfo}) => '${title}, ${episodeInfo}',
@@ -2130,7 +2186,7 @@ extension on TranslationsZh {
 			'videoControls.nextChapterButton' => '下一章节',
 			'videoControls.muteButton' => '静音',
 			'videoControls.unmuteButton' => '取消静音',
-			'videoControls.settingsButton' => '视频设置',
+			'videoControls.settingsButton' => '播放设置',
 			'videoControls.tracksButton' => '音频和字幕',
 			'videoControls.chaptersButton' => '章节',
 			'videoControls.versionsButton' => '视频版本',
@@ -2156,6 +2212,7 @@ extension on TranslationsZh {
 			'videoControls.endsAt' => ({required Object time}) => '${time} 结束',
 			'videoControls.pipActive' => '正在画中画模式中播放',
 			'videoControls.pipFailed' => '画中画启动失败',
+			'videoControls.screenshotSaved' => '截图已保存',
 			'videoControls.pipErrors.androidVersion' => '需要 Android 8.0 或更高版本',
 			'videoControls.pipErrors.iosVersion' => '需要 iOS 15.0 或更高版本',
 			'videoControls.pipErrors.permissionDisabled' => '画中画已禁用。请在系统设置中启用。',
@@ -2255,6 +2312,8 @@ extension on TranslationsZh {
 			'profiles.signOut' => '退出登录',
 			'profiles.signOutPlexTitle' => '退出 Plex 登录？',
 			'profiles.signOutPlexMessage' => ({required Object displayName}) => '要移除 ${displayName} 和所有 Plex Home 用户吗？可随时重新登录。',
+			_ => null,
+		} ?? switch (path) {
 			'profiles.signedOutPlex' => '已退出 Plex 登录。',
 			'profiles.signOutFailed' => '退出登录失败。',
 			'profiles.sectionTitle' => '配置文件',
@@ -2274,8 +2333,6 @@ extension on TranslationsZh {
 			'profiles.confirmPinTitle' => '确认 PIN',
 			'profiles.pinSet' => '已设置 PIN',
 			'profiles.changePin' => '更改',
-			_ => null,
-		} ?? switch (path) {
 			'profiles.removePin' => '移除',
 			'profiles.connectionsLabel' => '连接',
 			'profiles.add' => '添加',
@@ -2400,8 +2457,18 @@ extension on TranslationsZh {
 			'libraries.sortLabels.dateAdded' => '添加日期',
 			'libraries.sortLabels.releaseDate' => '发行日期',
 			'libraries.sortLabels.rating' => '评分',
+			'libraries.sortLabels.communityRating' => '社区评分',
+			'libraries.sortLabels.criticRating' => '影评人评分',
 			'libraries.sortLabels.lastPlayed' => '最近播放',
+			'libraries.sortLabels.datePlayed' => '播放日期',
 			'libraries.sortLabels.playCount' => '播放次数',
+			'libraries.sortLabels.productionYear' => '制作年份',
+			'libraries.sortLabels.runtime' => '时长',
+			'libraries.sortLabels.officialRating' => '官方分级',
+			'libraries.sortLabels.premiereDate' => '首映日期',
+			'libraries.sortLabels.startDate' => '开始日期',
+			'libraries.sortLabels.airTime' => '播出时间',
+			'libraries.sortLabels.studio' => '工作室',
 			'libraries.sortLabels.random' => '随机',
 			'libraries.sortLabels.dateShared' => '共享日期',
 			'libraries.sortLabels.latestEpisodeAirDate' => '最新一集播出日期',
@@ -2719,7 +2786,6 @@ extension on TranslationsZh {
 			'companionRemote.remote.subtitles' => '字幕',
 			'companionRemote.remote.audio' => '音频',
 			'companionRemote.remote.searchHint' => '在桌面上搜索...',
-			'videoSettings.playbackSettings' => '播放设置',
 			'videoSettings.playbackSpeed' => '播放速度',
 			'videoSettings.sleepTimer' => '睡眠定时器',
 			'videoSettings.audioSync' => '音频同步',
@@ -2760,6 +2826,8 @@ extension on TranslationsZh {
 			'metadataEdit.poster' => '海报',
 			'metadataEdit.background' => '背景',
 			'metadataEdit.logo' => '标志',
+			_ => null,
+		} ?? switch (path) {
 			'metadataEdit.squareArt' => '方形图片',
 			'metadataEdit.selectPoster' => '选择海报',
 			'metadataEdit.selectBackground' => '选择背景',
@@ -2788,8 +2856,6 @@ extension on TranslationsZh {
 			'metadataEdit.episodesAddedPastDays' => ({required Object count}) => '过去 ${count} 天内添加的剧集',
 			'metadataEdit.deleteAfterPlaying' => '播放后删除剧集',
 			'metadataEdit.never' => '从不',
-			_ => null,
-		} ?? switch (path) {
 			'metadataEdit.afterADay' => '一天后',
 			'metadataEdit.afterAWeek' => '一周后',
 			'metadataEdit.afterAMonth' => '一个月后',

@@ -97,8 +97,8 @@ class _NotInSessionViewState extends State<_NotInSessionView> with MountedSetSta
   String? get _plexDisplayName => context.read<ActiveProfileProvider>().active?.displayName;
 
   Future<void> _checkHealth() async {
+    final client = HttpClient();
     try {
-      final client = HttpClient();
       client.connectionTimeout = const Duration(seconds: 5);
       final request = await client.getUrl(Uri.parse(WatchTogetherPeerService.healthUrlFor(_customRelayUrl)));
       final response = await request.close().namedTimeout(
@@ -106,13 +106,14 @@ class _NotInSessionViewState extends State<_NotInSessionView> with MountedSetSta
         operation: 'WatchTogether health check',
       );
       final body = await response.transform(const SystemEncoding().decoder).join();
-      client.close();
       if (!mounted) return;
       setState(() => _healthOk = response.statusCode == 200 && body.trim() == 'ok');
     } catch (e) {
       appLogger.w('Watch Together health check failed', error: e);
       if (!mounted) return;
       setState(() => _healthOk = false);
+    } finally {
+      client.close(force: true);
     }
   }
 
@@ -347,12 +348,12 @@ class _NotInSessionViewState extends State<_NotInSessionView> with MountedSetSta
     if (name == null || !mounted) return;
 
     await RecentRoomsService.renameRoom(room.code, name.isEmpty ? null : name);
-    setState(() => _recentRooms = RecentRoomsService.getRecentRooms());
+    setStateIfMounted(() => _recentRooms = RecentRoomsService.getRecentRooms());
   }
 
   Future<void> _removeRoom(RecentRoom room) async {
     await RecentRoomsService.removeRoom(room.code);
-    setState(() => _recentRooms = RecentRoomsService.getRecentRooms());
+    setStateIfMounted(() => _recentRooms = RecentRoomsService.getRecentRooms());
   }
 }
 
@@ -385,18 +386,21 @@ class _RecentRoomTile extends StatelessWidget {
         borderRadius: 12,
         onSelect: isBusy ? null : onTap,
         onLongPress: () => _showActions(context),
-        child: ListTile(
-          shape: const RoundedRectangleBorder(borderRadius: BorderRadius.all(Radius.circular(12))),
-          leading: isEntering ? const LoadingIndicatorBox(size: 24) : const Icon(Symbols.meeting_room_rounded),
-          title: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis),
-          subtitle: room.name != null
-              ? Text(
-                  room.code,
-                  style: TextStyle(fontFamily: 'monospace', color: theme.colorScheme.onSurfaceVariant),
-                )
-              : null,
-          trailing: IconButton(icon: const Icon(Symbols.more_vert_rounded), onPressed: () => _showActions(context)),
-          onTap: isBusy ? null : onTap,
+        child: Material(
+          type: MaterialType.transparency,
+          child: ListTile(
+            shape: const RoundedRectangleBorder(borderRadius: BorderRadius.all(Radius.circular(12))),
+            leading: isEntering ? const LoadingIndicatorBox(size: 24) : const Icon(Symbols.meeting_room_rounded),
+            title: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis),
+            subtitle: room.name != null
+                ? Text(
+                    room.code,
+                    style: TextStyle(fontFamily: 'monospace', color: theme.colorScheme.onSurfaceVariant),
+                  )
+                : null,
+            trailing: IconButton(icon: const Icon(Symbols.more_vert_rounded), onPressed: () => _showActions(context)),
+            onTap: isBusy ? null : onTap,
+          ),
         ),
       ),
     );

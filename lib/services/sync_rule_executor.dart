@@ -46,7 +46,7 @@ class SyncRuleExecutor {
 
   OfflineModeSource? _offlineSource;
 
-  SyncRuleExecutor({required AppDatabase database}) : _database = database;
+  SyncRuleExecutor({required this._database});
 
   bool get isExecuting => _isExecuting;
 
@@ -259,10 +259,23 @@ class SyncRuleExecutor {
     required Future<bool> Function(MediaItem episode, MediaServerClient client, {int mediaIndex}) queueSingleDownload,
   }) async {
     final fromServer = <MediaItem>[];
+    final sourceMetadata = metadata[rule.globalKey];
     if (rule.targetType == ContentTypes.show) {
-      await collectEpisodesForShow(client, rule.ratingKey, unwatchedOnly: true, out: fromServer);
+      await collectEpisodesForShow(
+        client,
+        rule.ratingKey,
+        unwatchedOnly: true,
+        out: fromServer,
+        fallback: sourceMetadata,
+      );
     } else {
-      await collectEpisodesForSeason(client, rule.ratingKey, unwatchedOnly: true, out: fromServer);
+      await collectEpisodesForSeason(
+        client,
+        rule.ratingKey,
+        unwatchedOnly: true,
+        out: fromServer,
+        fallback: sourceMetadata,
+      );
     }
 
     final unwatchedEpisodes = await _excludeLocallyWatched(
@@ -334,7 +347,7 @@ class SyncRuleExecutor {
       // default limit. Plex collections use a distinct collections endpoint;
       // Jellyfin's collection page implementation maps to its children API.
       if (rule.targetType == ContentTypes.collection) {
-        rootItems = await _fetchAllCollectionItems(client, rule.ratingKey);
+        rootItems = await _fetchAllCollectionItems(client, rule.ratingKey, source: metadata[rule.globalKey]);
       } else {
         rootItems = await _fetchAllPlaylistItems(client, rule.ratingKey);
       }
@@ -389,9 +402,7 @@ class SyncRuleExecutor {
     return SyncRuleResult(globalKey: rule.globalKey, title: displayTitle, queuedCount: queued);
   }
 
-  /// Page through every item in a playlist; the neutral
-  /// [MediaServerClient.fetchPlaylistItems] caps each page (Plex at 100,
-  /// Jellyfin honours `limit`).
+  /// Page through every item in a playlist using the shared playlist page size.
   Future<List<MediaItem>> _fetchAllPlaylistItems(MediaServerClient client, String playlistId) async {
     return fetchAllPlaylistItems(client, playlistId);
   }
@@ -399,19 +410,16 @@ class SyncRuleExecutor {
   /// Page through every item in a collection. Plex requires
   /// [MediaServerClient.fetchCollectionPage] because collection children live
   /// under `/library/collections/{id}/children`, not metadata children.
-  Future<List<MediaItem>> _fetchAllCollectionItems(MediaServerClient client, String collectionId) async {
-    final all = <MediaItem>[];
-    const pageSize = 100;
-    var offset = 0;
-    while (true) {
-      final page = await client.fetchCollectionPage(collectionId, start: offset, size: pageSize);
-      if (page.items.isEmpty) break;
-      all.addAll(page.items);
-      if (all.length >= page.totalCount || page.items.length < pageSize) break;
-      offset += page.items.length;
-    }
-    return all;
-  }
+  Future<List<MediaItem>> _fetchAllCollectionItems(
+    MediaServerClient client,
+    String collectionId, {
+    MediaItem? source,
+  }) => fetchAllCollectionItemsPaged(
+    client,
+    collectionId,
+    libraryId: source?.libraryId,
+    libraryTitle: source?.libraryTitle,
+  );
 
   /// Walks [items] and collects playable movie/episode entries into [out].
   /// Shows and seasons are expanded into their episodes; music and nested
@@ -429,9 +437,9 @@ class SyncRuleExecutor {
           if (unwatchedOnly && item.isWatched && !item.hasActiveProgress) break;
           out.add(item);
         case MediaKind.show:
-          await collectEpisodesForShow(client, item.id, unwatchedOnly: unwatchedOnly, out: out);
+          await collectEpisodesForShow(client, item.id, unwatchedOnly: unwatchedOnly, out: out, fallback: item);
         case MediaKind.season:
-          await collectEpisodesForSeason(client, item.id, unwatchedOnly: unwatchedOnly, out: out);
+          await collectEpisodesForSeason(client, item.id, unwatchedOnly: unwatchedOnly, out: out, fallback: item);
         default:
           // Skip music, clips, nested collections/playlists, unknown types.
           break;

@@ -22,6 +22,7 @@ import '../../services/pip_service.dart';
 import 'package:window_manager/window_manager.dart';
 
 import '../../mixins/settings_effect_mixin.dart';
+import '../../mixins/mounted_set_state_mixin.dart';
 import '../../mpv/mpv.dart';
 import '../overlay_sheet.dart';
 import '../../focus/dpad_navigator.dart';
@@ -75,93 +76,15 @@ part 'parts/playback_input.dart';
 part 'parts/track_controls.dart';
 part 'parts/visibility.dart';
 
-/// Custom video controls builder for Plex with chapter, audio, and subtitle support
-Widget plexVideoControlsBuilder(
-  Player player,
-  MediaItem metadata, {
-  VoidCallback? onNext,
-  VoidCallback? onPrevious,
-  List<MediaVersion>? availableVersions,
-  int? selectedMediaIndex,
-  TranscodeQualityPreset selectedQualityPreset = TranscodeQualityPreset.original,
-  bool serverSupportsTranscoding = false,
-  bool isTranscoding = false,
-  bool isOfflinePlayback = false,
-  List<MediaAudioTrack> sourceAudioTracks = const [],
-  int? selectedAudioStreamId,
-  VoidCallback? onTogglePIPMode,
-  int boxFitMode = 0,
-  VoidCallback? onCycleBoxFitMode,
-  VoidCallback? onCycleAudioTrack,
-  VoidCallback? onCycleSubtitleTrack,
-  Function(AudioTrack)? onAudioTrackChanged,
-  Function(SubtitleTrack)? onSubtitleTrackChanged,
-  Function(SubtitleTrack)? onSecondarySubtitleTrackChanged,
-  Function(Duration position)? onSeekCompleted,
-  VoidCallback? onBack,
-  void Function({required bool skipAutoPlayCountdown})? onReachedEnd,
-  bool canControl = true,
-  ValueNotifier<bool>? hasFirstFrame,
-  FocusNode? playNextFocusNode,
-  ValueNotifier<bool>? controlsVisible,
-  ShaderService? shaderService,
-  VoidCallback? onShaderChanged,
-  ScrubFrame? Function(Duration time)? thumbnailDataBuilder,
-  bool isLive = false,
-  String? liveChannelName,
-  CaptureBuffer? captureBuffer,
-  bool isAtLiveEdge = true,
-  double streamStartEpoch = 0,
-  int? currentPositionEpoch,
-  ValueChanged<int>? onLiveSeek,
-  VoidCallback? onJumpToLive,
-  bool isAmbientLightingEnabled = false,
-  VoidCallback? onToggleAmbientLighting,
-  required PlayerToastController toastController,
+@visibleForTesting
+ShaderPreset resolveShaderTogglePreset({
+  required ShaderPreset currentPreset,
+  required ShaderPreset savedPreset,
+  required List<ShaderPreset> allPresets,
 }) {
-  return PlexVideoControls(
-    player: player,
-    metadata: metadata,
-    toastController: toastController,
-    onNext: onNext,
-    onPrevious: onPrevious,
-    availableVersions: availableVersions ?? [],
-    selectedMediaIndex: selectedMediaIndex ?? 0,
-    selectedQualityPreset: selectedQualityPreset,
-    serverSupportsTranscoding: serverSupportsTranscoding,
-    isTranscoding: isTranscoding,
-    isOfflinePlayback: isOfflinePlayback,
-    sourceAudioTracks: sourceAudioTracks,
-    selectedAudioStreamId: selectedAudioStreamId,
-    boxFitMode: boxFitMode,
-    onTogglePIPMode: onTogglePIPMode,
-    onCycleBoxFitMode: onCycleBoxFitMode,
-    onCycleAudioTrack: onCycleAudioTrack,
-    onCycleSubtitleTrack: onCycleSubtitleTrack,
-    onAudioTrackChanged: onAudioTrackChanged,
-    onSubtitleTrackChanged: onSubtitleTrackChanged,
-    onSecondarySubtitleTrackChanged: onSecondarySubtitleTrackChanged,
-    onSeekCompleted: onSeekCompleted,
-    onBack: onBack,
-    onReachedEnd: onReachedEnd,
-    canControl: canControl,
-    hasFirstFrame: hasFirstFrame,
-    playNextFocusNode: playNextFocusNode,
-    controlsVisible: controlsVisible,
-    shaderService: shaderService,
-    onShaderChanged: onShaderChanged,
-    thumbnailDataBuilder: thumbnailDataBuilder,
-    isLive: isLive,
-    liveChannelName: liveChannelName,
-    captureBuffer: captureBuffer,
-    isAtLiveEdge: isAtLiveEdge,
-    streamStartEpoch: streamStartEpoch,
-    currentPositionEpoch: currentPositionEpoch,
-    onLiveSeek: onLiveSeek,
-    onJumpToLive: onJumpToLive,
-    isAmbientLightingEnabled: isAmbientLightingEnabled,
-    onToggleAmbientLighting: onToggleAmbientLighting,
-  );
+  if (currentPreset.isEnabled) return ShaderPreset.none;
+  if (savedPreset.isEnabled) return savedPreset;
+  return allPresets.firstWhere((p) => p.isEnabled, orElse: () => ShaderPreset.nvscalerDefault);
 }
 
 @visibleForTesting
@@ -171,6 +94,8 @@ Widget plexVideoControlsBuilder(
   bool isTranscoding,
   List<MediaAudioTrack> sourceAudioTracks,
   int? selectedAudioStreamId,
+  List<MediaSubtitleTrack> sourceSubtitleTracks,
+  int? selectedSubtitleStreamId,
   bool canSwitch,
 })
 effectiveVersionQualityControls({
@@ -180,6 +105,8 @@ effectiveVersionQualityControls({
   required bool isTranscoding,
   required List<MediaAudioTrack> sourceAudioTracks,
   required int? selectedAudioStreamId,
+  required List<MediaSubtitleTrack> sourceSubtitleTracks,
+  required int? selectedSubtitleStreamId,
 }) {
   if (isOfflinePlayback) {
     return (
@@ -188,6 +115,8 @@ effectiveVersionQualityControls({
       isTranscoding: false,
       sourceAudioTracks: const <MediaAudioTrack>[],
       selectedAudioStreamId: null,
+      sourceSubtitleTracks: const <MediaSubtitleTrack>[],
+      selectedSubtitleStreamId: null,
       canSwitch: false,
     );
   }
@@ -197,6 +126,8 @@ effectiveVersionQualityControls({
     isTranscoding: isTranscoding,
     sourceAudioTracks: sourceAudioTracks,
     selectedAudioStreamId: selectedAudioStreamId,
+    sourceSubtitleTracks: sourceSubtitleTracks,
+    selectedSubtitleStreamId: selectedSubtitleStreamId,
     canSwitch: true,
   );
 }
@@ -208,12 +139,16 @@ class PlexVideoControls extends StatefulWidget {
   final VoidCallback? onPrevious;
   final List<MediaVersion> availableVersions;
   final int selectedMediaIndex;
+  final String? selectedMediaSourceId;
   final TranscodeQualityPreset selectedQualityPreset;
   final bool serverSupportsTranscoding;
   final bool isTranscoding;
   final bool isOfflinePlayback;
   final List<MediaAudioTrack> sourceAudioTracks;
   final int? selectedAudioStreamId;
+  final List<MediaSubtitleTrack> sourceSubtitleTracks;
+  final int? selectedSubtitleStreamId;
+  final int? sourcePartId;
   final int boxFitMode;
   final VoidCallback? onTogglePIPMode;
   final VoidCallback? onCycleBoxFitMode;
@@ -222,6 +157,10 @@ class PlexVideoControls extends StatefulWidget {
   final Function(AudioTrack)? onAudioTrackChanged;
   final Function(SubtitleTrack)? onSubtitleTrackChanged;
   final Function(SubtitleTrack)? onSecondarySubtitleTrackChanged;
+
+  /// Called for app-level seek requests. Plex transcodes use this to restart
+  /// the server-side transcode session at the requested absolute timestamp.
+  final Future<void> Function(Duration position)? onSeekRequested;
 
   /// Called when a seek operation completes (for Watch Together sync)
   final Function(Duration position)? onSeekCompleted;
@@ -297,12 +236,16 @@ class PlexVideoControls extends StatefulWidget {
     this.onPrevious,
     this.availableVersions = const [],
     this.selectedMediaIndex = 0,
+    this.selectedMediaSourceId,
     this.selectedQualityPreset = TranscodeQualityPreset.original,
     this.serverSupportsTranscoding = false,
     this.isTranscoding = false,
     this.isOfflinePlayback = false,
     this.sourceAudioTracks = const [],
     this.selectedAudioStreamId,
+    this.sourceSubtitleTracks = const [],
+    this.selectedSubtitleStreamId,
+    this.sourcePartId,
     this.boxFitMode = 0,
     this.onTogglePIPMode,
     this.onCycleBoxFitMode,
@@ -311,6 +254,7 @@ class PlexVideoControls extends StatefulWidget {
     this.onAudioTrackChanged,
     this.onSubtitleTrackChanged,
     this.onSecondarySubtitleTrackChanged,
+    this.onSeekRequested,
     this.onSeekCompleted,
     this.onBack,
     this.onReachedEnd,
@@ -337,7 +281,8 @@ class PlexVideoControls extends StatefulWidget {
   State<PlexVideoControls> createState() => _PlexVideoControlsState();
 }
 
-class _PlexVideoControlsState extends State<PlexVideoControls> with WindowListener, SettingsEffectMixin {
+class _PlexVideoControlsState extends State<PlexVideoControls>
+    with WindowListener, SettingsEffectMixin, MountedSetStateMixin {
   bool _showControls = true;
   bool _forceShowControls = false;
   bool _isLoadingExtras = false;
@@ -501,7 +446,7 @@ class _PlexVideoControlsState extends State<PlexVideoControls> with WindowListen
     });
   }
 
-  void _setControlsState(VoidCallback fn) => setState(fn);
+  void _setControlsState(VoidCallback fn) => setStateIfMounted(fn);
 
   @override
   void dispose() {
@@ -704,6 +649,7 @@ class _PlexVideoControlsState extends State<PlexVideoControls> with WindowListen
                                                 ),
                                                 onSeek: _throttledSeek,
                                                 onSeekEnd: _finalizeSeek,
+                                                onSeekRequested: widget.onSeekRequested,
                                                 onSeekCompleted: widget.onSeekCompleted,
                                                 // ignore: no-empty-block - play/pause handled by parent VideoControlsState
                                                 onPlayPause: () {},
@@ -807,7 +753,7 @@ class _PlexVideoControlsState extends State<PlexVideoControls> with WindowListen
                     AnimatedPositioned(
                       duration: const Duration(milliseconds: 200),
                       curve: Curves.easeInOut,
-                      top: _showControls && isMobile ? 80.0 : 16.0,
+                      top: _showControls ? (isMobile ? 100.0 : 60.0) : 16.0,
                       left: 16,
                       child: AnimatedOpacity(
                         opacity: (!_autoHidePerformanceOverlay || _showControls || _forceShowControls) ? 1.0 : 0.0,

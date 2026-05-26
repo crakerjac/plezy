@@ -248,6 +248,12 @@
     "displaySwitchDelay": "Задержка переключения дисплея",
     "tunneledPlayback": "Туннельное воспроизведение",
     "tunneledPlaybackDescription": "Использовать видеотуннелирование. Отключите, если HDR показывает черный экран.",
+    "dvConversionMode": "Преобразование Dolby Vision",
+    "dvConversionModeDescription": "Выберите, как ExoPlayer обрабатывает файлы Dolby Vision Profile 7.",
+    "dvConversionAuto": "Авто",
+    "dvConversionNative": "Нативно / отключено",
+    "dvConversionDv81": "P7 → P8.1",
+    "dvConversionHevcStrip": "P7 → HEVC",
     "requireProfileSelectionOnOpen": "Запрашивать профиль при запуске",
     "requireProfileSelectionOnOpenDescription": "Показывать выбор профиля при каждом открытии приложения",
     "forceTvMode": "Принудительный режим ТВ",
@@ -300,7 +306,8 @@
       "subSeekNext": "К следующему субтитру",
       "subSeekPrev": "К предыдущему субтитру",
       "shaderToggle": "Вкл./выкл. шейдеры",
-      "skipMarker": "Пропустить вступление/титры"
+      "skipMarker": "Пропустить вступление/титры",
+      "screenshot": "Сделать снимок экрана"
     }
   },
   "fileInfo": {
@@ -346,6 +353,19 @@
     "rate": "Оценить",
     "playFromBeginning": "Воспроизвести сначала",
     "playVersion": "Воспроизвести версию..."
+  },
+  "rateSheet": {
+    "title": "Оценить",
+    "server": "Сервер",
+    "starValue": "${rating} / 5",
+    "scoreValue": "${score} / 10",
+    "setScore": "Установить оценку",
+    "notRated": "Без оценки",
+    "liked": "Понравилось",
+    "notLiked": "Не отмечено понравившимся",
+    "saved": "Сохранено",
+    "notAvailable": "Совпадений не найдено",
+    "noConnectedTrackers": "Подключите трекер в настройках, чтобы оценивать там."
   },
   "accessibility": {
     "mediaCardMovie": "${title}, фильм",
@@ -394,7 +414,7 @@
     "nextChapterButton": "Следующая глава",
     "muteButton": "Без звука",
     "unmuteButton": "Включить звук",
-    "settingsButton": "Настройки видео",
+    "settingsButton": "Настройки воспроизведения",
     "tracksButton": "Аудио и субтитры",
     "chaptersButton": "Главы",
     "versionsButton": "Версии видео",
@@ -420,6 +440,7 @@
     "endsAt": "Закончится в ${time}",
     "pipActive": "Воспроизводится в режиме «картинка в картинке»",
     "pipFailed": "Не удалось запустить режим «картинка в картинке»",
+    "screenshotSaved": "Снимок экрана сохранён",
     "pipErrors": {
       "androidVersion": "Требуется Android 8.0 или новее",
       "iosVersion": "Требуется iOS 15.0 или новее",
@@ -691,8 +712,18 @@
       "dateAdded": "Дата добавления",
       "releaseDate": "Дата выхода",
       "rating": "Рейтинг",
+      "communityRating": "Оценка сообщества",
+      "criticRating": "Оценка критиков",
       "lastPlayed": "Последний просмотр",
+      "datePlayed": "Дата просмотра",
       "playCount": "Количество просмотров",
+      "productionYear": "Год производства",
+      "runtime": "Длительность",
+      "officialRating": "Официальный рейтинг",
+      "premiereDate": "Дата премьеры",
+      "startDate": "Дата начала",
+      "airTime": "Время эфира",
+      "studio": "Студия",
       "random": "Случайно",
       "dateShared": "Дата открытия доступа",
       "latestEpisodeAirDate": "Дата выхода последнего эпизода"
@@ -1045,7 +1076,6 @@
     }
   },
   "videoSettings": {
-    "playbackSettings": "Настройки воспроизведения",
     "playbackSpeed": "Скорость воспроизведения",
     "sleepTimer": "Таймер сна",
     "audioSync": "Синхронизация аудио",

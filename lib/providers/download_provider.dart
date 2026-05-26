@@ -13,6 +13,7 @@ import '../database/app_database.dart';
 import '../database/download_operations.dart';
 import '../services/download_manager_service.dart';
 import '../services/api_cache.dart';
+import '../services/download_artwork_service.dart';
 import '../services/plex_syncer_import_service.dart';
 import '../services/download_storage_service.dart';
 import '../services/multi_server_manager.dart';
@@ -42,8 +43,13 @@ class DownloadedArtwork {
   /// Get the local file path for this artwork
   String? getLocalPath(DownloadStorageService storage, String serverId) {
     if (thumbPath == null) return null;
-    return storage.getArtworkPathSync(serverId, thumbPath!);
+    return DownloadArtworkService.localPathSync(storage, serverId, thumbPath);
   }
+}
+
+class _RelatedMetadataDownloadContext {
+  final hydratedMetadataKeys = <String>{};
+  final ensuredArtworkKeys = <String>{};
 }
 
 /// Provider for managing download state and operations.
@@ -89,10 +95,8 @@ class DownloadProvider extends ChangeNotifier with DisposableChangeNotifierMixin
 
   OfflineModeSource? _offlineSource;
 
-  DownloadProvider({required DownloadManagerService downloadManager, required AppDatabase database})
-    : _downloadManager = downloadManager,
-      _database = database,
-      _syncRuleExecutor = SyncRuleExecutor(database: database) {
+  DownloadProvider({required this._downloadManager, required this._database})
+    : _syncRuleExecutor = SyncRuleExecutor(database: _database) {
     // Listen to progress updates from the download manager
     _progressSubscription = _downloadManager.progressStream.listen(_onProgressUpdate);
 
@@ -114,13 +118,10 @@ class DownloadProvider extends ChangeNotifier with DisposableChangeNotifierMixin
   /// or path_provider.
   @visibleForTesting
   DownloadProvider.forTesting({
-    required DownloadManagerService downloadManager,
-    required AppDatabase database,
-    String? activeProfileId = 'test-profile',
-  }) : _downloadManager = downloadManager,
-       _database = database,
-       _syncRuleExecutor = SyncRuleExecutor(database: database),
-       _activeProfileId = activeProfileId {
+    required this._downloadManager,
+    required this._database,
+    this._activeProfileId = 'test-profile',
+  }) : _syncRuleExecutor = SyncRuleExecutor(database: _database) {
     _progressSubscription = _downloadManager.progressStream.listen(_onProgressUpdate);
     _deletionProgressSubscription = _downloadManager.deletionProgressStream.listen(_onDeletionProgressUpdate);
     _watchStateSubscription = WatchStateNotifier().stream.listen(_onWatchStateChanged);
@@ -602,7 +603,7 @@ class DownloadProvider extends ChangeNotifier with DisposableChangeNotifierMixin
     // Strip Plex timestamp suffix so timestamped and non-timestamped URLs
     // resolve to the same local file (e.g. /thumb/1777409847 → /thumb).
     final canonical = artworkPath.replaceAll(RegExp(r'/\d+$'), '');
-    return DownloadStorageService.instance.getArtworkPathSync(serverId, canonical);
+    return DownloadArtworkService.localPathSync(DownloadStorageService.instance, serverId, canonical);
   }
 
   /// Get downloaded episodes for a specific show (by grandparentRatingKey)
@@ -885,6 +886,8 @@ class DownloadProvider extends ChangeNotifier with DisposableChangeNotifierMixin
     DownloadFilter filter = DownloadFilter.all,
     int? maxCount,
   }) async {
+    if (!_downloadManager.downloadsSupported) return 0;
+
     final globalKey = metadata.globalKey;
     final config = versionConfig ?? DownloadVersionConfig();
 
@@ -947,16 +950,19 @@ class DownloadProvider extends ChangeNotifier with DisposableChangeNotifierMixin
     DownloadFilter filter = DownloadFilter.all,
     bool expandShows = true,
   }) async {
+    if (!_downloadManager.downloadsSupported) return 0;
+
     if (await DownloadManagerService.shouldBlockDownloadOnCellular()) {
       throw CellularDownloadBlockedException();
     }
 
     final unwatchedOnly = filter == DownloadFilter.unwatched;
+    final relatedContext = _RelatedMetadataDownloadContext();
     int count = 0;
 
     Future<void> queueItem(MediaItem item) async {
       if (unwatchedOnly && item.isWatched && !item.hasActiveProgress) return;
-      final queued = await _queueSingleDownload(item, client);
+      final queued = await _queueSingleDownload(item, client, relatedContext: relatedContext);
       if (queued) count++;
     }
 
@@ -970,9 +976,9 @@ class DownloadProvider extends ChangeNotifier with DisposableChangeNotifierMixin
         // was the same pattern as collectEpisodes*, just inlined.
         final episodes = <MediaItem>[];
         if (item.isShow) {
-          await collectEpisodesForShow(client, item.id, unwatchedOnly: unwatchedOnly, out: episodes);
+          await collectEpisodesForShow(client, item.id, unwatchedOnly: unwatchedOnly, out: episodes, fallback: item);
         } else {
-          await collectEpisodesForSeason(client, item.id, unwatchedOnly: unwatchedOnly, out: episodes);
+          await collectEpisodesForSeason(client, item.id, unwatchedOnly: unwatchedOnly, out: episodes, fallback: item);
         }
         for (final ep in episodes) {
           await queueItem(ep);
@@ -992,7 +998,10 @@ class DownloadProvider extends ChangeNotifier with DisposableChangeNotifierMixin
     MediaServerClient client, {
     int mediaIndex = 0,
     DownloadVersionConfig? versionConfig,
+    _RelatedMetadataDownloadContext? relatedContext,
   }) async {
+    if (!_downloadManager.downloadsSupported) return false;
+
     _requireActiveProfileId();
     final globalKey = metadata.globalKey;
 
@@ -1027,6 +1036,8 @@ class DownloadProvider extends ChangeNotifier with DisposableChangeNotifierMixin
           metadataToStore = fullMetadata.copyWith(
             serverId: metadata.serverId ?? fullMetadata.serverId,
             serverName: metadata.serverName ?? fullMetadata.serverName,
+            libraryId: fullMetadata.libraryId ?? metadata.libraryId,
+            libraryTitle: fullMetadata.libraryTitle ?? metadata.libraryTitle,
           );
         }
       } catch (e) {
@@ -1053,7 +1064,11 @@ class DownloadProvider extends ChangeNotifier with DisposableChangeNotifierMixin
 
     // For episodes, also fetch and store show and season metadata for offline display
     if (metadataToStore.isEpisode) {
-      await _fetchAndStoreParentMetadata(metadataToStore, client);
+      await _fetchAndStoreParentMetadata(
+        metadataToStore,
+        client,
+        context: relatedContext ?? _RelatedMetadataDownloadContext(),
+      );
     }
 
     // Store full metadata for display
@@ -1072,12 +1087,26 @@ class DownloadProvider extends ChangeNotifier with DisposableChangeNotifierMixin
 
   /// Fetch and store show and season metadata for an episode
   /// Also downloads artwork for show and season
-  Future<void> _fetchAndStoreParentMetadata(MediaItem episode, MediaServerClient client) async {
+  Future<void> _fetchAndStoreParentMetadata(
+    MediaItem episode,
+    MediaServerClient client, {
+    required _RelatedMetadataDownloadContext context,
+  }) async {
     final serverId = episode.serverId;
     if (serverId == null) return;
 
-    await _fetchAndStoreRelatedMetadata(serverId: serverId, ratingKey: episode.grandparentId, client: client);
-    await _fetchAndStoreRelatedMetadata(serverId: serverId, ratingKey: episode.parentId, client: client);
+    await _fetchAndStoreRelatedMetadata(
+      serverId: serverId,
+      ratingKey: episode.grandparentId,
+      client: client,
+      context: context,
+    );
+    await _fetchAndStoreRelatedMetadata(
+      serverId: serverId,
+      ratingKey: episode.parentId,
+      client: client,
+      context: context,
+    );
   }
 
   /// Fetch, persist, and download artwork for a related metadata item (show or season).
@@ -1085,15 +1114,27 @@ class DownloadProvider extends ChangeNotifier with DisposableChangeNotifierMixin
     required String serverId,
     required String? ratingKey,
     required MediaServerClient client,
+    required _RelatedMetadataDownloadContext context,
   }) async {
     if (ratingKey == null) return;
     final globalKey = buildGlobalKey(serverId, ratingKey);
-    final storageService = DownloadStorageService.instance;
 
     MediaItem? metadata = _metadata[globalKey];
-    if (metadata == null) {
+    var fetchedFreshMetadata = false;
+    if (!(_offlineSource?.isOffline ?? false) && !context.hydratedMetadataKeys.contains(globalKey)) {
       try {
-        metadata = await client.fetchItem(ratingKey);
+        final fetched = await client.fetchItem(ratingKey);
+        if (fetched != null) {
+          final existing = metadata;
+          metadata = fetched.copyWith(
+            serverId: existing?.serverId ?? fetched.serverId ?? serverId,
+            serverName: existing?.serverName ?? fetched.serverName,
+            libraryId: fetched.libraryId ?? existing?.libraryId,
+            libraryTitle: fetched.libraryTitle ?? existing?.libraryTitle,
+          );
+          context.hydratedMetadataKeys.add(globalKey);
+          fetchedFreshMetadata = true;
+        }
       } catch (e) {
         appLogger.w('Failed to fetch metadata for $ratingKey', error: e);
       }
@@ -1105,8 +1146,7 @@ class DownloadProvider extends ChangeNotifier with DisposableChangeNotifierMixin
     await _downloadManager.saveMetadata(withServer, client);
 
     final thumbPath = withServer.thumbPath;
-    final hasPoster = thumbPath != null && await storageService.artworkExists(serverId, thumbPath);
-    if (!hasPoster) {
+    if (fetchedFreshMetadata || context.ensuredArtworkKeys.add(globalKey)) {
       await _downloadManager.downloadArtworkForMetadata(withServer, client);
     }
     _artworkPaths[globalKey] = DownloadedArtwork(thumbPath: thumbPath);
@@ -1194,11 +1234,24 @@ class DownloadProvider extends ChangeNotifier with DisposableChangeNotifierMixin
     required bool skipExisting,
   }) async {
     final unwatchedOnly = filter == DownloadFilter.unwatched;
+    final relatedContext = _RelatedMetadataDownloadContext();
     final episodes = <MediaItem>[];
     if (container.kind == MediaKind.show) {
-      await collectEpisodesForShow(client, container.id, unwatchedOnly: unwatchedOnly, out: episodes);
+      await collectEpisodesForShow(
+        client,
+        container.id,
+        unwatchedOnly: unwatchedOnly,
+        out: episodes,
+        fallback: container,
+      );
     } else {
-      await collectEpisodesForSeason(client, container.id, unwatchedOnly: unwatchedOnly, out: episodes);
+      await collectEpisodesForSeason(
+        client,
+        container.id,
+        unwatchedOnly: unwatchedOnly,
+        out: episodes,
+        fallback: container,
+      );
     }
 
     int count = 0;
@@ -1218,7 +1271,12 @@ class DownloadProvider extends ChangeNotifier with DisposableChangeNotifierMixin
         }
       }
 
-      final queued = await _queueSingleDownload(episodeWithServer, client, versionConfig: versionConfig);
+      final queued = await _queueSingleDownload(
+        episodeWithServer,
+        client,
+        versionConfig: versionConfig,
+        relatedContext: relatedContext,
+      );
       if (queued) count++;
     }
     return count;
@@ -1394,6 +1452,7 @@ class DownloadProvider extends ChangeNotifier with DisposableChangeNotifierMixin
   /// Resume queued downloads that were interrupted by app kill.
   /// Call after a [MediaServerClient] becomes available (e.g. after server connect on launch).
   void resumeQueuedDownloads(MediaServerClient client) {
+    if (!_downloadManager.downloadsSupported) return;
     _downloadManager.resumeQueuedDownloads(client);
   }
 
@@ -1663,17 +1722,20 @@ class DownloadProvider extends ChangeNotifier with DisposableChangeNotifierMixin
   ///
   /// Returns titles of newly queued items (for snackbar display).
   Future<List<String>> executeSyncRules(MultiServerManager serverManager, {bool force = false}) async {
+    if (!_downloadManager.downloadsSupported) return [];
+
     final profileId = _activeProfileId;
     if (profileId == null || profileId.isEmpty) return [];
     if (_syncRules.isEmpty) return [];
 
+    final relatedContext = _RelatedMetadataDownloadContext();
     final results = await _syncRuleExecutor.executeSyncRules(
       profileId: profileId,
       serverManager: serverManager,
       downloads: downloads,
       metadata: Map.unmodifiable(_metadata),
       queueSingleDownload: (episode, client, {int mediaIndex = 0}) =>
-          _queueSingleDownload(episode, client, mediaIndex: mediaIndex),
+          _queueSingleDownload(episode, client, mediaIndex: mediaIndex, relatedContext: relatedContext),
       force: force,
     );
 
@@ -1686,10 +1748,13 @@ class DownloadProvider extends ChangeNotifier with DisposableChangeNotifierMixin
   /// Execute a single sync rule immediately (eager path for `addToPlaylist` /
   /// `addToCollection`). Bypasses the cooldown.
   Future<SyncRuleResult?> executeSyncRuleFor(String globalKey, MultiServerManager serverManager) async {
+    if (!_downloadManager.downloadsSupported) return null;
+
     final profileId = _activeProfileId;
     if (profileId == null || profileId.isEmpty) return null;
     if (!_syncRules.containsKey(globalKey)) return null;
 
+    final relatedContext = _RelatedMetadataDownloadContext();
     return _syncRuleExecutor.executeSingleRule(
       profileId: profileId,
       globalKey: globalKey,
@@ -1697,7 +1762,7 @@ class DownloadProvider extends ChangeNotifier with DisposableChangeNotifierMixin
       downloads: downloads,
       metadata: Map.unmodifiable(_metadata),
       queueSingleDownload: (episode, client, {int mediaIndex = 0}) =>
-          _queueSingleDownload(episode, client, mediaIndex: mediaIndex),
+          _queueSingleDownload(episode, client, mediaIndex: mediaIndex, relatedContext: relatedContext),
     );
   }
 

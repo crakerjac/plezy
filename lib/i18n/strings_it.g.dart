@@ -49,6 +49,7 @@ class TranslationsIt extends Translations with BaseTranslations<AppLocale, Trans
 	@override late final _TranslationsHotkeysIt hotkeys = _TranslationsHotkeysIt._(_root);
 	@override late final _TranslationsFileInfoIt fileInfo = _TranslationsFileInfoIt._(_root);
 	@override late final _TranslationsMediaMenuIt mediaMenu = _TranslationsMediaMenuIt._(_root);
+	@override late final _TranslationsRateSheetIt rateSheet = _TranslationsRateSheetIt._(_root);
 	@override late final _TranslationsAccessibilityIt accessibility = _TranslationsAccessibilityIt._(_root);
 	@override late final _TranslationsTooltipsIt tooltips = _TranslationsTooltipsIt._(_root);
 	@override late final _TranslationsVideoControlsIt videoControls = _TranslationsVideoControlsIt._(_root);
@@ -375,6 +376,12 @@ class _TranslationsSettingsIt extends TranslationsSettingsEn {
 	@override String get displaySwitchDelay => 'Ritardo cambio display';
 	@override String get tunneledPlayback => 'Riproduzione tunnelizzata';
 	@override String get tunneledPlaybackDescription => 'Usa tunneling video. Disattiva se la riproduzione HDR mostra video nero.';
+	@override String get dvConversionMode => 'Conversione Dolby Vision';
+	@override String get dvConversionModeDescription => 'Scegli come ExoPlayer gestisce i file Dolby Vision Profile 7.';
+	@override String get dvConversionAuto => 'Auto';
+	@override String get dvConversionNative => 'Nativo / disattivato';
+	@override String get dvConversionDv81 => 'P7 → P8.1';
+	@override String get dvConversionHevcStrip => 'P7 → HEVC';
 	@override String get requireProfileSelectionOnOpen => 'Chiedi profilo all\'apertura';
 	@override String get requireProfileSelectionOnOpenDescription => 'Mostra la selezione del profilo ogni volta che l\'app viene aperta';
 	@override String get forceTvMode => 'Forza modalità TV';
@@ -481,6 +488,26 @@ class _TranslationsMediaMenuIt extends TranslationsMediaMenuEn {
 	@override String get playVersion => 'Riproduci versione...';
 }
 
+// Path: rateSheet
+class _TranslationsRateSheetIt extends TranslationsRateSheetEn {
+	_TranslationsRateSheetIt._(TranslationsIt root) : this._root = root, super.internal(root);
+
+	final TranslationsIt _root; // ignore: unused_field
+
+	// Translations
+	@override String get title => 'Valuta';
+	@override String get server => 'Server';
+	@override String starValue({required Object rating}) => '${rating} / 5';
+	@override String scoreValue({required Object score}) => '${score} / 10';
+	@override String get setScore => 'Imposta un punteggio';
+	@override String get notRated => 'Non valutato';
+	@override String get liked => 'Mi piace';
+	@override String get notLiked => 'Non contrassegnato con Mi piace';
+	@override String get saved => 'Salvato';
+	@override String get notAvailable => 'Nessuna corrispondenza trovata';
+	@override String get noConnectedTrackers => 'Collega un tracker in Impostazioni per valutarlo lì.';
+}
+
 // Path: accessibility
 class _TranslationsAccessibilityIt extends TranslationsAccessibilityEn {
 	_TranslationsAccessibilityIt._(TranslationsIt root) : this._root = root, super.internal(root);
@@ -548,7 +575,7 @@ class _TranslationsVideoControlsIt extends TranslationsVideoControlsEn {
 	@override String get nextChapterButton => 'Capitolo successivo';
 	@override String get muteButton => 'Silenzia';
 	@override String get unmuteButton => 'Riattiva audio';
-	@override String get settingsButton => 'Impostazioni video';
+	@override String get settingsButton => 'Impostazioni di riproduzione';
 	@override String get tracksButton => 'Audio e sottotitoli';
 	@override String get chaptersButton => 'Capitoli';
 	@override String get versionsButton => 'Versioni video';
@@ -574,6 +601,7 @@ class _TranslationsVideoControlsIt extends TranslationsVideoControlsEn {
 	@override String endsAt({required Object time}) => 'Finisce alle ${time}';
 	@override String get pipActive => 'Riproduzione in Picture-in-Picture';
 	@override String get pipFailed => 'Impossibile avviare la modalità Picture-in-Picture';
+	@override String get screenshotSaved => 'Schermata salvata';
 	@override late final _TranslationsVideoControlsPipErrorsIt pipErrors = _TranslationsVideoControlsPipErrorsIt._(_root);
 	@override String get chapters => 'Capitoli';
 	@override String get noChaptersAvailable => 'Nessun capitolo disponibile';
@@ -1274,7 +1302,6 @@ class _TranslationsVideoSettingsIt extends TranslationsVideoSettingsEn {
 	final TranslationsIt _root; // ignore: unused_field
 
 	// Translations
-	@override String get playbackSettings => 'Impostazioni di riproduzione';
 	@override String get playbackSpeed => 'Velocità di riproduzione';
 	@override String get sleepTimer => 'Timer di spegnimento';
 	@override String get audioSync => 'Sincronizzazione audio';
@@ -1535,6 +1562,7 @@ class _TranslationsHotkeysActionsIt extends TranslationsHotkeysActionsEn {
 	@override String get subSeekPrev => 'Vai al sottotitolo precedente';
 	@override String get shaderToggle => 'Attiva/disattiva shader';
 	@override String get skipMarker => 'Salta intro/titoli di coda';
+	@override String get screenshot => 'Cattura schermata';
 }
 
 // Path: videoControls.pipErrors
@@ -1606,8 +1634,18 @@ class _TranslationsLibrariesSortLabelsIt extends TranslationsLibrariesSortLabels
 	@override String get dateAdded => 'Data di aggiunta';
 	@override String get releaseDate => 'Data di uscita';
 	@override String get rating => 'Valutazione';
+	@override String get communityRating => 'Valutazione della community';
+	@override String get criticRating => 'Valutazione critica';
 	@override String get lastPlayed => 'Ultima riproduzione';
+	@override String get datePlayed => 'Data di riproduzione';
 	@override String get playCount => 'Riproduzioni';
+	@override String get productionYear => 'Anno di produzione';
+	@override String get runtime => 'Durata';
+	@override String get officialRating => 'Classificazione ufficiale';
+	@override String get premiereDate => 'Data di première';
+	@override String get startDate => 'Data di inizio';
+	@override String get airTime => 'Orario di messa in onda';
+	@override String get studio => 'Studio';
 	@override String get random => 'Casuale';
 	@override String get dateShared => 'Data di condivisione';
 	@override String get latestEpisodeAirDate => 'Data ultima messa in onda';
@@ -2000,6 +2038,12 @@ extension on TranslationsIt {
 			'settings.displaySwitchDelay' => 'Ritardo cambio display',
 			'settings.tunneledPlayback' => 'Riproduzione tunnelizzata',
 			'settings.tunneledPlaybackDescription' => 'Usa tunneling video. Disattiva se la riproduzione HDR mostra video nero.',
+			'settings.dvConversionMode' => 'Conversione Dolby Vision',
+			'settings.dvConversionModeDescription' => 'Scegli come ExoPlayer gestisce i file Dolby Vision Profile 7.',
+			'settings.dvConversionAuto' => 'Auto',
+			'settings.dvConversionNative' => 'Nativo / disattivato',
+			'settings.dvConversionDv81' => 'P7 → P8.1',
+			'settings.dvConversionHevcStrip' => 'P7 → HEVC',
 			'settings.requireProfileSelectionOnOpen' => 'Chiedi profilo all\'apertura',
 			'settings.requireProfileSelectionOnOpenDescription' => 'Mostra la selezione del profilo ogni volta che l\'app viene aperta',
 			'settings.forceTvMode' => 'Forza modalità TV',
@@ -2048,6 +2092,7 @@ extension on TranslationsIt {
 			'hotkeys.actions.subSeekPrev' => 'Vai al sottotitolo precedente',
 			'hotkeys.actions.shaderToggle' => 'Attiva/disattiva shader',
 			'hotkeys.actions.skipMarker' => 'Salta intro/titoli di coda',
+			'hotkeys.actions.screenshot' => 'Cattura schermata',
 			'fileInfo.title' => 'Info sul file',
 			'fileInfo.video' => 'Video',
 			'fileInfo.audio' => 'Audio',
@@ -2088,6 +2133,17 @@ extension on TranslationsIt {
 			'mediaMenu.rate' => 'Valuta',
 			'mediaMenu.playFromBeginning' => 'Riproduci dall\'inizio',
 			'mediaMenu.playVersion' => 'Riproduci versione...',
+			'rateSheet.title' => 'Valuta',
+			'rateSheet.server' => 'Server',
+			'rateSheet.starValue' => ({required Object rating}) => '${rating} / 5',
+			'rateSheet.scoreValue' => ({required Object score}) => '${score} / 10',
+			'rateSheet.setScore' => 'Imposta un punteggio',
+			'rateSheet.notRated' => 'Non valutato',
+			'rateSheet.liked' => 'Mi piace',
+			'rateSheet.notLiked' => 'Non contrassegnato con Mi piace',
+			'rateSheet.saved' => 'Salvato',
+			'rateSheet.notAvailable' => 'Nessuna corrispondenza trovata',
+			'rateSheet.noConnectedTrackers' => 'Collega un tracker in Impostazioni per valutarlo lì.',
 			'accessibility.mediaCardMovie' => ({required Object title}) => '${title}, film',
 			'accessibility.mediaCardShow' => ({required Object title}) => '${title}, serie TV',
 			'accessibility.mediaCardEpisode' => ({required Object title, required Object episodeInfo}) => '${title}, ${episodeInfo}',
@@ -2130,7 +2186,7 @@ extension on TranslationsIt {
 			'videoControls.nextChapterButton' => 'Capitolo successivo',
 			'videoControls.muteButton' => 'Silenzia',
 			'videoControls.unmuteButton' => 'Riattiva audio',
-			'videoControls.settingsButton' => 'Impostazioni video',
+			'videoControls.settingsButton' => 'Impostazioni di riproduzione',
 			'videoControls.tracksButton' => 'Audio e sottotitoli',
 			'videoControls.chaptersButton' => 'Capitoli',
 			'videoControls.versionsButton' => 'Versioni video',
@@ -2156,6 +2212,7 @@ extension on TranslationsIt {
 			'videoControls.endsAt' => ({required Object time}) => 'Finisce alle ${time}',
 			'videoControls.pipActive' => 'Riproduzione in Picture-in-Picture',
 			'videoControls.pipFailed' => 'Impossibile avviare la modalità Picture-in-Picture',
+			'videoControls.screenshotSaved' => 'Schermata salvata',
 			'videoControls.pipErrors.androidVersion' => 'Richiede Android 8.0 o versioni successive',
 			'videoControls.pipErrors.iosVersion' => 'Richiede iOS 15.0 o versioni successive',
 			'videoControls.pipErrors.permissionDisabled' => 'Picture-in-picture è disattivato. Attivalo nelle impostazioni di sistema.',
@@ -2255,6 +2312,8 @@ extension on TranslationsIt {
 			'profiles.signOut' => 'Esci',
 			'profiles.signOutPlexTitle' => 'Uscire da Plex?',
 			'profiles.signOutPlexMessage' => ({required Object displayName}) => 'Rimuovere ${displayName} e tutti gli utenti Plex Home? Puoi accedere di nuovo quando vuoi.',
+			_ => null,
+		} ?? switch (path) {
 			'profiles.signedOutPlex' => 'Uscito da Plex.',
 			'profiles.signOutFailed' => 'Uscita non riuscita.',
 			'profiles.sectionTitle' => 'Profili',
@@ -2274,8 +2333,6 @@ extension on TranslationsIt {
 			'profiles.confirmPinTitle' => 'Conferma PIN',
 			'profiles.pinSet' => 'PIN impostato',
 			'profiles.changePin' => 'Cambia',
-			_ => null,
-		} ?? switch (path) {
 			'profiles.removePin' => 'Rimuovi',
 			'profiles.connectionsLabel' => 'Connessioni',
 			'profiles.add' => 'Aggiungi',
@@ -2400,8 +2457,18 @@ extension on TranslationsIt {
 			'libraries.sortLabels.dateAdded' => 'Data di aggiunta',
 			'libraries.sortLabels.releaseDate' => 'Data di uscita',
 			'libraries.sortLabels.rating' => 'Valutazione',
+			'libraries.sortLabels.communityRating' => 'Valutazione della community',
+			'libraries.sortLabels.criticRating' => 'Valutazione critica',
 			'libraries.sortLabels.lastPlayed' => 'Ultima riproduzione',
+			'libraries.sortLabels.datePlayed' => 'Data di riproduzione',
 			'libraries.sortLabels.playCount' => 'Riproduzioni',
+			'libraries.sortLabels.productionYear' => 'Anno di produzione',
+			'libraries.sortLabels.runtime' => 'Durata',
+			'libraries.sortLabels.officialRating' => 'Classificazione ufficiale',
+			'libraries.sortLabels.premiereDate' => 'Data di première',
+			'libraries.sortLabels.startDate' => 'Data di inizio',
+			'libraries.sortLabels.airTime' => 'Orario di messa in onda',
+			'libraries.sortLabels.studio' => 'Studio',
 			'libraries.sortLabels.random' => 'Casuale',
 			'libraries.sortLabels.dateShared' => 'Data di condivisione',
 			'libraries.sortLabels.latestEpisodeAirDate' => 'Data ultima messa in onda',
@@ -2719,7 +2786,6 @@ extension on TranslationsIt {
 			'companionRemote.remote.subtitles' => 'Sottotitoli',
 			'companionRemote.remote.audio' => 'Audio',
 			'companionRemote.remote.searchHint' => 'Cerca sul desktop...',
-			'videoSettings.playbackSettings' => 'Impostazioni di riproduzione',
 			'videoSettings.playbackSpeed' => 'Velocità di riproduzione',
 			'videoSettings.sleepTimer' => 'Timer di spegnimento',
 			'videoSettings.audioSync' => 'Sincronizzazione audio',
@@ -2760,6 +2826,8 @@ extension on TranslationsIt {
 			'metadataEdit.poster' => 'Poster',
 			'metadataEdit.background' => 'Sfondo',
 			'metadataEdit.logo' => 'Logo',
+			_ => null,
+		} ?? switch (path) {
 			'metadataEdit.squareArt' => 'Immagine quadrata',
 			'metadataEdit.selectPoster' => 'Seleziona poster',
 			'metadataEdit.selectBackground' => 'Seleziona sfondo',
@@ -2788,8 +2856,6 @@ extension on TranslationsIt {
 			'metadataEdit.episodesAddedPastDays' => ({required Object count}) => 'Episodi aggiunti negli ultimi ${count} giorni',
 			'metadataEdit.deleteAfterPlaying' => 'Elimina episodi dopo la riproduzione',
 			'metadataEdit.never' => 'Mai',
-			_ => null,
-		} ?? switch (path) {
 			'metadataEdit.afterADay' => 'Dopo un giorno',
 			'metadataEdit.afterAWeek' => 'Dopo una settimana',
 			'metadataEdit.afterAMonth' => 'Dopo un mese',

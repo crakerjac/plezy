@@ -182,8 +182,10 @@ class KeyboardShortcutsService extends ChangeNotifier {
     VoidCallback? onSkipMarker,
     VoidCallback? onNextEpisode,
     VoidCallback? onPreviousEpisode,
+    VoidCallback? onScreenshot,
     int? currentPositionEpoch,
     ValueChanged<int>? onLiveSeek,
+    Future<void> Function(Duration position)? onSeekRequested,
   }) {
     if (event is! KeyDownEvent) return KeyEventResult.ignored;
 
@@ -258,8 +260,10 @@ class KeyboardShortcutsService extends ChangeNotifier {
           onSkipMarker: onSkipMarker,
           onNextEpisode: onNextEpisode,
           onPreviousEpisode: onPreviousEpisode,
+          onScreenshot: onScreenshot,
           currentPositionEpoch: currentPositionEpoch,
           onLiveSeek: onLiveSeek,
+          onSeekRequested: onSeekRequested,
         );
         return KeyEventResult.handled;
       }
@@ -281,15 +285,17 @@ class KeyboardShortcutsService extends ChangeNotifier {
     VoidCallback? onSkipMarker,
     VoidCallback? onNextEpisode,
     VoidCallback? onPreviousEpisode,
+    VoidCallback? onScreenshot,
     int? currentPositionEpoch,
     ValueChanged<int>? onLiveSeek,
+    Future<void> Function(Duration position)? onSeekRequested,
   }) {
     void performSeek(int offsetSeconds) {
       if (onLiveSeek != null && currentPositionEpoch != null) {
         onLiveSeek(currentPositionEpoch + offsetSeconds);
       } else {
         final target = clampSeekPosition(player, player.state.position + Duration(seconds: offsetSeconds));
-        unawaited(player.seek(target));
+        unawaited((onSeekRequested ?? player.seek)(target));
       }
     }
 
@@ -374,6 +380,9 @@ class KeyboardShortcutsService extends ChangeNotifier {
       case 'skip_marker':
         onSkipMarker?.call();
         break;
+      case 'screenshot':
+        unawaited(player.command(['screenshot', 'subtitles']).then((_) => onScreenshot?.call()));
+        break;
     }
   }
 
@@ -425,6 +434,8 @@ class KeyboardShortcutsService extends ChangeNotifier {
         return t.hotkeys.actions.shaderToggle;
       case 'skip_marker':
         return t.hotkeys.actions.skipMarker;
+      case 'screenshot':
+        return t.hotkeys.actions.screenshot;
       default:
         return action;
     }

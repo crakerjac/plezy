@@ -248,6 +248,12 @@
     "displaySwitchDelay": "Opóźnienie przełączania ekranu",
     "tunneledPlayback": "Tunelowane odtwarzanie",
     "tunneledPlaybackDescription": "Użyj tunelowania wideo. Wyłącz, jeśli HDR pokazuje czarny obraz.",
+    "dvConversionMode": "Konwersja Dolby Vision",
+    "dvConversionModeDescription": "Wybierz, jak ExoPlayer obsługuje pliki Dolby Vision Profile 7.",
+    "dvConversionAuto": "Automatycznie",
+    "dvConversionNative": "Natywnie / wyłączone",
+    "dvConversionDv81": "P7 → P8.1",
+    "dvConversionHevcStrip": "P7 → HEVC",
     "requireProfileSelectionOnOpen": "Pytaj o profil przy otwarciu aplikacji",
     "requireProfileSelectionOnOpenDescription": "Pokaż wybór profilu za każdym razem, gdy aplikacja jest otwierana",
     "forceTvMode": "Wymuś tryb TV",
@@ -300,7 +306,8 @@
       "subSeekNext": "Przewiń do następnego napisu",
       "subSeekPrev": "Przewiń do poprzedniego napisu",
       "shaderToggle": "Przełącz shadery",
-      "skipMarker": "Pomiń intro/napisy końcowe"
+      "skipMarker": "Pomiń intro/napisy końcowe",
+      "screenshot": "Zrób zrzut ekranu"
     }
   },
   "fileInfo": {
@@ -346,6 +353,19 @@
     "rate": "Oceń",
     "playFromBeginning": "Odtwórz od początku",
     "playVersion": "Odtwórz wersję..."
+  },
+  "rateSheet": {
+    "title": "Oceń",
+    "server": "Serwer",
+    "starValue": "${rating} / 5",
+    "scoreValue": "${score} / 10",
+    "setScore": "Ustaw ocenę",
+    "notRated": "Nie oceniono",
+    "liked": "Polubione",
+    "notLiked": "Nie polubiono",
+    "saved": "Zapisano",
+    "notAvailable": "Nie znaleziono dopasowania",
+    "noConnectedTrackers": "Połącz tracker w Ustawieniach, aby tam oceniać."
   },
   "accessibility": {
     "mediaCardMovie": "${title}, film",
@@ -394,7 +414,7 @@
     "nextChapterButton": "Następny rozdział",
     "muteButton": "Wycisz",
     "unmuteButton": "Wyłącz wyciszenie",
-    "settingsButton": "Ustawienia wideo",
+    "settingsButton": "Ustawienia odtwarzania",
     "tracksButton": "Audio i napisy",
     "chaptersButton": "Rozdziały",
     "versionsButton": "Wersje wideo",
@@ -420,6 +440,7 @@
     "endsAt": "Kończy się o ${time}",
     "pipActive": "Odtwarzanie w trybie obraz w obrazie",
     "pipFailed": "Nie udało się uruchomić trybu obraz w obrazie",
+    "screenshotSaved": "Zrzut ekranu zapisany",
     "pipErrors": {
       "androidVersion": "Wymaga Androida 8.0 lub nowszego",
       "iosVersion": "Wymaga iOS 15.0 lub nowszego",
@@ -691,8 +712,18 @@
       "dateAdded": "Data dodania",
       "releaseDate": "Data premiery",
       "rating": "Ocena",
+      "communityRating": "Ocena społeczności",
+      "criticRating": "Ocena krytyków",
       "lastPlayed": "Ostatnio odtwarzane",
+      "datePlayed": "Data odtworzenia",
       "playCount": "Liczba odtworzeń",
+      "productionYear": "Rok produkcji",
+      "runtime": "Czas trwania",
+      "officialRating": "Oficjalna klasyfikacja",
+      "premiereDate": "Data premiery",
+      "startDate": "Data rozpoczęcia",
+      "airTime": "Godzina emisji",
+      "studio": "Studio",
       "random": "Losowo",
       "dateShared": "Data udostępnienia",
       "latestEpisodeAirDate": "Data emisji ostatniego odcinka"
@@ -1045,7 +1076,6 @@
     }
   },
   "videoSettings": {
-    "playbackSettings": "Ustawienia odtwarzania",
     "playbackSpeed": "Prędkość odtwarzania",
     "sleepTimer": "Wyłącznik czasowy",
     "audioSync": "Synchronizacja audio",
