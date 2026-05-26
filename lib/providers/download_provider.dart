@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:collection';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import '../media/media_backend.dart';
@@ -13,6 +14,7 @@ import '../database/download_operations.dart';
 import '../services/download_manager_service.dart';
 import '../services/api_cache.dart';
 import '../services/download_artwork_service.dart';
+import '../services/plex_syncer_import_service.dart';
 import '../services/download_storage_service.dart';
 import '../services/multi_server_manager.dart';
 import '../services/offline_mode_source.dart';
@@ -598,7 +600,10 @@ class DownloadProvider extends ChangeNotifier with DisposableChangeNotifierMixin
   /// Returns null if artwork directory isn't initialized or artworkPath is null
   String? getArtworkLocalPath(String serverId, String? artworkPath) {
     if (artworkPath == null) return null;
-    return DownloadArtworkService.localPathSync(DownloadStorageService.instance, serverId, artworkPath);
+    // Strip Plex timestamp suffix so timestamped and non-timestamped URLs
+    // resolve to the same local file (e.g. /thumb/1777409847 → /thumb).
+    final canonical = artworkPath.replaceAll(RegExp(r'/\d+$'), '');
+    return DownloadArtworkService.localPathSync(DownloadStorageService.instance, serverId, canonical);
   }
 
   /// Get downloaded episodes for a specific show (by grandparentRatingKey)
@@ -1419,6 +1424,24 @@ class DownloadProvider extends ChangeNotifier with DisposableChangeNotifierMixin
 
   /// Get deletion progress for an item
   DeletionProgress? getDeletionProgress(String globalKey) => _deletionProgress[globalKey];
+
+  /// Get all items currently being deleted
+  UnmodifiableMapView<String, DeletionProgress> get deletionProgress => UnmodifiableMapView(_deletionProgress);
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // PlexSyncer: import externally-synced files from a manifest.json
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /// Import PlexSyncer manifest — delegate entirely to [PlexSyncerImportService].
+  /// Call [refresh()] after this returns to sync in-memory state from DB.
+  Future<ImportSummary> importFromManifest({MediaServerClient? Function(String serverId)? clientResolver}) async {
+    final summary = await PlexSyncerImportService.instance.doImport(
+      downloadManager: _downloadManager,
+      clientResolver:  clientResolver,
+    );
+    await refresh();
+    return summary;
+  }
 
   /// Refresh the downloads list from database
   Future<void> refresh() async {
