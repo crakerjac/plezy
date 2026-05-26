@@ -1448,6 +1448,7 @@ class DownloadProvider extends ChangeNotifier with DisposableChangeNotifierMixin
     await _loadPersistedDownloads();
   }
 
+
   /// Resume queued downloads that were interrupted by app kill.
   /// Call after a [MediaServerClient] becomes available (e.g. after server connect on launch).
   void resumeQueuedDownloads(MediaServerClient client) {
@@ -1794,6 +1795,7 @@ class DownloadProvider extends ChangeNotifier with DisposableChangeNotifierMixin
     }
   }
 }
+
 
 /// Exception thrown when download is blocked due to cellular-only setting
 class CellularDownloadBlockedException implements Exception {

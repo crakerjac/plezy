@@ -227,6 +227,7 @@ class DownloadsScreenState extends State<DownloadsScreen>
             surfaceTintColor: Colors.transparent,
             shadowColor: Colors.transparent,
             scrolledUnderElevation: 0,
+            // PlexSyncer + upstream: both actions in one FocusableActionBar
             actions: [
               FocusableActionBar(
                 key: _actionBarKey,
