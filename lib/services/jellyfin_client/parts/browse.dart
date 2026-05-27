@@ -42,6 +42,18 @@ const _episodeQueuePageSize = 200;
 
 const _childrenPageSize = 500;
 const _pagedListPageSize = 200;
+const _playableDescendantTypes = 'Movie,Episode';
+const _playableFolderDescendantTypes = 'Movie,Episode,Video,MusicVideo';
+
+bool _isJellyfinFolderDto(Map<String, dynamic> item) {
+  final type = (item['Type'] as String?)?.toLowerCase();
+  return type == 'folder' || type == 'collectionfolder' || (type == null && item['IsFolder'] == true);
+}
+
+String _jellyfinFolderSortName(Map<String, dynamic> item) {
+  final raw = item['SortName'] as String? ?? item['Name'] as String? ?? '';
+  return raw.toLowerCase();
+}
 
 int _fallbackPageTotal({required int offset, required int itemCount, int? requestedSize}) {
   if (requestedSize == null || requestedSize <= 0 || itemCount < requestedSize) {
@@ -127,15 +139,26 @@ mixin _JellyfinBrowseMethods on MediaServerCacheMixin {
   }
 
   /// Jellyfin's `/Items/Filters` returns Genres / OfficialRatings / Tags /
-  /// Categories + values from `/Items/Filters` in a single call. Keys are
-  /// translated to Plex's filter naming so the existing filter-param map
-  /// round-trips through `_buildFilterParams` unchanged; the synthesised
-  /// `MediaFilter.key` is prefixed `jellyfin:` so FiltersBottomSheet can
-  /// recognise it as cached and skip the per-category value fetch.
+  /// Categories + values from `/Items/Filters` in a single call. The unwatched
+  /// boolean is synthetic because Jellyfin exposes it as an `/Items` query
+  /// filter, not a filter-listing category. Keys are translated to Plex's
+  /// filter naming so the existing filter-param map round-trips through
+  /// `_buildFilterParams` unchanged; the synthesised `MediaFilter.key` is
+  /// prefixed `jellyfin:` so FiltersBottomSheet can recognise it as cached and
+  /// skip the per-category value fetch.
   @override
   Future<LibraryFilterResult> fetchLibraryFiltersWithValues(String libraryId) async {
+    final filters = <MediaFilter>[
+      MediaFilter(
+        filter: 'unwatched',
+        filterType: 'boolean',
+        key: 'jellyfin:unwatched',
+        title: t.libraries.filterCategories.unwatched,
+        type: 'filter',
+      ),
+    ];
     final data = await _safeFetchFilterPayload(libraryId);
-    if (data == null) return LibraryFilterResult.empty;
+    if (data == null) return LibraryFilterResult(filters: filters, cachedValues: const {});
     List<String> stringList(Object? raw) {
       if (raw is! List) return const [];
       return raw.whereType<String>().where((s) => s.isNotEmpty).toList();
@@ -157,7 +180,6 @@ mixin _JellyfinBrowseMethods on MediaServerCacheMixin {
       'contentRating': t.libraries.filterCategories.contentRating,
       'tag': t.libraries.filterCategories.tag,
     };
-    final filters = <MediaFilter>[];
     final values = <String, List<MediaFilterValue>>{};
     for (final key in order) {
       final entries = raw[key];
@@ -496,6 +518,68 @@ mixin _JellyfinBrowseMethods on MediaServerCacheMixin {
     return _mapItems(allRaw);
   }
 
+  /// Jellyfin folder browsing mirrors Jellyfin Web/Findroid/Swiftfin: query
+  /// direct children of the library/folder with `Recursive=false`. This is
+  /// distinct from [fetchLibraryContent], which intentionally recurses through
+  /// a library to show metadata groupings like albums, artists, shows, etc.
+  Future<List<MediaItem>> fetchLibraryFolders(String libraryId) => _fetchFolderChildren(libraryId);
+
+  /// Contents of a Jellyfin folder. Kept separate from [fetchChildren] so the
+  /// folder tree can use direct-child semantics even for music libraries.
+  Future<List<MediaItem>> fetchFolderChildren(String folderId) => _fetchFolderChildren(folderId);
+
+  Future<List<MediaItem>> _fetchFolderChildren(String parentId) async {
+    final cacheKey = '/Items?ParentId=$parentId&Recursive=false&userId=${connection.userId}';
+    if (isOfflineMode) {
+      final cached = await cache.get(cacheServerId, cacheKey);
+      return cached == null ? const [] : _mapItems(_itemsArray(cached));
+    }
+
+    final allRaw = <Map<String, dynamic>>[];
+    var startIndex = 0;
+    int? totalRecordCount;
+    while (totalRecordCount == null || startIndex < totalRecordCount) {
+      final response = await _http.get(
+        '/Items',
+        queryParameters: {
+          'userId': connection.userId,
+          'ParentId': parentId,
+          'Recursive': 'false',
+          'StartIndex': '$startIndex',
+          'Limit': '$_childrenPageSize',
+          'EnableTotalRecordCount': 'true',
+          'SortBy': 'IsFolder,SortName',
+          'SortOrder': 'Ascending',
+          'Fields': _browseFields,
+          ...jellyfinImageQueryParameters,
+        },
+      );
+      throwIfHttpError(response);
+      final data = response.data;
+      final page = _itemsArray(data);
+      allRaw.addAll(page);
+      if (data is Map<String, dynamic>) {
+        final rawTotal = data['TotalRecordCount'];
+        if (rawTotal is int) totalRecordCount = rawTotal;
+      }
+      if (page.isEmpty || page.length < _childrenPageSize) break;
+      startIndex += page.length;
+    }
+
+    allRaw.sort((a, b) {
+      final folderRank = (_isJellyfinFolderDto(a) ? 0 : 1).compareTo(_isJellyfinFolderDto(b) ? 0 : 1);
+      if (folderRank != 0) return folderRank;
+      return _jellyfinFolderSortName(a).compareTo(_jellyfinFolderSortName(b));
+    });
+
+    try {
+      await cache.put(cacheServerId, cacheKey, {'Items': allRaw, 'TotalRecordCount': allRaw.length});
+    } catch (e, st) {
+      appLogger.w('JellyfinClient.fetchFolderChildren cache write failed', error: e, stackTrace: st);
+    }
+    return _mapItems(allRaw);
+  }
+
   /// All directly-playable descendants of [parentId] (Movies + Episodes),
   /// recursively expanded. Used by the playback launcher so a collection
   /// containing a Series plays its episodes instead of the unplayable
@@ -504,11 +588,27 @@ mixin _JellyfinBrowseMethods on MediaServerCacheMixin {
   /// since those preserve the container shape (Series rows, PlaylistItemId).
   ///
   @override
-  Future<List<MediaItem>> fetchPlayableDescendants(String parentId) async {
+  Future<List<MediaItem>> fetchPlayableDescendants(String parentId) {
+    return _fetchAllPlayableDescendants(parentId, includeItemTypes: _playableDescendantTypes);
+  }
+
+  /// Playable video descendants for a folder browse row. This includes
+  /// Jellyfin's generic `Video` / `MusicVideo` kinds for home-video libraries,
+  /// but deliberately excludes `Audio` so folder playback never starts music.
+  Future<List<MediaItem>> fetchPlayableFolderDescendants(String parentId) {
+    return _fetchAllPlayableDescendants(parentId, includeItemTypes: _playableFolderDescendantTypes);
+  }
+
+  Future<List<MediaItem>> _fetchAllPlayableDescendants(String parentId, {required String includeItemTypes}) async {
     final all = <MediaItem>[];
     var start = 0;
     while (true) {
-      final page = await fetchPlayableDescendantsPage(parentId, start: start, size: _pagedListPageSize);
+      final page = await _fetchPlayableDescendantsPage(
+        parentId,
+        start: start,
+        size: _pagedListPageSize,
+        includeItemTypes: includeItemTypes,
+      );
       if (page.items.isEmpty) break;
       all.addAll(page.items);
       start += page.items.length;
@@ -523,6 +623,22 @@ mixin _JellyfinBrowseMethods on MediaServerCacheMixin {
     int? start,
     int? size,
     AbortController? abort,
+  }) {
+    return _fetchPlayableDescendantsPage(
+      parentId,
+      start: start,
+      size: size,
+      abort: abort,
+      includeItemTypes: _playableDescendantTypes,
+    );
+  }
+
+  Future<LibraryPage<MediaItem>> _fetchPlayableDescendantsPage(
+    String parentId, {
+    int? start,
+    int? size,
+    AbortController? abort,
+    required String includeItemTypes,
   }) async {
     final offset = start ?? 0;
     final pageSize = size ?? _pagedListPageSize;
@@ -532,7 +648,7 @@ mixin _JellyfinBrowseMethods on MediaServerCacheMixin {
         'userId': connection.userId,
         'ParentId': parentId,
         'Recursive': 'true',
-        'IncludeItemTypes': 'Movie,Episode',
+        'IncludeItemTypes': includeItemTypes,
         'StartIndex': offset.toString(),
         'Limit': pageSize.toString(),
         'Fields': _browseFields,

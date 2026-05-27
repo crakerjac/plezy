@@ -1011,7 +1011,8 @@ class DownloadProvider extends ChangeNotifier with DisposableChangeNotifierMixin
       final existing = _downloads[globalKey]!;
       if (existing.status == DownloadStatus.downloading ||
           existing.status == DownloadStatus.completed ||
-          existing.status == DownloadStatus.queued) {
+          existing.status == DownloadStatus.queued ||
+          existing.status == DownloadStatus.paused) {
         final claimed = await _claimDownloadForActiveProfile(globalKey);
         if (claimed) safeNotifyListeners();
         return claimed;

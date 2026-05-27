@@ -89,8 +89,8 @@ packages:
     dependency: "direct main"
     description:
       path: "."
-      ref: "4c965996210e408465e3c8b66e63ab4a659a62f9"
-      resolved-ref: "4c965996210e408465e3c8b66e63ab4a659a62f9"
+      ref: b4d36f88bb365faaf308ff26be7ade49bbaec859
+      resolved-ref: b4d36f88bb365faaf308ff26be7ade49bbaec859
       url: "https://github.com/edde746/background_downloader"
     source: git
     version: "9.5.4"
@@ -1473,10 +1473,10 @@ packages:
     dependency: "direct main"
     description:
       name: win_http
-      sha256: efbfec044d43665e271b2c51d40864275d055b28eda1e9feddb42d884ae982df
+      sha256: a50a14f1bf32bc5c9b39add9baa01658b97146b21de25237810ca6b850a6704e
       url: "https://pub.dev"
     source: hosted
-    version: "0.2.0"
+    version: "0.2.1"
   window_manager:
     dependency: "direct main"
     description:
