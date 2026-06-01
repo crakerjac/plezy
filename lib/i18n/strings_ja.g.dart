@@ -143,6 +143,7 @@ class _TranslationsCommonJa extends TranslationsCommonEn {
 	@override String get yes => 'はい';
 	@override String get no => 'いいえ';
 	@override String get delete => '削除';
+	@override String get edit => '編集';
 	@override String get shuffle => 'シャッフル';
 	@override String get addTo => '追加...';
 	@override String get createNew => '新規作成';
@@ -253,6 +254,8 @@ class _TranslationsSettingsJa extends TranslationsSettingsEn {
 	@override String get showEpisodeNumberOnCardsDescription => 'エピソードカードにシーズン番号とエピソード番号を表示します';
 	@override String get showSeasonPostersOnTabs => 'タブにシーズンポスターを表示';
 	@override String get showSeasonPostersOnTabsDescription => '各シーズンのポスターをタブの上に表示します';
+	@override String get tvFullCardLayout => 'フルTVカード';
+	@override String get tvFullCardLayoutDescription => 'TVカードを画像のみで表示し、俳優名を重ねて表示します';
 	@override String get hideSpoilers => '未視聴エピソードのネタバレを非表示';
 	@override String get hideSpoilersDescription => '未視聴エピソードのサムネイルと説明をぼかします';
 	@override String get playerBackend => 'プレーヤーバックエンド';
@@ -388,6 +391,8 @@ class _TranslationsSettingsJa extends TranslationsSettingsEn {
 	@override String get forceTvModeDescription => 'TVレイアウトを強制します。自動検出しないデバイス向けです。再起動が必要です。';
 	@override String get startInFullscreen => '全画面表示で起動';
 	@override String get startInFullscreenDescription => '起動時にPlezyを全画面モードで開きます';
+	@override String get exitFullscreenOnPlayerClose => 'プレイヤーを閉じたときに全画面を終了';
+	@override String get exitFullscreenOnPlayerCloseDescription => 'ビデオプレイヤーを閉じたときに自動的に全画面モードを終了します';
 	@override String get autoHidePerformanceOverlay => 'パフォーマンスオーバーレイを自動非表示';
 	@override String get autoHidePerformanceOverlayDescription => '再生コントロールと一緒にパフォーマンスオーバーレイをフェードする';
 	@override String get showNavBarLabels => 'ナビゲーションバーラベルを表示';
@@ -560,6 +565,10 @@ class _TranslationsVideoControlsJa extends TranslationsVideoControlsEn {
 	@override String get unlockRotation => '回転のロックを解除';
 	@override String get timerActive => 'タイマー動作中';
 	@override String playbackWillPauseIn({required Object duration}) => '再生は${duration}後に一時停止します';
+	@override String get sleepTimerEndOfVideo => '現在の動画の最後';
+	@override String get sleepTimerStopAtHeader => '停止のタイミング';
+	@override String get sleepTimerDurationHeader => 'タイマー';
+	@override String get playbackWillPauseAtEnd => '再生はこの動画の最後に一時停止します';
 	@override String get stillWatching => 'まだ視聴中ですか？';
 	@override String pausingIn({required Object seconds}) => '${seconds}秒後に一時停止';
 	@override String get continueWatching => '続ける';
@@ -602,6 +611,7 @@ class _TranslationsVideoControlsJa extends TranslationsVideoControlsEn {
 	@override String get pipActive => 'ピクチャーインピクチャーで再生中';
 	@override String get pipFailed => 'ピクチャーインピクチャーの開始に失敗しました';
 	@override String get screenshotSaved => 'スクリーンショットを保存しました';
+	@override String zoomPercent({required Object percent}) => 'ズーム ${percent}%';
 	@override late final _TranslationsVideoControlsPipErrorsJa pipErrors = _TranslationsVideoControlsPipErrorsJa._(_root);
 	@override String get chapters => 'チャプター';
 	@override String get noChaptersAvailable => 'チャプターがありません';
@@ -812,6 +822,8 @@ class _TranslationsConnectionsJa extends TranslationsConnectionsEn {
 	@override String sessionExpiredOne({required Object name}) => '${name} のセッションの有効期限が切れました';
 	@override String sessionExpiredMany({required Object count}) => '${count} 台のサーバーのセッションの有効期限が切れました';
 	@override String get signInAgain => '再度サインイン';
+	@override String get editJellyfinTitle => 'Jellyfin接続を編集';
+	@override String editJellyfinIntro({required Object serverName}) => '${serverName} のURLを追加または削除します。Plezyは到達可能なURLのうち最も低遅延のものを使用します。';
 }
 
 // Path: discover
@@ -1303,6 +1315,7 @@ class _TranslationsVideoSettingsJa extends TranslationsVideoSettingsEn {
 
 	// Translations
 	@override String get playbackSpeed => '再生速度';
+	@override String get zoom => 'ズーム';
 	@override String get sleepTimer => 'スリープタイマー';
 	@override String get audioSync => '音声同期';
 	@override String get subtitleSync => '字幕同期';
@@ -1502,8 +1515,12 @@ class _TranslationsAddServerJa extends TranslationsAddServerEn {
 	// Translations
 	@override String get addJellyfinTitle => 'Jellyfinサーバーを追加';
 	@override String get jellyfinUrlIntro => 'サーバーURLを入力してください。例: `https://jellyfin.example.com`。';
+	@override String get jellyfinUrlsIntro => 'サーバーURLを1つ以上、カンマまたは改行で区切って入力してください。Plezyは到達可能なURLのうち最も低遅延のものを使用します。';
 	@override String get serverUrl => 'サーバーURL';
+	@override String get serverUrls => 'サーバーURL';
 	@override String get findServer => 'サーバーを検索';
+	@override String get searchingLocalServers => 'ローカル Jellyfin サーバーを検索中...';
+	@override String get localServers => 'ローカル Jellyfin サーバー';
 	@override String get username => 'ユーザー名';
 	@override String get password => 'パスワード';
 	@override String get signIn => 'サインイン';
@@ -1558,6 +1575,9 @@ class _TranslationsHotkeysActionsJa extends TranslationsHotkeysActionsEn {
 	@override String get speedIncrease => '速度を上げる';
 	@override String get speedDecrease => '速度を下げる';
 	@override String get speedReset => '速度をリセット';
+	@override String get zoomIn => 'ズームイン';
+	@override String get zoomOut => 'ズームアウト';
+	@override String get zoomReset => 'ズームをリセット';
 	@override String get subSeekNext => '次の字幕にシーク';
 	@override String get subSeekPrev => '前の字幕にシーク';
 	@override String get shaderToggle => 'シェーダー切替';
@@ -1833,6 +1853,7 @@ extension on TranslationsJa {
 			'common.yes' => 'はい',
 			'common.no' => 'いいえ',
 			'common.delete' => '削除',
+			'common.edit' => '編集',
 			'common.shuffle' => 'シャッフル',
 			'common.addTo' => '追加...',
 			'common.createNew' => '新規作成',
@@ -1916,6 +1937,8 @@ extension on TranslationsJa {
 			'settings.showEpisodeNumberOnCardsDescription' => 'エピソードカードにシーズン番号とエピソード番号を表示します',
 			'settings.showSeasonPostersOnTabs' => 'タブにシーズンポスターを表示',
 			'settings.showSeasonPostersOnTabsDescription' => '各シーズンのポスターをタブの上に表示します',
+			'settings.tvFullCardLayout' => 'フルTVカード',
+			'settings.tvFullCardLayoutDescription' => 'TVカードを画像のみで表示し、俳優名を重ねて表示します',
 			'settings.hideSpoilers' => '未視聴エピソードのネタバレを非表示',
 			'settings.hideSpoilersDescription' => '未視聴エピソードのサムネイルと説明をぼかします',
 			'settings.playerBackend' => 'プレーヤーバックエンド',
@@ -2051,6 +2074,8 @@ extension on TranslationsJa {
 			'settings.forceTvModeDescription' => 'TVレイアウトを強制します。自動検出しないデバイス向けです。再起動が必要です。',
 			'settings.startInFullscreen' => '全画面表示で起動',
 			'settings.startInFullscreenDescription' => '起動時にPlezyを全画面モードで開きます',
+			'settings.exitFullscreenOnPlayerClose' => 'プレイヤーを閉じたときに全画面を終了',
+			'settings.exitFullscreenOnPlayerCloseDescription' => 'ビデオプレイヤーを閉じたときに自動的に全画面モードを終了します',
 			'settings.autoHidePerformanceOverlay' => 'パフォーマンスオーバーレイを自動非表示',
 			'settings.autoHidePerformanceOverlayDescription' => '再生コントロールと一緒にパフォーマンスオーバーレイをフェードする',
 			'settings.showNavBarLabels' => 'ナビゲーションバーラベルを表示',
@@ -2089,6 +2114,9 @@ extension on TranslationsJa {
 			'hotkeys.actions.speedIncrease' => '速度を上げる',
 			'hotkeys.actions.speedDecrease' => '速度を下げる',
 			'hotkeys.actions.speedReset' => '速度をリセット',
+			'hotkeys.actions.zoomIn' => 'ズームイン',
+			'hotkeys.actions.zoomOut' => 'ズームアウト',
+			'hotkeys.actions.zoomReset' => 'ズームをリセット',
 			'hotkeys.actions.subSeekNext' => '次の字幕にシーク',
 			'hotkeys.actions.subSeekPrev' => '前の字幕にシーク',
 			'hotkeys.actions.shaderToggle' => 'シェーダー切替',
@@ -2172,6 +2200,10 @@ extension on TranslationsJa {
 			'videoControls.unlockRotation' => '回転のロックを解除',
 			'videoControls.timerActive' => 'タイマー動作中',
 			'videoControls.playbackWillPauseIn' => ({required Object duration}) => '再生は${duration}後に一時停止します',
+			'videoControls.sleepTimerEndOfVideo' => '現在の動画の最後',
+			'videoControls.sleepTimerStopAtHeader' => '停止のタイミング',
+			'videoControls.sleepTimerDurationHeader' => 'タイマー',
+			'videoControls.playbackWillPauseAtEnd' => '再生はこの動画の最後に一時停止します',
 			'videoControls.stillWatching' => 'まだ視聴中ですか？',
 			'videoControls.pausingIn' => ({required Object seconds}) => '${seconds}秒後に一時停止',
 			'videoControls.continueWatching' => '続ける',
@@ -2214,6 +2246,7 @@ extension on TranslationsJa {
 			'videoControls.pipActive' => 'ピクチャーインピクチャーで再生中',
 			'videoControls.pipFailed' => 'ピクチャーインピクチャーの開始に失敗しました',
 			'videoControls.screenshotSaved' => 'スクリーンショットを保存しました',
+			'videoControls.zoomPercent' => ({required Object percent}) => 'ズーム ${percent}%',
 			'videoControls.pipErrors.androidVersion' => 'Android 8.0以降が必要です',
 			'videoControls.pipErrors.iosVersion' => 'iOS 15.0以降が必要です',
 			'videoControls.pipErrors.permissionDisabled' => 'ピクチャーインピクチャーが無効です。システム設定で有効にしてください。',
@@ -2300,6 +2333,8 @@ extension on TranslationsJa {
 			'mpvConfig.presetSaved' => 'プリセットを保存しました',
 			'mpvConfig.presetLoaded' => 'プリセットを読み込みました',
 			'mpvConfig.presetDeleted' => 'プリセットを削除しました',
+			_ => null,
+		} ?? switch (path) {
 			'mpvConfig.confirmDeletePreset' => 'このプリセットを削除してもよろしいですか？',
 			'mpvConfig.configPlaceholder' => 'gpu-api=vulkan\nhwdec=auto\n# comment',
 			'dialog.confirmAction' => '操作の確認',
@@ -2313,8 +2348,6 @@ extension on TranslationsJa {
 			'profiles.signOut' => 'サインアウト',
 			'profiles.signOutPlexTitle' => 'Plex からサインアウトしますか？',
 			'profiles.signOutPlexMessage' => ({required Object displayName}) => '${displayName}とすべてのPlex Homeユーザーを削除しますか？いつでも再サインインできます。',
-			_ => null,
-		} ?? switch (path) {
 			'profiles.signedOutPlex' => 'Plex からサインアウトしました。',
 			'profiles.signOutFailed' => 'サインアウトに失敗しました。',
 			'profiles.sectionTitle' => 'プロファイル',
@@ -2369,6 +2402,8 @@ extension on TranslationsJa {
 			'connections.sessionExpiredOne' => ({required Object name}) => '${name} のセッションの有効期限が切れました',
 			'connections.sessionExpiredMany' => ({required Object count}) => '${count} 台のサーバーのセッションの有効期限が切れました',
 			'connections.signInAgain' => '再度サインイン',
+			'connections.editJellyfinTitle' => 'Jellyfin接続を編集',
+			'connections.editJellyfinIntro' => ({required Object serverName}) => '${serverName} のURLを追加または削除します。Plezyは到達可能なURLのうち最も低遅延のものを使用します。',
 			'discover.title' => '探す',
 			'discover.switchProfile' => 'プロフィール切替',
 			'discover.noContentAvailable' => 'コンテンツがありません',
@@ -2789,6 +2824,7 @@ extension on TranslationsJa {
 			'companionRemote.remote.audio' => '音声',
 			'companionRemote.remote.searchHint' => 'デスクトップで検索...',
 			'videoSettings.playbackSpeed' => '再生速度',
+			'videoSettings.zoom' => 'ズーム',
 			'videoSettings.sleepTimer' => 'スリープタイマー',
 			'videoSettings.audioSync' => '音声同期',
 			'videoSettings.subtitleSync' => '字幕同期',
@@ -2811,6 +2847,8 @@ extension on TranslationsJa {
 			'externalPlayer.off' => 'オフ',
 			'externalPlayer.launchFailed' => '外部プレーヤーの起動に失敗しました',
 			'externalPlayer.appNotInstalled' => ({required Object name}) => '${name}がインストールされていません',
+			_ => null,
+		} ?? switch (path) {
 			'externalPlayer.playInExternalPlayer' => '外部プレーヤーで再生',
 			'metadataEdit.editMetadata' => '編集...',
 			'metadataEdit.screenTitle' => 'メタデータを編集',
@@ -2827,8 +2865,6 @@ extension on TranslationsJa {
 			'metadataEdit.summary' => 'あらすじ',
 			'metadataEdit.poster' => 'ポスター',
 			'metadataEdit.background' => '背景',
-			_ => null,
-		} ?? switch (path) {
 			'metadataEdit.logo' => 'ロゴ',
 			'metadataEdit.squareArt' => '正方形アート',
 			'metadataEdit.selectPoster' => 'ポスターを選択',
@@ -2947,8 +2983,12 @@ extension on TranslationsJa {
 			'trackers.libraryFilter.noLibraries' => '利用できるライブラリがありません',
 			'addServer.addJellyfinTitle' => 'Jellyfinサーバーを追加',
 			'addServer.jellyfinUrlIntro' => 'サーバーURLを入力してください。例: `https://jellyfin.example.com`。',
+			'addServer.jellyfinUrlsIntro' => 'サーバーURLを1つ以上、カンマまたは改行で区切って入力してください。Plezyは到達可能なURLのうち最も低遅延のものを使用します。',
 			'addServer.serverUrl' => 'サーバーURL',
+			'addServer.serverUrls' => 'サーバーURL',
 			'addServer.findServer' => 'サーバーを検索',
+			'addServer.searchingLocalServers' => 'ローカル Jellyfin サーバーを検索中...',
+			'addServer.localServers' => 'ローカル Jellyfin サーバー',
 			'addServer.username' => 'ユーザー名',
 			'addServer.password' => 'パスワード',
 			'addServer.signIn' => 'サインイン',

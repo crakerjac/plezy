@@ -143,6 +143,7 @@ class _TranslationsCommonKo extends TranslationsCommonEn {
 	@override String get yes => '예';
 	@override String get no => '아니오';
 	@override String get delete => '삭제';
+	@override String get edit => '편집';
 	@override String get shuffle => '무작위 재생';
 	@override String get addTo => '추가하기...';
 	@override String get createNew => '새로 만들기';
@@ -253,6 +254,8 @@ class _TranslationsSettingsKo extends TranslationsSettingsEn {
 	@override String get showEpisodeNumberOnCardsDescription => '에피소드 카드에 시즌 및 에피소드 번호 표시';
 	@override String get showSeasonPostersOnTabs => '탭에 시즌 포스터 표시';
 	@override String get showSeasonPostersOnTabsDescription => '각 시즌 포스터를 탭 위에 표시';
+	@override String get tvFullCardLayout => '전체 TV 카드';
+	@override String get tvFullCardLayoutDescription => 'TV 카드에 이미지만 표시하고 배우 이름을 오버레이로 표시';
 	@override String get hideSpoilers => '미시청 에피소드 스포일러 숨기기';
 	@override String get hideSpoilersDescription => '시청하지 않은 에피소드의 썸네일과 설명을 흐리게 처리';
 	@override String get playerBackend => '플레이어 백엔드';
@@ -388,6 +391,8 @@ class _TranslationsSettingsKo extends TranslationsSettingsEn {
 	@override String get forceTvModeDescription => 'TV 레이아웃을 강제합니다. 자동 감지되지 않는 기기용입니다. 재시작이 필요합니다.';
 	@override String get startInFullscreen => '전체화면으로 시작';
 	@override String get startInFullscreenDescription => '실행 시 Plezy를 전체화면 모드로 엽니다';
+	@override String get exitFullscreenOnPlayerClose => '플레이어 닫을 때 전체화면 종료';
+	@override String get exitFullscreenOnPlayerCloseDescription => '비디오 플레이어를 닫을 때 자동으로 전체화면을 종료합니다';
 	@override String get autoHidePerformanceOverlay => '성능 오버레이 자동 숨기기';
 	@override String get autoHidePerformanceOverlayDescription => '재생 컨트롤과 함께 성능 오버레이를 페이드 처리';
 	@override String get showNavBarLabels => '내비게이션 바 라벨 표시';
@@ -560,6 +565,10 @@ class _TranslationsVideoControlsKo extends TranslationsVideoControlsEn {
 	@override String get unlockRotation => '회전 잠금 해제';
 	@override String get timerActive => '타이머 활성화됨';
 	@override String playbackWillPauseIn({required Object duration}) => '재생이 ${duration} 후에 일시 중지 됩니다';
+	@override String get sleepTimerEndOfVideo => '현재 비디오의 끝';
+	@override String get sleepTimerStopAtHeader => '정지 시점';
+	@override String get sleepTimerDurationHeader => '타이머';
+	@override String get playbackWillPauseAtEnd => '재생이 이 비디오의 끝에서 일시 중지됩니다';
 	@override String get stillWatching => '아직 시청 중이신가요?';
 	@override String pausingIn({required Object seconds}) => '${seconds}초 후 일시 정지';
 	@override String get continueWatching => '계속';
@@ -602,6 +611,7 @@ class _TranslationsVideoControlsKo extends TranslationsVideoControlsEn {
 	@override String get pipActive => '화면 속 화면으로 재생 중';
 	@override String get pipFailed => '화면 속 화면 모드를 시작할 수 없습니다';
 	@override String get screenshotSaved => '스크린샷 저장됨';
+	@override String zoomPercent({required Object percent}) => '확대/축소 ${percent}%';
 	@override late final _TranslationsVideoControlsPipErrorsKo pipErrors = _TranslationsVideoControlsPipErrorsKo._(_root);
 	@override String get chapters => '챕터';
 	@override String get noChaptersAvailable => '사용 가능한 챕터가 없습니다';
@@ -812,6 +822,8 @@ class _TranslationsConnectionsKo extends TranslationsConnectionsEn {
 	@override String sessionExpiredOne({required Object name}) => '${name} 의 세션이 만료되었습니다';
 	@override String sessionExpiredMany({required Object count}) => '${count} 개의 서버에서 세션이 만료되었습니다';
 	@override String get signInAgain => '다시 로그인';
+	@override String get editJellyfinTitle => 'Jellyfin 연결 편집';
+	@override String editJellyfinIntro({required Object serverName}) => '${serverName}의 URL을 추가하거나 제거하세요. Plezy는 연결 가능한 URL 중 지연 시간이 가장 낮은 URL을 사용합니다.';
 }
 
 // Path: discover
@@ -1303,6 +1315,7 @@ class _TranslationsVideoSettingsKo extends TranslationsVideoSettingsEn {
 
 	// Translations
 	@override String get playbackSpeed => '재생 속도';
+	@override String get zoom => '확대/축소';
 	@override String get sleepTimer => '취침 타이머';
 	@override String get audioSync => '오디오 동기화';
 	@override String get subtitleSync => '자막 동기화';
@@ -1502,8 +1515,12 @@ class _TranslationsAddServerKo extends TranslationsAddServerEn {
 	// Translations
 	@override String get addJellyfinTitle => 'Jellyfin 서버 추가';
 	@override String get jellyfinUrlIntro => '서버 URL을 입력하세요. 예: `https://jellyfin.example.com`.';
+	@override String get jellyfinUrlsIntro => '서버 URL을 하나 이상 쉼표나 줄바꿈으로 구분해 입력하세요. Plezy는 연결 가능한 URL 중 지연 시간이 가장 낮은 URL을 사용합니다.';
 	@override String get serverUrl => '서버 URL';
+	@override String get serverUrls => '서버 URL';
 	@override String get findServer => '서버 찾기';
+	@override String get searchingLocalServers => '로컬 Jellyfin 서버 검색 중...';
+	@override String get localServers => '로컬 Jellyfin 서버';
 	@override String get username => '사용자 이름';
 	@override String get password => '비밀번호';
 	@override String get signIn => '로그인';
@@ -1558,6 +1575,9 @@ class _TranslationsHotkeysActionsKo extends TranslationsHotkeysActionsEn {
 	@override String get speedIncrease => '속도 높이기';
 	@override String get speedDecrease => '속도 낮추기';
 	@override String get speedReset => '속도 초기화';
+	@override String get zoomIn => '확대';
+	@override String get zoomOut => '축소';
+	@override String get zoomReset => '확대/축소 초기화';
 	@override String get subSeekNext => '다음 자막으로 이동';
 	@override String get subSeekPrev => '이전 자막으로 이동';
 	@override String get shaderToggle => '셰이더 전환';
@@ -1833,6 +1853,7 @@ extension on TranslationsKo {
 			'common.yes' => '예',
 			'common.no' => '아니오',
 			'common.delete' => '삭제',
+			'common.edit' => '편집',
 			'common.shuffle' => '무작위 재생',
 			'common.addTo' => '추가하기...',
 			'common.createNew' => '새로 만들기',
@@ -1916,6 +1937,8 @@ extension on TranslationsKo {
 			'settings.showEpisodeNumberOnCardsDescription' => '에피소드 카드에 시즌 및 에피소드 번호 표시',
 			'settings.showSeasonPostersOnTabs' => '탭에 시즌 포스터 표시',
 			'settings.showSeasonPostersOnTabsDescription' => '각 시즌 포스터를 탭 위에 표시',
+			'settings.tvFullCardLayout' => '전체 TV 카드',
+			'settings.tvFullCardLayoutDescription' => 'TV 카드에 이미지만 표시하고 배우 이름을 오버레이로 표시',
 			'settings.hideSpoilers' => '미시청 에피소드 스포일러 숨기기',
 			'settings.hideSpoilersDescription' => '시청하지 않은 에피소드의 썸네일과 설명을 흐리게 처리',
 			'settings.playerBackend' => '플레이어 백엔드',
@@ -2051,6 +2074,8 @@ extension on TranslationsKo {
 			'settings.forceTvModeDescription' => 'TV 레이아웃을 강제합니다. 자동 감지되지 않는 기기용입니다. 재시작이 필요합니다.',
 			'settings.startInFullscreen' => '전체화면으로 시작',
 			'settings.startInFullscreenDescription' => '실행 시 Plezy를 전체화면 모드로 엽니다',
+			'settings.exitFullscreenOnPlayerClose' => '플레이어 닫을 때 전체화면 종료',
+			'settings.exitFullscreenOnPlayerCloseDescription' => '비디오 플레이어를 닫을 때 자동으로 전체화면을 종료합니다',
 			'settings.autoHidePerformanceOverlay' => '성능 오버레이 자동 숨기기',
 			'settings.autoHidePerformanceOverlayDescription' => '재생 컨트롤과 함께 성능 오버레이를 페이드 처리',
 			'settings.showNavBarLabels' => '내비게이션 바 라벨 표시',
@@ -2089,6 +2114,9 @@ extension on TranslationsKo {
 			'hotkeys.actions.speedIncrease' => '속도 높이기',
 			'hotkeys.actions.speedDecrease' => '속도 낮추기',
 			'hotkeys.actions.speedReset' => '속도 초기화',
+			'hotkeys.actions.zoomIn' => '확대',
+			'hotkeys.actions.zoomOut' => '축소',
+			'hotkeys.actions.zoomReset' => '확대/축소 초기화',
 			'hotkeys.actions.subSeekNext' => '다음 자막으로 이동',
 			'hotkeys.actions.subSeekPrev' => '이전 자막으로 이동',
 			'hotkeys.actions.shaderToggle' => '셰이더 전환',
@@ -2172,6 +2200,10 @@ extension on TranslationsKo {
 			'videoControls.unlockRotation' => '회전 잠금 해제',
 			'videoControls.timerActive' => '타이머 활성화됨',
 			'videoControls.playbackWillPauseIn' => ({required Object duration}) => '재생이 ${duration} 후에 일시 중지 됩니다',
+			'videoControls.sleepTimerEndOfVideo' => '현재 비디오의 끝',
+			'videoControls.sleepTimerStopAtHeader' => '정지 시점',
+			'videoControls.sleepTimerDurationHeader' => '타이머',
+			'videoControls.playbackWillPauseAtEnd' => '재생이 이 비디오의 끝에서 일시 중지됩니다',
 			'videoControls.stillWatching' => '아직 시청 중이신가요?',
 			'videoControls.pausingIn' => ({required Object seconds}) => '${seconds}초 후 일시 정지',
 			'videoControls.continueWatching' => '계속',
@@ -2214,6 +2246,7 @@ extension on TranslationsKo {
 			'videoControls.pipActive' => '화면 속 화면으로 재생 중',
 			'videoControls.pipFailed' => '화면 속 화면 모드를 시작할 수 없습니다',
 			'videoControls.screenshotSaved' => '스크린샷 저장됨',
+			'videoControls.zoomPercent' => ({required Object percent}) => '확대/축소 ${percent}%',
 			'videoControls.pipErrors.androidVersion' => 'Android 8.0 이상이 필요합니다',
 			'videoControls.pipErrors.iosVersion' => 'iOS 15.0 이상이 필요합니다',
 			'videoControls.pipErrors.permissionDisabled' => '화면 속 화면이 비활성화되어 있습니다. 시스템 설정에서 활성화하세요.',
@@ -2300,6 +2333,8 @@ extension on TranslationsKo {
 			'mpvConfig.presetSaved' => '프리셋이 저장 되었습니다',
 			'mpvConfig.presetLoaded' => '프리셋이 로드 되었습니다',
 			'mpvConfig.presetDeleted' => '프리셋이 삭제 되었습니다',
+			_ => null,
+		} ?? switch (path) {
 			'mpvConfig.confirmDeletePreset' => '이 프리셋을 삭제 하시겠습니까?',
 			'mpvConfig.configPlaceholder' => 'gpu-api=vulkan\nhwdec=auto\n# comment',
 			'dialog.confirmAction' => '확인',
@@ -2313,8 +2348,6 @@ extension on TranslationsKo {
 			'profiles.signOut' => '로그아웃',
 			'profiles.signOutPlexTitle' => 'Plex에서 로그아웃하시겠습니까?',
 			'profiles.signOutPlexMessage' => ({required Object displayName}) => '${displayName} 및 모든 Plex Home 사용자를 제거할까요? 언제든 다시 로그인할 수 있습니다.',
-			_ => null,
-		} ?? switch (path) {
 			'profiles.signedOutPlex' => 'Plex에서 로그아웃되었습니다.',
 			'profiles.signOutFailed' => '로그아웃에 실패했습니다.',
 			'profiles.sectionTitle' => '프로필',
@@ -2369,6 +2402,8 @@ extension on TranslationsKo {
 			'connections.sessionExpiredOne' => ({required Object name}) => '${name} 의 세션이 만료되었습니다',
 			'connections.sessionExpiredMany' => ({required Object count}) => '${count} 개의 서버에서 세션이 만료되었습니다',
 			'connections.signInAgain' => '다시 로그인',
+			'connections.editJellyfinTitle' => 'Jellyfin 연결 편집',
+			'connections.editJellyfinIntro' => ({required Object serverName}) => '${serverName}의 URL을 추가하거나 제거하세요. Plezy는 연결 가능한 URL 중 지연 시간이 가장 낮은 URL을 사용합니다.',
 			'discover.title' => '발견',
 			'discover.switchProfile' => '사용자 전환',
 			'discover.noContentAvailable' => '사용 가능한 콘텐츠가 없습니다',
@@ -2789,6 +2824,7 @@ extension on TranslationsKo {
 			'companionRemote.remote.audio' => '오디오',
 			'companionRemote.remote.searchHint' => '데스크톱에서 검색...',
 			'videoSettings.playbackSpeed' => '재생 속도',
+			'videoSettings.zoom' => '확대/축소',
 			'videoSettings.sleepTimer' => '취침 타이머',
 			'videoSettings.audioSync' => '오디오 동기화',
 			'videoSettings.subtitleSync' => '자막 동기화',
@@ -2811,6 +2847,8 @@ extension on TranslationsKo {
 			'externalPlayer.off' => '꺼짐',
 			'externalPlayer.launchFailed' => '외부 플레이어를 열 수 없습니다',
 			'externalPlayer.appNotInstalled' => ({required Object name}) => '${name}이(가) 설치되어 있지 않습니다',
+			_ => null,
+		} ?? switch (path) {
 			'externalPlayer.playInExternalPlayer' => '외부 플레이어에서 재생',
 			'metadataEdit.editMetadata' => '편집...',
 			'metadataEdit.screenTitle' => '메타데이터 편집',
@@ -2827,8 +2865,6 @@ extension on TranslationsKo {
 			'metadataEdit.summary' => '줄거리',
 			'metadataEdit.poster' => '포스터',
 			'metadataEdit.background' => '배경',
-			_ => null,
-		} ?? switch (path) {
 			'metadataEdit.logo' => '로고',
 			'metadataEdit.squareArt' => '정사각형 아트',
 			'metadataEdit.selectPoster' => '포스터 선택',
@@ -2947,8 +2983,12 @@ extension on TranslationsKo {
 			'trackers.libraryFilter.noLibraries' => '사용 가능한 라이브러리가 없습니다',
 			'addServer.addJellyfinTitle' => 'Jellyfin 서버 추가',
 			'addServer.jellyfinUrlIntro' => '서버 URL을 입력하세요. 예: `https://jellyfin.example.com`.',
+			'addServer.jellyfinUrlsIntro' => '서버 URL을 하나 이상 쉼표나 줄바꿈으로 구분해 입력하세요. Plezy는 연결 가능한 URL 중 지연 시간이 가장 낮은 URL을 사용합니다.',
 			'addServer.serverUrl' => '서버 URL',
+			'addServer.serverUrls' => '서버 URL',
 			'addServer.findServer' => '서버 찾기',
+			'addServer.searchingLocalServers' => '로컬 Jellyfin 서버 검색 중...',
+			'addServer.localServers' => '로컬 Jellyfin 서버',
 			'addServer.username' => '사용자 이름',
 			'addServer.password' => '비밀번호',
 			'addServer.signIn' => '로그인',

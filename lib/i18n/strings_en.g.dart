@@ -209,6 +209,9 @@ class TranslationsCommonEn {
 	/// en: 'Delete'
 	String get delete => 'Delete';
 
+	/// en: 'Edit'
+	String get edit => 'Edit';
+
 	/// en: 'Shuffle'
 	String get shuffle => 'Shuffle';
 
@@ -484,6 +487,12 @@ class TranslationsSettingsEn {
 
 	/// en: 'Show each season's poster above its tab'
 	String get showSeasonPostersOnTabsDescription => 'Show each season\'s poster above its tab';
+
+	/// en: 'Full TV Cards'
+	String get tvFullCardLayout => 'Full TV Cards';
+
+	/// en: 'Use image-only TV cards with actor names overlaid'
+	String get tvFullCardLayoutDescription => 'Use image-only TV cards with actor names overlaid';
 
 	/// en: 'Hide Spoilers for Unwatched Episodes'
 	String get hideSpoilers => 'Hide Spoilers for Unwatched Episodes';
@@ -890,6 +899,12 @@ class TranslationsSettingsEn {
 	/// en: 'Open Plezy in fullscreen mode at launch'
 	String get startInFullscreenDescription => 'Open Plezy in fullscreen mode at launch';
 
+	/// en: 'Exit fullscreen on player close'
+	String get exitFullscreenOnPlayerClose => 'Exit fullscreen on player close';
+
+	/// en: 'Automatically exit fullscreen when closing the video player'
+	String get exitFullscreenOnPlayerCloseDescription => 'Automatically exit fullscreen when closing the video player';
+
 	/// en: 'Auto-Hide Performance Overlay'
 	String get autoHidePerformanceOverlay => 'Auto-Hide Performance Overlay';
 
@@ -1261,6 +1276,18 @@ class TranslationsVideoControlsEn {
 	/// en: 'Playback will pause in ${duration}'
 	String playbackWillPauseIn({required Object duration}) => 'Playback will pause in ${duration}';
 
+	/// en: 'End of current video'
+	String get sleepTimerEndOfVideo => 'End of current video';
+
+	/// en: 'Stop at'
+	String get sleepTimerStopAtHeader => 'Stop at';
+
+	/// en: 'Timer'
+	String get sleepTimerDurationHeader => 'Timer';
+
+	/// en: 'Playback will pause at the end of this video'
+	String get playbackWillPauseAtEnd => 'Playback will pause at the end of this video';
+
 	/// en: 'Still watching?'
 	String get stillWatching => 'Still watching?';
 
@@ -1386,6 +1413,9 @@ class TranslationsVideoControlsEn {
 
 	/// en: 'Screenshot saved'
 	String get screenshotSaved => 'Screenshot saved';
+
+	/// en: 'Zoom ${percent}%'
+	String zoomPercent({required Object percent}) => 'Zoom ${percent}%';
 
 	late final TranslationsVideoControlsPipErrorsEn pipErrors = TranslationsVideoControlsPipErrorsEn.internal(_root);
 
@@ -1889,6 +1919,12 @@ class TranslationsConnectionsEn {
 
 	/// en: 'Sign in again'
 	String get signInAgain => 'Sign in again';
+
+	/// en: 'Edit Jellyfin connection'
+	String get editJellyfinTitle => 'Edit Jellyfin connection';
+
+	/// en: 'Add or remove URLs for ${serverName}. Plezy will use the reachable URL with the lowest latency.'
+	String editJellyfinIntro({required Object serverName}) => 'Add or remove URLs for ${serverName}. Plezy will use the reachable URL with the lowest latency.';
 }
 
 // Path: discover
@@ -3045,6 +3081,9 @@ class TranslationsVideoSettingsEn {
 	/// en: 'Playback Speed'
 	String get playbackSpeed => 'Playback Speed';
 
+	/// en: 'Zoom'
+	String get zoom => 'Zoom';
+
 	/// en: 'Sleep Timer'
 	String get sleepTimer => 'Sleep Timer';
 
@@ -3509,11 +3548,23 @@ class TranslationsAddServerEn {
 	/// en: 'Enter the server URL, e.g. `https://jellyfin.example.com`.'
 	String get jellyfinUrlIntro => 'Enter the server URL, e.g. `https://jellyfin.example.com`.';
 
+	/// en: 'Enter one or more server URLs, separated by commas or new lines. Plezy will use the reachable URL with the lowest latency.'
+	String get jellyfinUrlsIntro => 'Enter one or more server URLs, separated by commas or new lines. Plezy will use the reachable URL with the lowest latency.';
+
 	/// en: 'Server URL'
 	String get serverUrl => 'Server URL';
 
+	/// en: 'Server URLs'
+	String get serverUrls => 'Server URLs';
+
 	/// en: 'Find server'
 	String get findServer => 'Find server';
+
+	/// en: 'Looking for local Jellyfin servers...'
+	String get searchingLocalServers => 'Looking for local Jellyfin servers...';
+
+	/// en: 'Local Jellyfin servers'
+	String get localServers => 'Local Jellyfin servers';
 
 	/// en: 'Username'
 	String get username => 'Username';
@@ -3658,6 +3709,15 @@ class TranslationsHotkeysActionsEn {
 
 	/// en: 'Reset Speed'
 	String get speedReset => 'Reset Speed';
+
+	/// en: 'Zoom In'
+	String get zoomIn => 'Zoom In';
+
+	/// en: 'Zoom Out'
+	String get zoomOut => 'Zoom Out';
+
+	/// en: 'Reset Zoom'
+	String get zoomReset => 'Reset Zoom';
 
 	/// en: 'Seek to Next Subtitle'
 	String get subSeekNext => 'Seek to Next Subtitle';
@@ -4183,6 +4243,7 @@ extension on Translations {
 			'common.yes' => 'Yes',
 			'common.no' => 'No',
 			'common.delete' => 'Delete',
+			'common.edit' => 'Edit',
 			'common.shuffle' => 'Shuffle',
 			'common.addTo' => 'Add to...',
 			'common.createNew' => 'Create new',
@@ -4266,6 +4327,8 @@ extension on Translations {
 			'settings.showEpisodeNumberOnCardsDescription' => 'Show season and episode number on episode cards',
 			'settings.showSeasonPostersOnTabs' => 'Show Season Posters on Tabs',
 			'settings.showSeasonPostersOnTabsDescription' => 'Show each season\'s poster above its tab',
+			'settings.tvFullCardLayout' => 'Full TV Cards',
+			'settings.tvFullCardLayoutDescription' => 'Use image-only TV cards with actor names overlaid',
 			'settings.hideSpoilers' => 'Hide Spoilers for Unwatched Episodes',
 			'settings.hideSpoilersDescription' => 'Blur thumbnails and descriptions for unwatched episodes',
 			'settings.playerBackend' => 'Player Backend',
@@ -4401,6 +4464,8 @@ extension on Translations {
 			'settings.forceTvModeDescription' => 'Force TV layout. For devices that don\'t auto-detect. Requires restart.',
 			'settings.startInFullscreen' => 'Start in fullscreen',
 			'settings.startInFullscreenDescription' => 'Open Plezy in fullscreen mode at launch',
+			'settings.exitFullscreenOnPlayerClose' => 'Exit fullscreen on player close',
+			'settings.exitFullscreenOnPlayerCloseDescription' => 'Automatically exit fullscreen when closing the video player',
 			'settings.autoHidePerformanceOverlay' => 'Auto-Hide Performance Overlay',
 			'settings.autoHidePerformanceOverlayDescription' => 'Fade the performance overlay with the playback controls',
 			'settings.showNavBarLabels' => 'Show Navigation Bar Labels',
@@ -4439,6 +4504,9 @@ extension on Translations {
 			'hotkeys.actions.speedIncrease' => 'Increase Speed',
 			'hotkeys.actions.speedDecrease' => 'Decrease Speed',
 			'hotkeys.actions.speedReset' => 'Reset Speed',
+			'hotkeys.actions.zoomIn' => 'Zoom In',
+			'hotkeys.actions.zoomOut' => 'Zoom Out',
+			'hotkeys.actions.zoomReset' => 'Reset Zoom',
 			'hotkeys.actions.subSeekNext' => 'Seek to Next Subtitle',
 			'hotkeys.actions.subSeekPrev' => 'Seek to Previous Subtitle',
 			'hotkeys.actions.shaderToggle' => 'Toggle Shaders',
@@ -4522,6 +4590,10 @@ extension on Translations {
 			'videoControls.unlockRotation' => 'Unlock rotation',
 			'videoControls.timerActive' => 'Timer Active',
 			'videoControls.playbackWillPauseIn' => ({required Object duration}) => 'Playback will pause in ${duration}',
+			'videoControls.sleepTimerEndOfVideo' => 'End of current video',
+			'videoControls.sleepTimerStopAtHeader' => 'Stop at',
+			'videoControls.sleepTimerDurationHeader' => 'Timer',
+			'videoControls.playbackWillPauseAtEnd' => 'Playback will pause at the end of this video',
 			'videoControls.stillWatching' => 'Still watching?',
 			'videoControls.pausingIn' => ({required Object seconds}) => 'Pausing in ${seconds}s',
 			'videoControls.continueWatching' => 'Continue',
@@ -4564,6 +4636,7 @@ extension on Translations {
 			'videoControls.pipActive' => 'Playing in Picture-in-Picture',
 			'videoControls.pipFailed' => 'Picture-in-picture failed to start',
 			'videoControls.screenshotSaved' => 'Screenshot saved',
+			'videoControls.zoomPercent' => ({required Object percent}) => 'Zoom ${percent}%',
 			'videoControls.pipErrors.androidVersion' => 'Requires Android 8.0 or newer',
 			'videoControls.pipErrors.iosVersion' => 'Requires iOS 15.0 or newer',
 			'videoControls.pipErrors.permissionDisabled' => 'Picture-in-picture is disabled. Enable it in system settings.',
@@ -4650,6 +4723,8 @@ extension on Translations {
 			'mpvConfig.presetSaved' => 'Preset saved',
 			'mpvConfig.presetLoaded' => 'Preset loaded',
 			'mpvConfig.presetDeleted' => 'Preset deleted',
+			_ => null,
+		} ?? switch (path) {
 			'mpvConfig.confirmDeletePreset' => 'Are you sure you want to delete this preset?',
 			'mpvConfig.configPlaceholder' => 'gpu-api=vulkan\nhwdec=auto\n# comment',
 			'dialog.confirmAction' => 'Confirm Action',
@@ -4663,8 +4738,6 @@ extension on Translations {
 			'profiles.signOut' => 'Sign out',
 			'profiles.signOutPlexTitle' => 'Sign out of Plex?',
 			'profiles.signOutPlexMessage' => ({required Object displayName}) => 'Remove ${displayName} and all Plex Home users? Sign back in anytime.',
-			_ => null,
-		} ?? switch (path) {
 			'profiles.signedOutPlex' => 'Signed out of Plex.',
 			'profiles.signOutFailed' => 'Sign out failed.',
 			'profiles.sectionTitle' => 'Profiles',
@@ -4719,6 +4792,8 @@ extension on Translations {
 			'connections.sessionExpiredOne' => ({required Object name}) => 'Session expired for ${name}',
 			'connections.sessionExpiredMany' => ({required Object count}) => 'Session expired for ${count} servers',
 			'connections.signInAgain' => 'Sign in again',
+			'connections.editJellyfinTitle' => 'Edit Jellyfin connection',
+			'connections.editJellyfinIntro' => ({required Object serverName}) => 'Add or remove URLs for ${serverName}. Plezy will use the reachable URL with the lowest latency.',
 			'discover.title' => 'Discover',
 			'discover.switchProfile' => 'Switch Profile',
 			'discover.noContentAvailable' => 'No content available',
@@ -5139,6 +5214,7 @@ extension on Translations {
 			'companionRemote.remote.audio' => 'Audio',
 			'companionRemote.remote.searchHint' => 'Search on desktop...',
 			'videoSettings.playbackSpeed' => 'Playback Speed',
+			'videoSettings.zoom' => 'Zoom',
 			'videoSettings.sleepTimer' => 'Sleep Timer',
 			'videoSettings.audioSync' => 'Audio Sync',
 			'videoSettings.subtitleSync' => 'Subtitle Sync',
@@ -5161,6 +5237,8 @@ extension on Translations {
 			'externalPlayer.off' => 'Off',
 			'externalPlayer.launchFailed' => 'Failed to open external player',
 			'externalPlayer.appNotInstalled' => ({required Object name}) => '${name} is not installed',
+			_ => null,
+		} ?? switch (path) {
 			'externalPlayer.playInExternalPlayer' => 'Play in External Player',
 			'metadataEdit.editMetadata' => 'Edit...',
 			'metadataEdit.screenTitle' => 'Edit Metadata',
@@ -5177,8 +5255,6 @@ extension on Translations {
 			'metadataEdit.summary' => 'Summary',
 			'metadataEdit.poster' => 'Poster',
 			'metadataEdit.background' => 'Background',
-			_ => null,
-		} ?? switch (path) {
 			'metadataEdit.logo' => 'Logo',
 			'metadataEdit.squareArt' => 'Square Art',
 			'metadataEdit.selectPoster' => 'Select Poster',
@@ -5297,8 +5373,12 @@ extension on Translations {
 			'trackers.libraryFilter.noLibraries' => 'No libraries available',
 			'addServer.addJellyfinTitle' => 'Add Jellyfin server',
 			'addServer.jellyfinUrlIntro' => 'Enter the server URL, e.g. `https://jellyfin.example.com`.',
+			'addServer.jellyfinUrlsIntro' => 'Enter one or more server URLs, separated by commas or new lines. Plezy will use the reachable URL with the lowest latency.',
 			'addServer.serverUrl' => 'Server URL',
+			'addServer.serverUrls' => 'Server URLs',
 			'addServer.findServer' => 'Find server',
+			'addServer.searchingLocalServers' => 'Looking for local Jellyfin servers...',
+			'addServer.localServers' => 'Local Jellyfin servers',
 			'addServer.username' => 'Username',
 			'addServer.password' => 'Password',
 			'addServer.signIn' => 'Sign in',

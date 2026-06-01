@@ -19,6 +19,7 @@ import '../services/download_storage_service.dart';
 import '../services/multi_server_manager.dart';
 import '../services/offline_mode_source.dart';
 import '../services/storage_service.dart';
+import '../services/watch_state_resolver.dart';
 import '../media/media_server_client.dart';
 import '../services/sync_rule_executor.dart';
 import '../utils/app_logger.dart';
@@ -363,7 +364,7 @@ class DownloadProvider extends ChangeNotifier with DisposableChangeNotifierMixin
         scopes[key] = await _offlineWatchScopeForGlobalKey(key);
       }
       final profileId = _activeProfileId;
-      final actions = await _database.getLatestWatchActionsForKeys(
+      final actions = await _database.getWatchActionsForKeys(
         keys,
         profileId: profileId,
         filterProfile: profileId != null,
@@ -373,21 +374,9 @@ class DownloadProvider extends ChangeNotifier with DisposableChangeNotifierMixin
       for (final entry in actions.entries) {
         final base = _metadata[entry.key];
         if (base == null) continue;
-        final action = entry.value;
-        bool? isWatched;
-        switch (action.actionType) {
-          case 'watched':
-            isWatched = true;
-          case 'unwatched':
-            isWatched = false;
-          case 'progress':
-            isWatched = action.shouldMarkWatched;
-        }
-        if (isWatched == null) continue;
-        _metadata[entry.key] = base.copyWith(
-          viewCount: isWatched ? 1 : 0,
-          viewOffsetMs: isWatched ? base.viewOffsetMs : 0,
-        );
+        final snapshot = WatchStateResolver.fromActions(entry.value);
+        if (snapshot.isEmpty) continue;
+        _metadata[entry.key] = snapshot.apply(base);
       }
     } catch (e) {
       appLogger.w('Failed to apply offline watch overlay', error: e);
@@ -496,26 +485,41 @@ class DownloadProvider extends ChangeNotifier with DisposableChangeNotifierMixin
   }
 
   void _onWatchStateChanged(WatchStateEvent event) {
-    // Progress ticks fire continuously during playback; only react to discrete
-    // watched/unwatched flips so we don't churn listeners on every frame.
-    if (event.changeType == WatchStateChangeType.progressUpdate) return;
-    if (event.isNowWatched == null) return;
+    final snapshot = WatchStateResolver.fromEvent(event);
+    if (snapshot.isEmpty) return;
 
     final globalKey = buildGlobalKey(event.serverId, event.itemId);
     final base = _metadata[globalKey];
     if (base == null) return;
+    final eventScope = event.cacheServerId;
+    final activeScope = _downloadManager.activeClientScopeIdForServer(event.serverId);
+    if (eventScope != null && eventScope.isNotEmpty && eventScope != event.serverId && eventScope != activeScope) {
+      return;
+    }
 
-    final isWatched = event.isNowWatched!;
-    _metadata[globalKey] = base.copyWith(viewCount: isWatched ? 1 : 0, viewOffsetMs: isWatched ? base.viewOffsetMs : 0);
+    _metadata[globalKey] = snapshot.apply(base);
+
+    final isWatched = snapshot.isWatched;
+    // Sub-threshold progress ticks are frequent; offline reloads re-apply them
+    // from queued watch actions, so only durable watch flips hit the cache here.
+    final shouldPersistToCache =
+        isWatched != null && (event.changeType != WatchStateChangeType.progressUpdate || event.isNowWatched == true);
+
     // Persist into the per-backend pinned cache so the patch survives reloads
     // (`_loadPersistedDownloads` rehydrates `_metadata` from the cache).
-    unawaited(
-      ApiCache.forBackend(base.backend)
-          .applyWatchState(serverId: event.cacheServerId ?? event.serverId, itemId: event.itemId, isWatched: isWatched)
-          .catchError((Object e) {
-            appLogger.w('Failed to apply watch state to cache for $globalKey', error: e);
-          }),
-    );
+    if (shouldPersistToCache) {
+      unawaited(
+        ApiCache.forBackend(base.backend)
+            .applyWatchState(
+              serverId: event.cacheServerId ?? event.serverId,
+              itemId: event.itemId,
+              isWatched: isWatched,
+            )
+            .catchError((Object e) {
+              appLogger.w('Failed to apply watch state to cache for $globalKey', error: e);
+            }),
+      );
+    }
     safeNotifyListeners();
   }
 
@@ -665,42 +669,18 @@ class DownloadProvider extends ChangeNotifier with DisposableChangeNotifierMixin
   }) {
     final globalKey = buildGlobalKey(serverId, ratingKey);
 
-    // DIAGNOSTIC: Check all sources of episode count
-    final meta = _metadata[globalKey];
-    final metadataLeafCount = meta?.leafCount;
-    final storedCount = _totalEpisodeCounts[globalKey];
-    final downloadedCount = episodes.length;
+    // The progress ring reflects only the episodes the user actually queued for
+    // this show/season — not the show's full episode count. _getEpisodeDownloads
+    // returns just the owned download records, so episodes.length IS the queued
+    // count. Downloading 5 of a 50-episode show therefore reaches 100% at 5/5.
+    //
+    // NOTE: the show's full episode count (metadata.leafCount / _totalEpisodeCounts)
+    // is intentionally not used as the denominator here.
+    // TODO: remove the now-unread _totalEpisodeCounts plumbing in a dedicated cleanup.
+    final int totalEpisodes = episodes.length;
 
-    appLogger.d(
-      '📊 Episode count sources for $entityType $ratingKey:\n'
-      '  - Metadata leafCount: $metadataLeafCount\n'
-      '  - Stored count: $storedCount\n'
-      '  - Downloaded episodes: $downloadedCount\n'
-      '  - Metadata exists: ${meta != null}\n'
-      '  - Type: ${meta?.kind.id}\n'
-      '  - Title: ${meta?.title}',
-    );
-
-    // Get total episode count - Use metadata.leafCount as primary source
-    int totalEpisodes;
-    String countSource;
-
-    if (metadataLeafCount != null && metadataLeafCount > 0) {
-      totalEpisodes = metadataLeafCount;
-      countSource = 'metadata.leafCount';
-    } else if (storedCount != null && storedCount > 0) {
-      totalEpisodes = storedCount;
-      countSource = 'stored count (StorageService)';
-    } else {
-      totalEpisodes = downloadedCount;
-      countSource = 'downloaded episodes (fallback)';
-    }
-
-    appLogger.d('✅ Using totalEpisodes=$totalEpisodes from [$countSource] for $entityType $ratingKey');
-
-    // If we have stored count but no downloads, check if it's a valid partial state
-    if (totalEpisodes == 0 || (episodes.isEmpty && totalEpisodes > 0)) {
-      appLogger.d('⚠️  No valid downloads for $entityType $ratingKey, returning null');
+    if (totalEpisodes == 0) {
+      appLogger.d('⚠️  No queued downloads for $entityType $ratingKey, returning null');
       return null;
     }
 
@@ -709,8 +689,10 @@ class DownloadProvider extends ChangeNotifier with DisposableChangeNotifierMixin
     int downloadingCount = 0;
     int queuedCount = 0;
     int failedCount = 0;
+    int summedProgress = 0; // sum of per-episode progress (completed counts as 100)
 
     for (final ep in episodes) {
+      summedProgress += ep.status == DownloadStatus.completed ? 100 : ep.progress;
       switch (ep.status) {
         case DownloadStatus.completed:
           completedCount++;
@@ -741,8 +723,13 @@ class DownloadProvider extends ChangeNotifier with DisposableChangeNotifierMixin
       return null;
     }
 
-    // Calculate overall progress percentage based on TOTAL episodes
-    final int overallProgress = totalEpisodes > 0 ? ((completedCount * 100) / totalEpisodes).round() : 0;
+    // Smooth percentage across the queued episodes: an in-flight episode
+    // contributes its partial progress so the ring advances continuously,
+    // rather than jumping only when whole episodes complete. Cap below 100%
+    // until every episode is actually complete — otherwise rounding (e.g.
+    // 99.8 → 100) could fill the ring while a download is still finishing.
+    final int rawProgress = (summedProgress / totalEpisodes).round();
+    final int overallProgress = completedCount == totalEpisodes ? 100 : (rawProgress > 99 ? 99 : rawProgress);
 
     appLogger.d(
       'Aggregate progress for $entityType $ratingKey: $overallProgress% '
@@ -833,7 +820,7 @@ class DownloadProvider extends ChangeNotifier with DisposableChangeNotifierMixin
 
   /// Get the local video file path for a downloaded item
   /// Returns null if not downloaded or file doesn't exist
-  Future<String?> getVideoFilePath(String globalKey) async {
+  Future<String?> getVideoFilePath(String globalKey, {int? mediaIndex, String? mediaSourceId}) async {
     appLogger.d('getVideoFilePath called with globalKey: $globalKey');
     if (!_ownsDownloadKey(globalKey)) {
       appLogger.w('Profile does not own downloaded item: $globalKey');
@@ -847,6 +834,25 @@ class DownloadProvider extends ChangeNotifier with DisposableChangeNotifierMixin
     }
     if (downloadedItem.status != DownloadStatus.completed.index) {
       appLogger.w('Download not complete. Status: ${downloadedItem.status}');
+      return null;
+    }
+    final expectedSourceId = mediaSourceId?.trim();
+    final downloadedSourceId = downloadedItem.mediaSourceId;
+    final comparedBySourceId =
+        expectedSourceId != null &&
+        expectedSourceId.isNotEmpty &&
+        downloadedSourceId != null &&
+        downloadedSourceId.isNotEmpty;
+    if (comparedBySourceId && expectedSourceId != downloadedSourceId) {
+      appLogger.w(
+        'Downloaded media source mismatch for $globalKey: have $downloadedSourceId, expected $expectedSourceId',
+      );
+      return null;
+    }
+    if (!comparedBySourceId && mediaIndex != null && downloadedItem.mediaIndex != mediaIndex) {
+      appLogger.w(
+        'Downloaded media index mismatch for $globalKey: have ${downloadedItem.mediaIndex}, expected $mediaIndex',
+      );
       return null;
     }
     if (downloadedItem.videoFilePath == null) {

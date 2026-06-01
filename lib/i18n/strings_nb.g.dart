@@ -143,6 +143,7 @@ class _TranslationsCommonNb extends TranslationsCommonEn {
 	@override String get yes => 'Ja';
 	@override String get no => 'Nei';
 	@override String get delete => 'Slett';
+	@override String get edit => 'Rediger';
 	@override String get shuffle => 'Tilfeldig';
 	@override String get addTo => 'Legg til i...';
 	@override String get createNew => 'Opprett ny';
@@ -253,6 +254,8 @@ class _TranslationsSettingsNb extends TranslationsSettingsEn {
 	@override String get showEpisodeNumberOnCardsDescription => 'Vis sesong- og episodenummer på episodekort';
 	@override String get showSeasonPostersOnTabs => 'Vis sesongplakater på faner';
 	@override String get showSeasonPostersOnTabsDescription => 'Vis hver sesongs plakat over fanen';
+	@override String get tvFullCardLayout => 'Fulle TV-kort';
+	@override String get tvFullCardLayoutDescription => 'Bruk bildebaserte TV-kort med skuespillernavn lagt over';
 	@override String get hideSpoilers => 'Skjul spoilere for usette episoder';
 	@override String get hideSpoilersDescription => 'Slør miniatyrbilder og beskrivelser for usette episoder';
 	@override String get playerBackend => 'Spillermotor';
@@ -388,6 +391,8 @@ class _TranslationsSettingsNb extends TranslationsSettingsEn {
 	@override String get forceTvModeDescription => 'Tving TV-oppsett. For enheter som ikke oppdages automatisk. Krever omstart.';
 	@override String get startInFullscreen => 'Start i fullskjerm';
 	@override String get startInFullscreenDescription => 'Åpne Plezy i fullskjermmodus ved oppstart';
+	@override String get exitFullscreenOnPlayerClose => 'Avslutt fullskjerm ved lukking av avspiller';
+	@override String get exitFullscreenOnPlayerCloseDescription => 'Avslutt fullskjerm automatisk når videospilleren lukkes';
 	@override String get autoHidePerformanceOverlay => 'Skjul ytelsesoverlegg automatisk';
 	@override String get autoHidePerformanceOverlayDescription => 'Fade ytelsesoverlegget med avspillingskontrollene';
 	@override String get showNavBarLabels => 'Vis navigasjonsfeltlabeler';
@@ -560,6 +565,10 @@ class _TranslationsVideoControlsNb extends TranslationsVideoControlsEn {
 	@override String get unlockRotation => 'Lås opp rotasjon';
 	@override String get timerActive => 'Timer aktiv';
 	@override String playbackWillPauseIn({required Object duration}) => 'Avspilling vil pause om ${duration}';
+	@override String get sleepTimerEndOfVideo => 'Slutten av gjeldende video';
+	@override String get sleepTimerStopAtHeader => 'Stopp ved';
+	@override String get sleepTimerDurationHeader => 'Timer';
+	@override String get playbackWillPauseAtEnd => 'Avspilling vil pause på slutten av denne videoen';
 	@override String get stillWatching => 'Ser du fortsatt?';
 	@override String pausingIn({required Object seconds}) => 'Pauser om ${seconds}s';
 	@override String get continueWatching => 'Fortsett';
@@ -602,6 +611,7 @@ class _TranslationsVideoControlsNb extends TranslationsVideoControlsEn {
 	@override String get pipActive => 'Spiller i bilde-i-bilde';
 	@override String get pipFailed => 'Bilde-i-bilde kunne ikke starte';
 	@override String get screenshotSaved => 'Skjermbilde lagret';
+	@override String zoomPercent({required Object percent}) => 'Zoom ${percent}%';
 	@override late final _TranslationsVideoControlsPipErrorsNb pipErrors = _TranslationsVideoControlsPipErrorsNb._(_root);
 	@override String get chapters => 'Kapitler';
 	@override String get noChaptersAvailable => 'Ingen kapitler tilgjengelig';
@@ -812,6 +822,8 @@ class _TranslationsConnectionsNb extends TranslationsConnectionsEn {
 	@override String sessionExpiredOne({required Object name}) => 'Økten er utløpt for ${name}';
 	@override String sessionExpiredMany({required Object count}) => 'Økten er utløpt for ${count} servere';
 	@override String get signInAgain => 'Logg inn igjen';
+	@override String get editJellyfinTitle => 'Rediger Jellyfin-tilkobling';
+	@override String editJellyfinIntro({required Object serverName}) => 'Legg til eller fjern URL-er for ${serverName}. Plezy bruker den tilgjengelige URL-en med lavest forsinkelse.';
 }
 
 // Path: discover
@@ -1303,6 +1315,7 @@ class _TranslationsVideoSettingsNb extends TranslationsVideoSettingsEn {
 
 	// Translations
 	@override String get playbackSpeed => 'Avspillingshastighet';
+	@override String get zoom => 'Zoom';
 	@override String get sleepTimer => 'Søvntimer';
 	@override String get audioSync => 'Lydsynkronisering';
 	@override String get subtitleSync => 'Undertekstsynkronisering';
@@ -1502,8 +1515,12 @@ class _TranslationsAddServerNb extends TranslationsAddServerEn {
 	// Translations
 	@override String get addJellyfinTitle => 'Legg til Jellyfin-server';
 	@override String get jellyfinUrlIntro => 'Skriv inn server-URL-en, f.eks. `https://jellyfin.example.com`.';
+	@override String get jellyfinUrlsIntro => 'Skriv inn én eller flere server-URL-er, adskilt med kommaer eller nye linjer. Plezy bruker den tilgjengelige URL-en med lavest forsinkelse.';
 	@override String get serverUrl => 'Server-URL';
+	@override String get serverUrls => 'Server-URL-er';
 	@override String get findServer => 'Finn server';
+	@override String get searchingLocalServers => 'Søker etter lokale Jellyfin-servere...';
+	@override String get localServers => 'Lokale Jellyfin-servere';
 	@override String get username => 'Brukernavn';
 	@override String get password => 'Passord';
 	@override String get signIn => 'Logg på';
@@ -1558,6 +1575,9 @@ class _TranslationsHotkeysActionsNb extends TranslationsHotkeysActionsEn {
 	@override String get speedIncrease => 'Øk hastighet';
 	@override String get speedDecrease => 'Reduser hastighet';
 	@override String get speedReset => 'Tilbakestill hastighet';
+	@override String get zoomIn => 'Zoom inn';
+	@override String get zoomOut => 'Zoom ut';
+	@override String get zoomReset => 'Tilbakestill zoom';
 	@override String get subSeekNext => 'Spol til neste undertekst';
 	@override String get subSeekPrev => 'Spol til forrige undertekst';
 	@override String get shaderToggle => 'Veksle shadere';
@@ -1833,6 +1853,7 @@ extension on TranslationsNb {
 			'common.yes' => 'Ja',
 			'common.no' => 'Nei',
 			'common.delete' => 'Slett',
+			'common.edit' => 'Rediger',
 			'common.shuffle' => 'Tilfeldig',
 			'common.addTo' => 'Legg til i...',
 			'common.createNew' => 'Opprett ny',
@@ -1916,6 +1937,8 @@ extension on TranslationsNb {
 			'settings.showEpisodeNumberOnCardsDescription' => 'Vis sesong- og episodenummer på episodekort',
 			'settings.showSeasonPostersOnTabs' => 'Vis sesongplakater på faner',
 			'settings.showSeasonPostersOnTabsDescription' => 'Vis hver sesongs plakat over fanen',
+			'settings.tvFullCardLayout' => 'Fulle TV-kort',
+			'settings.tvFullCardLayoutDescription' => 'Bruk bildebaserte TV-kort med skuespillernavn lagt over',
 			'settings.hideSpoilers' => 'Skjul spoilere for usette episoder',
 			'settings.hideSpoilersDescription' => 'Slør miniatyrbilder og beskrivelser for usette episoder',
 			'settings.playerBackend' => 'Spillermotor',
@@ -2051,6 +2074,8 @@ extension on TranslationsNb {
 			'settings.forceTvModeDescription' => 'Tving TV-oppsett. For enheter som ikke oppdages automatisk. Krever omstart.',
 			'settings.startInFullscreen' => 'Start i fullskjerm',
 			'settings.startInFullscreenDescription' => 'Åpne Plezy i fullskjermmodus ved oppstart',
+			'settings.exitFullscreenOnPlayerClose' => 'Avslutt fullskjerm ved lukking av avspiller',
+			'settings.exitFullscreenOnPlayerCloseDescription' => 'Avslutt fullskjerm automatisk når videospilleren lukkes',
 			'settings.autoHidePerformanceOverlay' => 'Skjul ytelsesoverlegg automatisk',
 			'settings.autoHidePerformanceOverlayDescription' => 'Fade ytelsesoverlegget med avspillingskontrollene',
 			'settings.showNavBarLabels' => 'Vis navigasjonsfeltlabeler',
@@ -2089,6 +2114,9 @@ extension on TranslationsNb {
 			'hotkeys.actions.speedIncrease' => 'Øk hastighet',
 			'hotkeys.actions.speedDecrease' => 'Reduser hastighet',
 			'hotkeys.actions.speedReset' => 'Tilbakestill hastighet',
+			'hotkeys.actions.zoomIn' => 'Zoom inn',
+			'hotkeys.actions.zoomOut' => 'Zoom ut',
+			'hotkeys.actions.zoomReset' => 'Tilbakestill zoom',
 			'hotkeys.actions.subSeekNext' => 'Spol til neste undertekst',
 			'hotkeys.actions.subSeekPrev' => 'Spol til forrige undertekst',
 			'hotkeys.actions.shaderToggle' => 'Veksle shadere',
@@ -2172,6 +2200,10 @@ extension on TranslationsNb {
 			'videoControls.unlockRotation' => 'Lås opp rotasjon',
 			'videoControls.timerActive' => 'Timer aktiv',
 			'videoControls.playbackWillPauseIn' => ({required Object duration}) => 'Avspilling vil pause om ${duration}',
+			'videoControls.sleepTimerEndOfVideo' => 'Slutten av gjeldende video',
+			'videoControls.sleepTimerStopAtHeader' => 'Stopp ved',
+			'videoControls.sleepTimerDurationHeader' => 'Timer',
+			'videoControls.playbackWillPauseAtEnd' => 'Avspilling vil pause på slutten av denne videoen',
 			'videoControls.stillWatching' => 'Ser du fortsatt?',
 			'videoControls.pausingIn' => ({required Object seconds}) => 'Pauser om ${seconds}s',
 			'videoControls.continueWatching' => 'Fortsett',
@@ -2214,6 +2246,7 @@ extension on TranslationsNb {
 			'videoControls.pipActive' => 'Spiller i bilde-i-bilde',
 			'videoControls.pipFailed' => 'Bilde-i-bilde kunne ikke starte',
 			'videoControls.screenshotSaved' => 'Skjermbilde lagret',
+			'videoControls.zoomPercent' => ({required Object percent}) => 'Zoom ${percent}%',
 			'videoControls.pipErrors.androidVersion' => 'Krever Android 8.0 eller nyere',
 			'videoControls.pipErrors.iosVersion' => 'Krever iOS 15.0 eller nyere',
 			'videoControls.pipErrors.permissionDisabled' => 'Bilde-i-bilde er deaktivert. Slå det på i systeminnstillinger.',
@@ -2300,6 +2333,8 @@ extension on TranslationsNb {
 			'mpvConfig.presetSaved' => 'Forhåndsinnstilling lagret',
 			'mpvConfig.presetLoaded' => 'Forhåndsinnstilling lastet inn',
 			'mpvConfig.presetDeleted' => 'Forhåndsinnstilling slettet',
+			_ => null,
+		} ?? switch (path) {
 			'mpvConfig.confirmDeletePreset' => 'Er du sikker på at du vil slette denne forhåndsinnstillingen?',
 			'mpvConfig.configPlaceholder' => 'gpu-api=vulkan\nhwdec=auto\n# kommentar',
 			'dialog.confirmAction' => 'Bekreft handling',
@@ -2313,8 +2348,6 @@ extension on TranslationsNb {
 			'profiles.signOut' => 'Logg ut',
 			'profiles.signOutPlexTitle' => 'Logge ut av Plex?',
 			'profiles.signOutPlexMessage' => ({required Object displayName}) => 'Fjerne ${displayName} og alle Plex Home-brukere? Du kan logge inn igjen når som helst.',
-			_ => null,
-		} ?? switch (path) {
 			'profiles.signedOutPlex' => 'Logget ut av Plex.',
 			'profiles.signOutFailed' => 'Utlogging mislyktes.',
 			'profiles.sectionTitle' => 'Profiler',
@@ -2369,6 +2402,8 @@ extension on TranslationsNb {
 			'connections.sessionExpiredOne' => ({required Object name}) => 'Økten er utløpt for ${name}',
 			'connections.sessionExpiredMany' => ({required Object count}) => 'Økten er utløpt for ${count} servere',
 			'connections.signInAgain' => 'Logg inn igjen',
+			'connections.editJellyfinTitle' => 'Rediger Jellyfin-tilkobling',
+			'connections.editJellyfinIntro' => ({required Object serverName}) => 'Legg til eller fjern URL-er for ${serverName}. Plezy bruker den tilgjengelige URL-en med lavest forsinkelse.',
 			'discover.title' => 'Oppdag',
 			'discover.switchProfile' => 'Bytt profil',
 			'discover.noContentAvailable' => 'Ingen innhold tilgjengelig',
@@ -2789,6 +2824,7 @@ extension on TranslationsNb {
 			'companionRemote.remote.audio' => 'Lyd',
 			'companionRemote.remote.searchHint' => 'Søk på stasjonær...',
 			'videoSettings.playbackSpeed' => 'Avspillingshastighet',
+			'videoSettings.zoom' => 'Zoom',
 			'videoSettings.sleepTimer' => 'Søvntimer',
 			'videoSettings.audioSync' => 'Lydsynkronisering',
 			'videoSettings.subtitleSync' => 'Undertekstsynkronisering',
@@ -2811,6 +2847,8 @@ extension on TranslationsNb {
 			'externalPlayer.off' => 'Av',
 			'externalPlayer.launchFailed' => 'Kunne ikke åpne ekstern spiller',
 			'externalPlayer.appNotInstalled' => ({required Object name}) => '${name} er ikke installert',
+			_ => null,
+		} ?? switch (path) {
 			'externalPlayer.playInExternalPlayer' => 'Spill av i ekstern spiller',
 			'metadataEdit.editMetadata' => 'Rediger...',
 			'metadataEdit.screenTitle' => 'Rediger metadata',
@@ -2827,8 +2865,6 @@ extension on TranslationsNb {
 			'metadataEdit.summary' => 'Sammendrag',
 			'metadataEdit.poster' => 'Plakat',
 			'metadataEdit.background' => 'Bakgrunn',
-			_ => null,
-		} ?? switch (path) {
 			'metadataEdit.logo' => 'Logo',
 			'metadataEdit.squareArt' => 'Kvadratisk bilde',
 			'metadataEdit.selectPoster' => 'Velg plakat',
@@ -2947,8 +2983,12 @@ extension on TranslationsNb {
 			'trackers.libraryFilter.noLibraries' => 'Ingen biblioteker tilgjengelige',
 			'addServer.addJellyfinTitle' => 'Legg til Jellyfin-server',
 			'addServer.jellyfinUrlIntro' => 'Skriv inn server-URL-en, f.eks. `https://jellyfin.example.com`.',
+			'addServer.jellyfinUrlsIntro' => 'Skriv inn én eller flere server-URL-er, adskilt med kommaer eller nye linjer. Plezy bruker den tilgjengelige URL-en med lavest forsinkelse.',
 			'addServer.serverUrl' => 'Server-URL',
+			'addServer.serverUrls' => 'Server-URL-er',
 			'addServer.findServer' => 'Finn server',
+			'addServer.searchingLocalServers' => 'Søker etter lokale Jellyfin-servere...',
+			'addServer.localServers' => 'Lokale Jellyfin-servere',
 			'addServer.username' => 'Brukernavn',
 			'addServer.password' => 'Passord',
 			'addServer.signIn' => 'Logg på',

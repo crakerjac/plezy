@@ -244,6 +244,7 @@ mixin _JellyfinPlaybackMethods on MediaServerCacheMixin {
       activeAudioStreamId: requestedAudioStreamId,
       playSessionId: playSessionId,
       playMethod: playMethod,
+      selectedMediaIndex: bundle.selectedSourceIndex,
     );
   }
 
@@ -343,6 +344,9 @@ mixin _JellyfinPlaybackMethods on MediaServerCacheMixin {
               cleanSubtitleTitle(track.displayTitle ?? track.title, codec: track.codec) ??
               cleanTrackMetadataValue(track.language),
           language: cleanTrackMetadataValue(track.languageCode),
+          codec: track.codec,
+          isDefault: track.selected,
+          isForced: track.forced,
         ),
       );
     }
@@ -381,6 +385,7 @@ mixin _JellyfinPlaybackMethods on MediaServerCacheMixin {
       chapters: chapters is List ? chapters : const [],
       container: source['Container'] as String?,
       selectedSourceId: source['Id'] as String?,
+      selectedSourceIndex: index,
       trickplay: raw['Trickplay'],
     );
   }
@@ -647,6 +652,7 @@ mixin _JellyfinPlaybackMethods on MediaServerCacheMixin {
     Duration? duration,
     String? playSessionId,
     String? mediaSourceId,
+    PlaybackReportMetadata report = const PlaybackReportMetadata.live(),
   }) async {
     final response = await _http.post(
       '/Sessions/Playing/Stopped',

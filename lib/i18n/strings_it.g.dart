@@ -143,6 +143,7 @@ class _TranslationsCommonIt extends TranslationsCommonEn {
 	@override String get yes => 'Sì';
 	@override String get no => 'No';
 	@override String get delete => 'Elimina';
+	@override String get edit => 'Modifica';
 	@override String get shuffle => 'Casuale';
 	@override String get addTo => 'Aggiungi a...';
 	@override String get createNew => 'Crea';
@@ -253,6 +254,8 @@ class _TranslationsSettingsIt extends TranslationsSettingsEn {
 	@override String get showEpisodeNumberOnCardsDescription => 'Mostra stagione ed episodio sulle schede episodio';
 	@override String get showSeasonPostersOnTabs => 'Mostra poster delle stagioni sulle schede';
 	@override String get showSeasonPostersOnTabsDescription => 'Mostra il poster di ogni stagione sopra la sua scheda';
+	@override String get tvFullCardLayout => 'Schede TV piene';
+	@override String get tvFullCardLayoutDescription => 'Usa schede TV solo immagine con i nomi degli attori sovrapposti';
 	@override String get hideSpoilers => 'Nascondi spoiler per episodi non visti';
 	@override String get hideSpoilersDescription => 'Sfoca miniature e descrizioni degli episodi non visti';
 	@override String get playerBackend => 'Motore di riproduzione';
@@ -388,6 +391,8 @@ class _TranslationsSettingsIt extends TranslationsSettingsEn {
 	@override String get forceTvModeDescription => 'Forza layout TV. Per dispositivi non rilevati automaticamente. Richiede riavvio.';
 	@override String get startInFullscreen => 'Avvia a schermo intero';
 	@override String get startInFullscreenDescription => 'Apri Plezy a schermo intero all\'avvio';
+	@override String get exitFullscreenOnPlayerClose => 'Esci dallo schermo intero alla chiusura del player';
+	@override String get exitFullscreenOnPlayerCloseDescription => 'Esci automaticamente dallo schermo intero quando il lettore video viene chiuso';
 	@override String get autoHidePerformanceOverlay => 'Nascondi automaticamente overlay prestazioni';
 	@override String get autoHidePerformanceOverlayDescription => 'Dissolvi l\'overlay prestazioni con i controlli di riproduzione';
 	@override String get showNavBarLabels => 'Mostra etichette barra di navigazione';
@@ -560,6 +565,10 @@ class _TranslationsVideoControlsIt extends TranslationsVideoControlsEn {
 	@override String get unlockRotation => 'Sblocca rotazione';
 	@override String get timerActive => 'Timer attivo';
 	@override String playbackWillPauseIn({required Object duration}) => 'La riproduzione si interromperà tra ${duration}';
+	@override String get sleepTimerEndOfVideo => 'Fine del video corrente';
+	@override String get sleepTimerStopAtHeader => 'Interrompi a';
+	@override String get sleepTimerDurationHeader => 'Timer';
+	@override String get playbackWillPauseAtEnd => 'La riproduzione si interromperà alla fine di questo video';
 	@override String get stillWatching => 'Stai ancora guardando?';
 	@override String pausingIn({required Object seconds}) => 'Pausa tra ${seconds}s';
 	@override String get continueWatching => 'Continua';
@@ -602,6 +611,7 @@ class _TranslationsVideoControlsIt extends TranslationsVideoControlsEn {
 	@override String get pipActive => 'Riproduzione in Picture-in-Picture';
 	@override String get pipFailed => 'Impossibile avviare la modalità Picture-in-Picture';
 	@override String get screenshotSaved => 'Schermata salvata';
+	@override String zoomPercent({required Object percent}) => 'Zoom ${percent}%';
 	@override late final _TranslationsVideoControlsPipErrorsIt pipErrors = _TranslationsVideoControlsPipErrorsIt._(_root);
 	@override String get chapters => 'Capitoli';
 	@override String get noChaptersAvailable => 'Nessun capitolo disponibile';
@@ -812,6 +822,8 @@ class _TranslationsConnectionsIt extends TranslationsConnectionsEn {
 	@override String sessionExpiredOne({required Object name}) => 'Sessione scaduta per ${name}';
 	@override String sessionExpiredMany({required Object count}) => 'Sessione scaduta per ${count} server';
 	@override String get signInAgain => 'Accedi di nuovo';
+	@override String get editJellyfinTitle => 'Modifica connessione Jellyfin';
+	@override String editJellyfinIntro({required Object serverName}) => 'Aggiungi o rimuovi URL per ${serverName}. Plezy userà l\'URL raggiungibile con la latenza più bassa.';
 }
 
 // Path: discover
@@ -1303,6 +1315,7 @@ class _TranslationsVideoSettingsIt extends TranslationsVideoSettingsEn {
 
 	// Translations
 	@override String get playbackSpeed => 'Velocità di riproduzione';
+	@override String get zoom => 'Zoom';
 	@override String get sleepTimer => 'Timer di spegnimento';
 	@override String get audioSync => 'Sincronizzazione audio';
 	@override String get subtitleSync => 'Sincronizzazione sottotitoli';
@@ -1502,8 +1515,12 @@ class _TranslationsAddServerIt extends TranslationsAddServerEn {
 	// Translations
 	@override String get addJellyfinTitle => 'Aggiungi server Jellyfin';
 	@override String get jellyfinUrlIntro => 'Inserisci l\'URL del server, es. `https://jellyfin.example.com`.';
+	@override String get jellyfinUrlsIntro => 'Inserisci uno o più URL del server, separati da virgole o nuove righe. Plezy userà l\'URL raggiungibile con la latenza più bassa.';
 	@override String get serverUrl => 'URL del server';
+	@override String get serverUrls => 'URL del server';
 	@override String get findServer => 'Trova server';
+	@override String get searchingLocalServers => 'Ricerca server Jellyfin locali...';
+	@override String get localServers => 'Server Jellyfin locali';
 	@override String get username => 'Nome utente';
 	@override String get password => 'Password';
 	@override String get signIn => 'Accedi';
@@ -1558,6 +1575,9 @@ class _TranslationsHotkeysActionsIt extends TranslationsHotkeysActionsEn {
 	@override String get speedIncrease => 'Aumenta velocità';
 	@override String get speedDecrease => 'Diminuisci velocità';
 	@override String get speedReset => 'Ripristina velocità';
+	@override String get zoomIn => 'Aumenta zoom';
+	@override String get zoomOut => 'Riduci zoom';
+	@override String get zoomReset => 'Ripristina zoom';
 	@override String get subSeekNext => 'Vai al sottotitolo successivo';
 	@override String get subSeekPrev => 'Vai al sottotitolo precedente';
 	@override String get shaderToggle => 'Attiva/disattiva shader';
@@ -1833,6 +1853,7 @@ extension on TranslationsIt {
 			'common.yes' => 'Sì',
 			'common.no' => 'No',
 			'common.delete' => 'Elimina',
+			'common.edit' => 'Modifica',
 			'common.shuffle' => 'Casuale',
 			'common.addTo' => 'Aggiungi a...',
 			'common.createNew' => 'Crea',
@@ -1916,6 +1937,8 @@ extension on TranslationsIt {
 			'settings.showEpisodeNumberOnCardsDescription' => 'Mostra stagione ed episodio sulle schede episodio',
 			'settings.showSeasonPostersOnTabs' => 'Mostra poster delle stagioni sulle schede',
 			'settings.showSeasonPostersOnTabsDescription' => 'Mostra il poster di ogni stagione sopra la sua scheda',
+			'settings.tvFullCardLayout' => 'Schede TV piene',
+			'settings.tvFullCardLayoutDescription' => 'Usa schede TV solo immagine con i nomi degli attori sovrapposti',
 			'settings.hideSpoilers' => 'Nascondi spoiler per episodi non visti',
 			'settings.hideSpoilersDescription' => 'Sfoca miniature e descrizioni degli episodi non visti',
 			'settings.playerBackend' => 'Motore di riproduzione',
@@ -2051,6 +2074,8 @@ extension on TranslationsIt {
 			'settings.forceTvModeDescription' => 'Forza layout TV. Per dispositivi non rilevati automaticamente. Richiede riavvio.',
 			'settings.startInFullscreen' => 'Avvia a schermo intero',
 			'settings.startInFullscreenDescription' => 'Apri Plezy a schermo intero all\'avvio',
+			'settings.exitFullscreenOnPlayerClose' => 'Esci dallo schermo intero alla chiusura del player',
+			'settings.exitFullscreenOnPlayerCloseDescription' => 'Esci automaticamente dallo schermo intero quando il lettore video viene chiuso',
 			'settings.autoHidePerformanceOverlay' => 'Nascondi automaticamente overlay prestazioni',
 			'settings.autoHidePerformanceOverlayDescription' => 'Dissolvi l\'overlay prestazioni con i controlli di riproduzione',
 			'settings.showNavBarLabels' => 'Mostra etichette barra di navigazione',
@@ -2089,6 +2114,9 @@ extension on TranslationsIt {
 			'hotkeys.actions.speedIncrease' => 'Aumenta velocità',
 			'hotkeys.actions.speedDecrease' => 'Diminuisci velocità',
 			'hotkeys.actions.speedReset' => 'Ripristina velocità',
+			'hotkeys.actions.zoomIn' => 'Aumenta zoom',
+			'hotkeys.actions.zoomOut' => 'Riduci zoom',
+			'hotkeys.actions.zoomReset' => 'Ripristina zoom',
 			'hotkeys.actions.subSeekNext' => 'Vai al sottotitolo successivo',
 			'hotkeys.actions.subSeekPrev' => 'Vai al sottotitolo precedente',
 			'hotkeys.actions.shaderToggle' => 'Attiva/disattiva shader',
@@ -2172,6 +2200,10 @@ extension on TranslationsIt {
 			'videoControls.unlockRotation' => 'Sblocca rotazione',
 			'videoControls.timerActive' => 'Timer attivo',
 			'videoControls.playbackWillPauseIn' => ({required Object duration}) => 'La riproduzione si interromperà tra ${duration}',
+			'videoControls.sleepTimerEndOfVideo' => 'Fine del video corrente',
+			'videoControls.sleepTimerStopAtHeader' => 'Interrompi a',
+			'videoControls.sleepTimerDurationHeader' => 'Timer',
+			'videoControls.playbackWillPauseAtEnd' => 'La riproduzione si interromperà alla fine di questo video',
 			'videoControls.stillWatching' => 'Stai ancora guardando?',
 			'videoControls.pausingIn' => ({required Object seconds}) => 'Pausa tra ${seconds}s',
 			'videoControls.continueWatching' => 'Continua',
@@ -2214,6 +2246,7 @@ extension on TranslationsIt {
 			'videoControls.pipActive' => 'Riproduzione in Picture-in-Picture',
 			'videoControls.pipFailed' => 'Impossibile avviare la modalità Picture-in-Picture',
 			'videoControls.screenshotSaved' => 'Schermata salvata',
+			'videoControls.zoomPercent' => ({required Object percent}) => 'Zoom ${percent}%',
 			'videoControls.pipErrors.androidVersion' => 'Richiede Android 8.0 o versioni successive',
 			'videoControls.pipErrors.iosVersion' => 'Richiede iOS 15.0 o versioni successive',
 			'videoControls.pipErrors.permissionDisabled' => 'Picture-in-picture è disattivato. Attivalo nelle impostazioni di sistema.',
@@ -2300,6 +2333,8 @@ extension on TranslationsIt {
 			'mpvConfig.presetSaved' => 'Preset salvato',
 			'mpvConfig.presetLoaded' => 'Preset caricato',
 			'mpvConfig.presetDeleted' => 'Preset eliminato',
+			_ => null,
+		} ?? switch (path) {
 			'mpvConfig.confirmDeletePreset' => 'Sei sicuro di voler eliminare questo preset?',
 			'mpvConfig.configPlaceholder' => 'gpu-api=vulkan\nhwdec=auto\n# comment',
 			'dialog.confirmAction' => 'Conferma azione',
@@ -2313,8 +2348,6 @@ extension on TranslationsIt {
 			'profiles.signOut' => 'Esci',
 			'profiles.signOutPlexTitle' => 'Uscire da Plex?',
 			'profiles.signOutPlexMessage' => ({required Object displayName}) => 'Rimuovere ${displayName} e tutti gli utenti Plex Home? Puoi accedere di nuovo quando vuoi.',
-			_ => null,
-		} ?? switch (path) {
 			'profiles.signedOutPlex' => 'Uscito da Plex.',
 			'profiles.signOutFailed' => 'Uscita non riuscita.',
 			'profiles.sectionTitle' => 'Profili',
@@ -2369,6 +2402,8 @@ extension on TranslationsIt {
 			'connections.sessionExpiredOne' => ({required Object name}) => 'Sessione scaduta per ${name}',
 			'connections.sessionExpiredMany' => ({required Object count}) => 'Sessione scaduta per ${count} server',
 			'connections.signInAgain' => 'Accedi di nuovo',
+			'connections.editJellyfinTitle' => 'Modifica connessione Jellyfin',
+			'connections.editJellyfinIntro' => ({required Object serverName}) => 'Aggiungi o rimuovi URL per ${serverName}. Plezy userà l\'URL raggiungibile con la latenza più bassa.',
 			'discover.title' => 'Esplora',
 			'discover.switchProfile' => 'Cambia profilo',
 			'discover.noContentAvailable' => 'Nessun contenuto disponibile',
@@ -2789,6 +2824,7 @@ extension on TranslationsIt {
 			'companionRemote.remote.audio' => 'Audio',
 			'companionRemote.remote.searchHint' => 'Cerca sul desktop...',
 			'videoSettings.playbackSpeed' => 'Velocità di riproduzione',
+			'videoSettings.zoom' => 'Zoom',
 			'videoSettings.sleepTimer' => 'Timer di spegnimento',
 			'videoSettings.audioSync' => 'Sincronizzazione audio',
 			'videoSettings.subtitleSync' => 'Sincronizzazione sottotitoli',
@@ -2811,6 +2847,8 @@ extension on TranslationsIt {
 			'externalPlayer.off' => 'Disattivato',
 			'externalPlayer.launchFailed' => 'Impossibile aprire il lettore esterno',
 			'externalPlayer.appNotInstalled' => ({required Object name}) => '${name} non è installato',
+			_ => null,
+		} ?? switch (path) {
 			'externalPlayer.playInExternalPlayer' => 'Riproduci in lettore esterno',
 			'metadataEdit.editMetadata' => 'Modifica...',
 			'metadataEdit.screenTitle' => 'Modifica metadati',
@@ -2827,8 +2865,6 @@ extension on TranslationsIt {
 			'metadataEdit.summary' => 'Trama',
 			'metadataEdit.poster' => 'Poster',
 			'metadataEdit.background' => 'Sfondo',
-			_ => null,
-		} ?? switch (path) {
 			'metadataEdit.logo' => 'Logo',
 			'metadataEdit.squareArt' => 'Immagine quadrata',
 			'metadataEdit.selectPoster' => 'Seleziona poster',
@@ -2947,8 +2983,12 @@ extension on TranslationsIt {
 			'trackers.libraryFilter.noLibraries' => 'Nessuna libreria disponibile',
 			'addServer.addJellyfinTitle' => 'Aggiungi server Jellyfin',
 			'addServer.jellyfinUrlIntro' => 'Inserisci l\'URL del server, es. `https://jellyfin.example.com`.',
+			'addServer.jellyfinUrlsIntro' => 'Inserisci uno o più URL del server, separati da virgole o nuove righe. Plezy userà l\'URL raggiungibile con la latenza più bassa.',
 			'addServer.serverUrl' => 'URL del server',
+			'addServer.serverUrls' => 'URL del server',
 			'addServer.findServer' => 'Trova server',
+			'addServer.searchingLocalServers' => 'Ricerca server Jellyfin locali...',
+			'addServer.localServers' => 'Server Jellyfin locali',
 			'addServer.username' => 'Nome utente',
 			'addServer.password' => 'Password',
 			'addServer.signIn' => 'Accedi',

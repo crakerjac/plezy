@@ -73,6 +73,7 @@ import 'utils/media_server_http_client.dart';
 import 'utils/orientation_helper.dart';
 import 'utils/watch_state_notifier.dart';
 import 'i18n/strings.g.dart';
+import 'media/media_server_client.dart';
 import 'focus/input_mode_tracker.dart';
 import 'focus/key_event_utils.dart';
 import 'package:intl/date_symbol_data_local.dart';
@@ -227,10 +228,10 @@ Future<void> _bootstrapApp() async {
 
   FullscreenStateManager().startMonitoring();
 
-  // Apply "start in fullscreen" preference on Windows/Linux. macOS is
-  // excluded — its native fullscreen animation is awkward at launch and
-  // the OS already restores window state.
-  if ((Platform.isWindows || Platform.isLinux) && settings.read(SettingsService.startInFullscreen)) {
+  // Apply "start in fullscreen" preference on desktop. macOS does not restore
+  // fullscreen state on its own (frame autosave only persists windowed geometry),
+  // so it needs the same explicit handling as Windows/Linux.
+  if (PlatformDetector.isDesktopOS() && settings.read(SettingsService.startInFullscreen)) {
     unawaited(FullscreenStateManager().enterFullscreen());
   }
 
@@ -764,11 +765,15 @@ class _MainAppState extends State<MainApp> with WidgetsBindingObserver {
             return provider;
           },
         ),
-        ChangeNotifierProxyProvider<ActiveProfileProvider, WatchStateOverlayProvider>(
+        ChangeNotifierProxyProvider2<ActiveProfileProvider, MultiServerProvider, WatchStateOverlayProvider>(
           create: (_) => WatchStateOverlayProvider(),
-          update: (_, activeProfile, previous) {
+          update: (_, activeProfile, multiServer, previous) {
             final provider = previous ?? WatchStateOverlayProvider();
             provider.setActiveProfileId(activeProfile.activeId);
+            provider.setActiveClientScopesByServer({
+              for (final serverId in multiServer.serverManager.serverIds)
+                serverId: multiServer.serverManager.getClient(serverId)?.cacheServerId,
+            });
             return provider;
           },
         ),
@@ -849,7 +854,17 @@ class _MainAppState extends State<MainApp> with WidgetsBindingObserver {
         ChangeNotifierProvider(create: (context) => TraktAccountProvider()),
         ChangeNotifierProvider(create: (context) => TrackersProvider()),
         ChangeNotifierProvider(create: (context) => HiddenLibrariesProvider(), lazy: true),
-        ChangeNotifierProvider(create: (context) => LibrariesProvider()),
+        ChangeNotifierProvider(
+          create: (context) {
+            final provider = LibrariesProvider();
+            // Reload libraries when a new server comes online. Servers bind in
+            // waves on sign-in / profile switch and slow ones reconnect after
+            // the initial load; without this they stay missing from the sidebar
+            // until a profile re-switch or restart.
+            context.read<MultiServerProvider>().onOnlineServersChanged = provider.syncToOnlineServers;
+            return provider;
+          },
+        ),
         ChangeNotifierProvider(create: (context) => PlaybackStateProvider()),
         ChangeNotifierProvider(create: (context) => WatchTogetherProvider()),
         ChangeNotifierProvider(create: (context) => CompanionRemoteProvider()),

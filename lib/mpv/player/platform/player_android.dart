@@ -120,7 +120,16 @@ class PlayerAndroid extends PlayerBase {
       if (externalSubtitles != null && externalSubtitles.isNotEmpty)
         'externalSubtitles': externalSubtitles
             .where((s) => s.uri != null)
-            .map((s) => {'uri': s.uri, 'title': s.title, 'language': s.language})
+            .map(
+              (s) => {
+                'uri': s.uri,
+                'title': s.title,
+                'language': s.language,
+                'codec': s.codec,
+                'isDefault': s.isDefault,
+                'isForced': s.isForced,
+              },
+            )
             .toList(),
     });
   }
@@ -372,6 +381,12 @@ class PlayerAndroid extends PlayerBase {
     await invoke('setBoxFitMode', {'mode': mode});
   }
 
+  /// Apply custom zoom to the native ExoPlayer layer.
+  Future<void> setVideoZoom(double scale) async {
+    if (disposed || !initialized) return;
+    await invoke('setVideoZoom', {'scale': scale});
+  }
+
   @override
   Future<bool> setVideoFrameRate(double fps, int durationMs, {int extraDelayMs = 0}) async {
     if (disposed || !initialized) return false;
@@ -411,7 +426,6 @@ class PlayerAndroid extends PlayerBase {
   @override
   Future<void> setLogLevel(String level) async {
     if (disposed) return;
-    await _ensureInitialized();
     await invoke('setLogLevel', {'level': level});
   }
 }

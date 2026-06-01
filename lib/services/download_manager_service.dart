@@ -1027,6 +1027,7 @@ class DownloadManagerService {
       grandparentRatingKey: metadata.grandparentId,
       status: DownloadStatus.queued.index,
       mediaIndex: mediaIndex,
+      mediaSourceId: _mediaSourceIdForIndex(metadata, mediaIndex),
     );
 
     // Populate the offline cache via the read path and pin so the row
@@ -1044,6 +1045,13 @@ class DownloadManagerService {
     _emitProgress(globalKey, DownloadStatus.queued, 0);
 
     unawaited(_processQueue(client));
+  }
+
+  String? _mediaSourceIdForIndex(MediaItem metadata, int mediaIndex) {
+    final versions = metadata.mediaVersions;
+    if (versions == null || mediaIndex < 0 || mediaIndex >= versions.length) return null;
+    final id = versions[mediaIndex].id.trim();
+    return id.isEmpty ? null : id;
   }
 
   /// Process the download queue — prepares and enqueues items with background_downloader.
@@ -1251,6 +1259,9 @@ class DownloadManagerService {
         if (fetched != null) metadata = fetched.copyWith(serverId: serverId);
         resolution = await client.resolveDownload(metadata, mediaIndex: selectedMediaIndex);
         if (resolution.videoUrl == null) throw Exception('Could not get video URL for $globalKey');
+      }
+      if (resolution.mediaSourceId != null && resolution.mediaSourceId != existing.mediaSourceId) {
+        await _database.updateDownloadMediaSource(globalKey, resolution.mediaSourceId);
       }
 
       if (await _isCancelledOrDeleted(globalKey)) {
