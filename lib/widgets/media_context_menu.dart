@@ -14,6 +14,7 @@ import '../media/media_version.dart';
 import '../mixins/controller_disposer_mixin.dart';
 import '../services/plex_client.dart';
 import '../services/media_list_playback_launcher.dart';
+import '../services/offline_watch_sync_service.dart';
 import '../services/playlist_items_loader.dart';
 import '../services/trackers/tracker_coordinator.dart';
 import '../models/transcode_quality_preset.dart';
@@ -93,6 +94,13 @@ class MediaContextMenu extends StatefulWidget {
   final VoidCallback? onRemoveFromContinueWatching;
   final VoidCallback? onListRefresh; // For refreshing list after deletion
   final VoidCallback? onTap;
+
+  /// Plays the item's trailer. When non-null a "Play trailer" item is added to
+  /// the menu. Only the detail screen passes this (it resolves the trailer from
+  /// Plex extras), so the item never appears on card/browse context menus. This
+  /// keeps the trailer reachable even when the detail row hides its trailer
+  /// button to fit a small screen.
+  final VoidCallback? onPlayTrailer;
   final Widget child;
   final bool isInContinueWatching;
   final String? collectionId; // The collection ID if displaying within a collection
@@ -104,6 +112,7 @@ class MediaContextMenu extends StatefulWidget {
     this.onRemoveFromContinueWatching,
     this.onListRefresh,
     this.onTap,
+    this.onPlayTrailer,
     required this.child,
     this.isInContinueWatching = false,
     this.collectionId,
@@ -264,6 +273,14 @@ class MediaContextMenuState extends State<MediaContextMenu> {
       if (hasActiveProgress) {
         menuActions.add(
           _MenuAction(value: 'play_from_beginning', icon: Symbols.replay_rounded, label: t.mediaMenu.playFromBeginning),
+        );
+      }
+
+      // Trailer playback. The detail row may hide its trailer button on small
+      // screens, so surface it here whenever the screen wires up onPlayTrailer.
+      if (widget.onPlayTrailer != null) {
+        menuActions.add(
+          _MenuAction(value: 'play_trailer', icon: Symbols.theaters_rounded, label: t.tooltips.playTrailer),
         );
       }
 
@@ -545,6 +562,11 @@ class MediaContextMenuState extends State<MediaContextMenu> {
           if (context.mounted) {
             await navigateToVideoPlayer(context, metadata: mediaItem!.copyWith(viewOffsetMs: 0));
           }
+          break;
+
+        case 'play_trailer':
+          didNavigate = true;
+          widget.onPlayTrailer?.call();
           break;
 
         case 'watch':
@@ -1252,19 +1274,31 @@ class MediaContextMenuState extends State<MediaContextMenu> {
 
     // Check if the item is downloaded and use local file path if available
     final downloadProvider = Provider.of<DownloadProvider>(context, listen: false);
+    final offlineWatchService = Provider.of<OfflineWatchSyncService>(context, listen: false);
+    final client = _getMediaClientForItem();
     final globalKey = item.globalKey;
     if (downloadProvider.isDownloaded(globalKey)) {
       final videoPath = await downloadProvider.getVideoFilePath(globalKey);
       if (videoPath != null && context.mounted) {
         final videoUrl = videoPath.contains('://') ? videoPath : 'file://$videoPath';
-        await ExternalPlayerService.launch(context: context, videoUrl: videoUrl);
+        await ExternalPlayerService.launch(
+          context: context,
+          videoUrl: videoUrl,
+          metadata: item,
+          client: client,
+          offlineWatchService: offlineWatchService,
+        );
         return;
       }
     }
 
-    final client = _getMediaClientForItem();
     if (!context.mounted) return;
-    await ExternalPlayerService.launch(context: context, metadata: item, client: client);
+    await ExternalPlayerService.launch(
+      context: context,
+      metadata: item,
+      client: client,
+      offlineWatchService: offlineWatchService,
+    );
   }
 
   /// Handle download collection action — opens the same sync/one-time dialog

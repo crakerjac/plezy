@@ -33,6 +33,13 @@ class AppearanceSettingsScreen extends StatelessWidget {
         _densitySelector(),
         _viewModeSelector(),
         _episodePosterModeSelector(),
+        if (PlatformDetector.isTV())
+          SettingSwitchTile(
+            pref: SettingsService.tvFullCardLayout,
+            icon: Symbols.image_rounded,
+            title: t.settings.tvFullCardLayout,
+            subtitle: t.settings.tvFullCardLayoutDescription,
+          ),
         SettingSwitchTile(
           pref: SettingsService.showEpisodeNumberOnCards,
           icon: Symbols.tag_rounded,
@@ -108,13 +115,19 @@ class AppearanceSettingsScreen extends StatelessWidget {
           subtitle: t.settings.showUnwatchedCountDescription,
         ),
 
-        if (Platform.isWindows || Platform.isLinux) ...[
+        if (PlatformDetector.isDesktopOS()) ...[
           SettingsSectionHeader(t.settings.window),
           SettingSwitchTile(
             pref: SettingsService.startInFullscreen,
             icon: Symbols.fullscreen_rounded,
             title: t.settings.startInFullscreen,
             subtitle: t.settings.startInFullscreenDescription,
+          ),
+          SettingSwitchTile(
+            pref: SettingsService.exitFullscreenOnPlayerClose,
+            icon: Symbols.fullscreen_exit_rounded,
+            title: t.settings.exitFullscreenOnPlayerClose,
+            subtitle: t.settings.exitFullscreenOnPlayerCloseDescription,
           ),
         ],
 
@@ -283,6 +296,8 @@ class AppearanceSettingsScreen extends StatelessWidget {
         return 'Dansk';
       case AppLocale.nb:
         return 'Norsk bokmål';
+      case AppLocale.bg:
+        return 'Български';
     }
   }
 

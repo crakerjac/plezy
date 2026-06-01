@@ -44,7 +44,9 @@ import '../services/episode_navigation_service.dart';
 import '../services/app_foreground_service.dart';
 import '../services/media_controls_manager.dart';
 import '../services/playback_initialization_service.dart';
+import '../services/playback_context.dart';
 import '../services/playback_progress_tracker.dart';
+import '../services/playback_source_resolver.dart';
 import '../services/offline_watch_sync_service.dart';
 import '../services/display_mode_service.dart';
 import '../services/settings_service.dart';
@@ -263,6 +265,7 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
   bool _isPhone = false;
   List<MediaVersion> _availableVersions = [];
   MediaSourceInfo? _currentMediaInfo;
+  late int _effectiveSelectedMediaIndex;
 
   // Transcode / quality state
   late TranscodeQualityPreset _selectedQualityPreset;
@@ -274,7 +277,9 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
   // the metadata fetch (and transcode-decision HTTP, if non-original preset)
   // overlaps with MPV property configuration. Awaited inside `_startPlayback`
   // immediately before `player.open()` needs the video URL.
-  Future<PlaybackInitializationResult>? _playbackDataFuture;
+  Future<PlaybackContext>? _playbackDataFuture;
+  PlaybackContext? _playbackContext;
+  int _playbackGeneration = 0;
   // HTTP headers attached to the player's `Media` request — `X-Plex-Token`
   // for Plex, empty for Jellyfin (token rides in the URL there). Sourced
   // from `MediaServerClient.streamHeaders` so the player code path stays
@@ -370,14 +375,17 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
   bool _hiddenForBackground = false;
   bool _mediaControlsSuspendedForTvBackground = false;
   bool _resumeFromSuspendedMediaControlOnForeground = false;
+  bool _resumeAfterAppleAudioSessionPause = false;
+  DateTime? _lastPlaybackPauseAt;
   bool _autoPipEnabled = false;
+  bool _exitFullscreenOnPlayerClose = false;
   bool _androidAutoPipTransitionInFlight = false;
   bool _pipFiltersPrepared = false;
+  VoidCallback? _autoPipEnteringCallback;
   bool _resumeLiveTimelineOnResume = false;
   int _rewindOnResume = 0;
   Future<void> _lifecycleTransition = Future<void>.value();
   String _playerBackendLabel = 'unknown';
-  Future<void>? _stoppedProgressFuture;
   Timer? _tvBackgroundMediaControlResumeTimer;
 
   /// Whether to skip lifecycle actions because PiP is active or about to start.
@@ -399,6 +407,9 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
   Size? _pendingVideoLayoutSize;
   Player? _lastVideoLayoutPlayer;
   bool _videoLayoutUpdateScheduled = false;
+  double? _pinchStartZoomScale;
+  bool _isPinchZooming = false;
+  bool _pinchZoomChanged = false;
   final EpisodeNavigationService _episodeNavigation = EpisodeNavigationService();
 
   WatchTogetherProvider? _watchTogetherProvider;
@@ -414,9 +425,28 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
     return context.read<MultiServerProvider>().serverManager.getClient(id);
   }
 
+  MediaServerClient? _getOnlineMediaServerClient(BuildContext context) {
+    final id = _currentMetadata.serverId;
+    if (id == null) return null;
+    final manager = context.read<MultiServerProvider>().serverManager;
+    if (!manager.isClientOnline(id)) return null;
+    return manager.getClient(id);
+  }
+
+  bool get _usesLocalPlaybackSource => _effectiveIsOffline;
+
   bool get _isOfflinePlayback => widget.isOffline || _effectiveIsOffline;
 
   ScrubFrame? _getThumbnailData(Duration time) => _scrubPreviewSource?.getFrame(time);
+
+  int _beginPlaybackGeneration({bool isEpisodeSwap = false}) {
+    if (!isEpisodeSwap) _isSwappingEpisode = false;
+    return ++_playbackGeneration;
+  }
+
+  bool _isCurrentPlaybackGeneration(int generation, Player currentPlayer) {
+    return mounted && player == currentPlayer && _playbackGeneration == generation;
+  }
 
   final ValueNotifier<bool> _isBuffering = ValueNotifier<bool>(false);
   final ValueNotifier<bool> _hasFirstFrame = ValueNotifier<bool>(false);
@@ -430,13 +460,14 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
     _currentMetadata = widget.metadata;
     _activeId = widget.metadata.id;
     _activeMediaIndex = widget.selectedMediaIndex;
+    _effectiveSelectedMediaIndex = widget.selectedMediaIndex;
 
     // Reused across quality/version/audio switches so the server-side
     // transcode session is preserved.
     _playbackSessionIdentifier = widget.reusedSessionIdentifier ?? generateSessionIdentifier();
     _playbackTranscodeSessionId = widget.reusedTranscodeSessionId ?? generateSessionIdentifier();
     _selectedAudioStreamId = widget.selectedAudioStreamId;
-    _effectiveIsOffline = widget.isOffline;
+    _effectiveIsOffline = false;
     _selectedQualityPreset = widget.selectedQualityPreset ?? TranscodeQualityPreset.original;
 
     _liveChannelIndex = widget.liveCurrentChannelIndex ?? -1;
@@ -574,6 +605,7 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
       if (!mounted) return;
       _videoPlayerNavigationEnabled = settingsService.read(SettingsService.videoPlayerNavigationEnabled);
       _autoPipEnabled = settingsService.read(SettingsService.autoPip);
+      _exitFullscreenOnPlayerClose = settingsService.read(SettingsService.exitFullscreenOnPlayerClose);
       _rewindOnResume = settingsService.read(SettingsService.rewindOnResume);
       final bufferSizeMB = settingsService.read(SettingsService.bufferSize);
       final enableHardwareDecoding = settingsService.read(SettingsService.enableHardwareDecoding);
@@ -592,6 +624,10 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
       final currentPlayer = Player(useExoPlayer: useExoPlayer);
       player = currentPlayer;
       _playerBackendLabel = currentPlayer.playerType;
+      if (Platform.isAndroid && useExoPlayer) {
+        await currentPlayer.setLogLevel(debugLoggingEnabled ? 'v' : 'warn');
+        if (!mounted || player != currentPlayer) return;
+      }
 
       // Kick off getPlaybackData() in parallel with the rest of MPV setup.
       // The network/DB work has no dependency on the player — it just needs
@@ -609,26 +645,26 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
           throw StateError('No client registered for ${_currentMetadata.serverId}');
         }
         _streamHeaders = genericClient.streamHeaders;
-        // Single source of truth for showing quality controls. Plex uses a
-        // per-server probe; Jellyfin supports explicit quality selection but
-        // should not inherit the global Plex-style default on ordinary play.
+        // Single source of truth for showing quality controls and applying the
+        // saved startup quality. Backends that cannot transcode always start at
+        // Original even if the user picked a lower default quality.
         _serverSupportsTranscoding = genericClient.capabilities.videoTranscoding;
         if (widget.selectedQualityPreset == null) {
-          _selectedQualityPreset = genericClient.backend == MediaBackend.plex && _serverSupportsTranscoding
+          _selectedQualityPreset = _serverSupportsTranscoding
               ? settingsService.read(SettingsService.defaultQualityPreset)
               : TranscodeQualityPreset.original;
         } else {
           _selectedQualityPreset = widget.selectedQualityPreset!;
         }
-        final playbackService = PlaybackInitializationService(
-          client: genericClient,
+        final playbackResolver = PlaybackSourceResolver(
+          serverManager: context.read<MultiServerProvider>().serverManager,
           database: context.read<AppDatabase>(),
         );
-        _playbackDataFuture = playbackService.getPlaybackData(
+        _playbackDataFuture = playbackResolver.resolve(
           metadata: _currentMetadata,
           selectedMediaIndex: widget.selectedMediaIndex,
           selectedMediaSourceId: widget.selectedMediaSourceId,
-          preferOffline: _selectedQualityPreset.isOriginal,
+          offlineLibraryMode: false,
           qualityPreset: _selectedQualityPreset,
           selectedAudioStreamId: _selectedAudioStreamId,
           sessionIdentifier: _playbackSessionIdentifier,
@@ -647,8 +683,13 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
       if (Platform.isAndroid && useExoPlayer) {
         final tunneledPlayback = settingsService.read(SettingsService.tunneledPlayback);
         await currentPlayer.setProperty('tunneled-playback', tunneledPlayback ? 'yes' : 'no');
+      }
+      if ((Platform.isAndroid && useExoPlayer) || Platform.isIOS || Platform.isMacOS) {
         final dvConversionMode = settingsService.read(SettingsService.dvConversionMode);
         await currentPlayer.setProperty('dv-conversion-mode', dvConversionMode.nativeValue);
+      }
+      if (Platform.isIOS || Platform.isMacOS) {
+        await currentPlayer.setProperty('dv-conversion-log', debugLoggingEnabled ? 'yes' : 'no');
       }
       if (bufferSizeMB > 0) {
         final bufferSizeBytes = bufferSizeMB * 1024 * 1024;
@@ -998,6 +1039,7 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
             if (navigator.canPop()) {
               _isExiting.value = true;
               await _sendStoppedProgressOnce();
+              await _restoreSystemUiAndOrientation();
               if (!mounted) return;
               navigator.pop(true);
             }
@@ -1012,11 +1054,39 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
       if (navigator.canPop()) {
         _isExiting.value = true;
         await _sendStoppedProgressOnce();
+        await _restoreSystemUiAndOrientation();
         if (!mounted) return;
         navigator.pop(true);
       }
     } finally {
       _isHandlingBack = false;
+    }
+  }
+
+  Future<void> _restoreSystemUiAndOrientation() async {
+    if (PlatformDetector.isDesktopOS() && _exitFullscreenOnPlayerClose) {
+      unawaited(FullscreenStateManager().exitFullscreen());
+    }
+
+    try {
+      await OrientationHelper.restoreSystemUI();
+    } catch (e) {
+      appLogger.w('Failed to restore system UI', error: e);
+    }
+
+    try {
+      if (_isPhone) {
+        await SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp, DeviceOrientation.portraitDown]);
+      } else {
+        await SystemChrome.setPreferredOrientations([
+          DeviceOrientation.portraitUp,
+          DeviceOrientation.portraitDown,
+          DeviceOrientation.landscapeLeft,
+          DeviceOrientation.landscapeRight,
+        ]);
+      }
+    } catch (e) {
+      appLogger.w('Failed to restore orientation', error: e);
     }
   }
 
@@ -1053,11 +1123,13 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
     _sendLiveTimeline('stopped');
     _stopLiveTimelineUpdates();
 
-    _videoPIPManager?.isPipActive.removeListener(_onPipStateChanged);
+    _detachPipStateListener();
     _videoPIPManager?.onBeforeEnterPip = null;
-    _videoPIPManager?.disableAutoPip();
-    PipService.onAutoPipEntering = null;
+    unawaited(_videoPIPManager?.disableAutoPip());
+    _clearAutoPipEnteringCallback();
     _videoFilterManager?.dispose();
+    _videoPIPManager = null;
+    _videoFilterManager = null;
 
     _scrubPreviewSource?.dispose();
 
@@ -1128,23 +1200,7 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
 
     // Restore system UI and orientation preferences (skip if navigating to another video)
     if (!_isReplacingWithVideo) {
-      OrientationHelper.restoreSystemUI();
-
-      // Restore orientation based on cached device type (no context needed)
-      try {
-        if (_isPhone) {
-          SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp, DeviceOrientation.portraitDown]);
-        } else {
-          SystemChrome.setPreferredOrientations([
-            DeviceOrientation.portraitUp,
-            DeviceOrientation.portraitDown,
-            DeviceOrientation.landscapeLeft,
-            DeviceOrientation.landscapeRight,
-          ]);
-        }
-      } catch (e) {
-        appLogger.w('Failed to restore orientation in dispose', error: e);
-      }
+      unawaited(_restoreSystemUiAndOrientation());
     }
 
     Sentry.addBreadcrumb(Breadcrumb(message: 'Player dispose', category: 'player'));
@@ -1236,18 +1292,13 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
   String get playbackSessionIdentifier => _playbackSessionIdentifier;
   String get playbackTranscodeSessionId => _playbackTranscodeSessionId;
 
-  Future<void> _sendStoppedProgressOnce() {
-    final existing = _stoppedProgressFuture;
-    if (existing != null) return existing;
-
+  Future<void> _sendStoppedProgressOnce({Duration? positionOverride}) {
     final tracker = _progressTracker;
     if (tracker == null) return Future<void>.value();
 
-    final future = tracker.sendProgress('stopped').catchError((Object e, StackTrace st) {
+    return tracker.sendStoppedProgressOnce(positionOverride: positionOverride).catchError((Object e, StackTrace st) {
       appLogger.d('Stopped progress flush failed', error: e, stackTrace: st);
     });
-    _stoppedProgressFuture = future;
-    return future;
   }
 
   /// Dispose the player before replacing the video to avoid race conditions
@@ -1260,6 +1311,10 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
       _detachFromWatchTogetherSession();
       await _sendStoppedProgressOnce();
       _progressTracker?.stopTracking();
+      _detachPipStateListener();
+      _videoPIPManager?.onBeforeEnterPip = null;
+      unawaited(_videoPIPManager?.disableAutoPip());
+      _clearAutoPipEnteringCallback();
       // Clear frame rate matching before disposing (Android only)
       await _clearFrameRateMatching();
       // Restore Windows display mode before disposing

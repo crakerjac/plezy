@@ -12,12 +12,26 @@ extension _VideoPlayerPlaybackPromptMethods on VideoPlayerScreenState {
     // mpv does not flip the `pause` property on EOF, so _onPlayingStateChanged
     // never fires false.  Normalize all playback-dependent state.
     unawaited(_setWakelock(false));
-    unawaited(_progressTracker?.sendProgress('paused'));
+    final duration = player?.state.duration;
+    unawaited(
+      duration != null && duration.inMilliseconds > 0
+          ? _sendStoppedProgressOnce(positionOverride: duration)
+          : _sendStoppedProgressOnce(),
+    );
     _updateMediaControlsPlaybackState();
     unawaited(DiscordRPCService.instance.pausePlayback());
     unawaited(TraktScrobbleService.instance.pausePlayback());
     if (_autoPipEnabled) {
       unawaited(_videoPIPManager?.updateAutoPipState(isPlaying: false));
+    }
+
+    // End-of-video sleep timer takes precedence over autoplay / next-episode
+    // dialogs: the user explicitly asked to stop after this item.
+    final sleepTimerService = SleepTimerService();
+    if (sleepTimerService.isEndOfVideoMode && !_completionTriggered) {
+      _completionTriggered = true;
+      sleepTimerService.notifyVideoCompleted();
+      return;
     }
 
     if (_nextEpisode != null && !_showPlayNextDialog && !_showStillWatchingPrompt && !_completionTriggered) {
@@ -83,6 +97,7 @@ extension _VideoPlayerPlaybackPromptMethods on VideoPlayerScreenState {
 
   void _cancelAutoPlay() {
     _autoPlayTimer?.cancel();
+    _progressTracker?.resumeAfterStoppedReport();
     _completionTriggered = false; // Reset so it can trigger again if user seeks near end
     _setPlayerState(() {
       _showPlayNextDialog = false;

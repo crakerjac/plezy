@@ -39,6 +39,8 @@ class DownloadsScreenState extends State<DownloadsScreen>
   final _moviesTabChipFocusNode = FocusNode(debugLabel: 'tab_chip_movies');
   final _actionBarKey = GlobalKey<FocusableActionBarState>();
   bool _isImporting = false;
+  // offline_sort: sort state shared across TV Shows / Movies tabs
+  DownloadSortOrder _sortOrder = DownloadSortOrder.defaultOrder;
 
   @override
   List<FocusNode> get tabChipFocusNodes => [_queueTabChipFocusNode, _tvShowsTabChipFocusNode, _moviesTabChipFocusNode];
@@ -229,6 +231,35 @@ class DownloadsScreenState extends State<DownloadsScreen>
             scrolledUnderElevation: 0,
             // PlexSyncer + upstream: both actions in one FocusableActionBar
             actions: [
+              // offline_sort: sort menu — icon tinted when non-default sort active
+              if (tabController.index != 0)
+                PopupMenuButton<DownloadSortOrder>(
+                  icon: Icon(
+                    Symbols.sort_rounded,
+                    color: _sortOrder != DownloadSortOrder.defaultOrder
+                        ? Theme.of(context).colorScheme.primary
+                        : null,
+                  ),
+                  tooltip: 'Sort',
+                  onSelected: (order) => setState(() => _sortOrder = order),
+                  itemBuilder: (_) => DownloadSortOrder.values.map((order) =>
+                    PopupMenuItem(
+                      value: order,
+                      child: Row(
+                        children: [
+                          SizedBox(
+                            width: 20,
+                            child: _sortOrder == order
+                                ? const Icon(Icons.check, size: 16)
+                                : null,
+                          ),
+                          const SizedBox(width: 8),
+                          Text(order.label),
+                        ],
+                      ),
+                    ),
+                  ).toList(),
+                ),
               FocusableActionBar(
                 key: _actionBarKey,
                 onNavigateLeft: () => getTabChipFocusNode(tabCount - 1).requestFocus(),
@@ -324,11 +355,13 @@ class DownloadsScreenState extends State<DownloadsScreen>
                         type: DownloadType.tvShows,
                         suppressAutoFocus: suppressAutoFocus,
                         onBack: focusTabBar,
+                        sortOrder: _sortOrder,
                       ),
                       _DownloadsGridContent(
                         type: DownloadType.movies,
                         suppressAutoFocus: suppressAutoFocus,
                         onBack: focusTabBar,
+                        sortOrder: _sortOrder,
                       ),
                     ],
                   ),
@@ -344,13 +377,32 @@ class DownloadsScreenState extends State<DownloadsScreen>
 
 enum DownloadType { manage, tvShows, movies }
 
+// offline_sort: sort order for TV Shows and Movies grids
+enum DownloadSortOrder { defaultOrder, az, za, random }
+
+extension DownloadSortOrderLabel on DownloadSortOrder {
+  String get label => switch (this) {
+    DownloadSortOrder.defaultOrder => 'Default',
+    DownloadSortOrder.az           => 'A–Z',
+    DownloadSortOrder.za           => 'Z–A',
+    DownloadSortOrder.random       => 'Random',
+  };
+}
+
 /// Grid content for TV Shows and Movies tabs
 class _DownloadsGridContent extends StatefulWidget {
   final DownloadType type;
   final bool suppressAutoFocus;
   final VoidCallback? onBack;
+  // offline_sort: current sort order from parent
+  final DownloadSortOrder sortOrder;
 
-  const _DownloadsGridContent({required this.type, required this.suppressAutoFocus, this.onBack});
+  const _DownloadsGridContent({
+    required this.type,
+    required this.suppressAutoFocus,
+    required this.sortOrder,
+    this.onBack,
+  });
 
   @override
   State<_DownloadsGridContent> createState() => _DownloadsGridContentState();
@@ -358,6 +410,10 @@ class _DownloadsGridContent extends StatefulWidget {
 
 class _DownloadsGridContentState extends State<_DownloadsGridContent> {
   final FocusNode _firstItemFocusNode = FocusNode(debugLabel: 'DownloadsGrid_firstItem');
+
+  // offline_sort: random sort cache — only reshuffled when source list changes
+  List<MediaItem>? _randomCache;
+  List<MediaItem>? _randomSource;
 
   @override
   void dispose() {
@@ -387,9 +443,28 @@ class _DownloadsGridContentState extends State<_DownloadsGridContent> {
   Widget build(BuildContext context) {
     return Consumer<DownloadProvider>(
       builder: (context, downloadProvider, _) {
-        final List<MediaItem> items = widget.type == DownloadType.tvShows
+        final List<MediaItem> rawItems = widget.type == DownloadType.tvShows
             ? downloadProvider.downloadedShows
             : downloadProvider.downloadedMovies;
+
+        // offline_sort: apply sort order from parent
+        final List<MediaItem> items = () {
+          switch (widget.sortOrder) {
+            case DownloadSortOrder.az:
+              return [...rawItems]..sort((a, b) => (a.title ?? '').compareTo(b.title ?? ''));
+            case DownloadSortOrder.za:
+              return [...rawItems]..sort((a, b) => (b.title ?? '').compareTo(a.title ?? ''));
+            case DownloadSortOrder.random:
+              if (_randomCache == null || _randomSource != rawItems) {
+                _randomSource = rawItems;
+                _randomCache = [...rawItems]..shuffle();
+              }
+              return _randomCache!;
+            case DownloadSortOrder.defaultOrder:
+              _randomCache = null;
+              return rawItems;
+          }
+        }();
 
         if (items.isEmpty) {
           return _buildEmptyState();
@@ -398,21 +473,33 @@ class _DownloadsGridContentState extends State<_DownloadsGridContent> {
         // Extra top padding for focus decoration (scale + border extends beyond item bounds)
         const effectivePadding = EdgeInsets.only(left: 8, right: 8, top: 8);
 
-        return SettingValueBuilder<int>(
-          pref: SettingsService.libraryDensity,
-          builder: (context, density, _) {
+        return SettingsBuilder(
+          prefs: const [SettingsService.libraryDensity, SettingsService.tvFullCardLayout],
+          builder: (context) {
+            final settings = SettingsService.instanceOrNull!;
+            final density = settings.read(SettingsService.libraryDensity);
+            final fullCardLayout = PlatformDetector.isTV() && settings.read(SettingsService.tvFullCardLayout);
             final maxCrossAxisExtent = GridSizeCalculator.getMaxCrossAxisExtent(context, density);
             // Use LayoutBuilder to get actual available width (accounting for sidebar)
             return LayoutBuilder(
               builder: (context, constraints) {
                 final availableWidth = constraints.maxWidth - effectivePadding.left - effectivePadding.right;
-                final columnCount = GridSizeCalculator.getColumnCount(availableWidth, maxCrossAxisExtent);
+                final gridSpacing = MediaGridDelegate.spacingFor(context: context, fullBleedImage: fullCardLayout);
+                final columnCount = GridSizeCalculator.getColumnCount(
+                  availableWidth,
+                  maxCrossAxisExtent,
+                  crossAxisSpacing: gridSpacing,
+                );
 
                 return GridView.builder(
                   padding: effectivePadding,
                   // Allow focus decoration to render outside scroll bounds
                   clipBehavior: Clip.none,
-                  gridDelegate: MediaGridDelegate.createDelegate(context: context, density: density),
+                  gridDelegate: MediaGridDelegate.createDelegate(
+                    context: context,
+                    density: density,
+                    fullBleedImage: fullCardLayout,
+                  ),
                   itemCount: items.length,
                   itemBuilder: (context, index) {
                     final item = items[index];
@@ -423,6 +510,7 @@ class _DownloadsGridContentState extends State<_DownloadsGridContent> {
                       focusNode: isFirst ? _firstItemFocusNode : null,
                       onBack: widget.onBack,
                       isOffline: true, // Downloaded content works without server
+                      fullBleedImage: fullCardLayout,
                       onNavigateLeft: isFirstColumn ? _navigateToSidebar : null,
                     );
                   },
