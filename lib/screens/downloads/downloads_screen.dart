@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../media/ids.dart';
 import 'package:material_symbols_icons/symbols.dart';
 import 'package:provider/provider.dart';
 import '../../focus/focusable_action_bar.dart';
@@ -13,7 +14,6 @@ import '../../mixins/refreshable.dart';
 import '../../utils/grid_size_calculator.dart';
 import '../../utils/platform_detector.dart';
 import '../../widgets/desktop_app_bar.dart';
-import '../../widgets/focusable_tab_chip.dart';
 import '../../widgets/focusable_media_card.dart';
 import '../../widgets/media_grid_delegate.dart';
 import '../../widgets/download_tree_view.dart';
@@ -84,7 +84,7 @@ class DownloadsScreenState extends State<DownloadsScreen>
     try {
       final serverProvider = context.read<MultiServerProvider>();
       final summary = await context.read<DownloadProvider>().importFromManifest(
-        clientResolver: (id) => serverProvider.serverManager.getClient(id),
+        clientResolver: (id) => serverProvider.serverManager.getClient(ServerId(id)),
       );
 
       if (!mounted) return;
@@ -154,45 +154,12 @@ class DownloadsScreenState extends State<DownloadsScreen>
   }
 
   Widget _buildTabChip(String label, int index) {
-    final isSelected = tabController.index == index;
-
-    return FocusableTabChip(
-      label: label,
-      isSelected: isSelected,
-      focusNode: getTabChipFocusNode(index),
-      onSelect: () {
-        if (isSelected) {
-          // Already selected - navigate to tab content
-          _focusCurrentTab();
-        } else {
-          // Switch to this tab
-          setState(() {
-            tabController.index = index;
-          });
-        }
-      },
-      onNavigateLeft: index > 0
-          ? () {
-              final newIndex = index - 1;
-              setState(() {
-                suppressAutoFocus = true;
-                tabController.index = newIndex;
-              });
-              getTabChipFocusNode(newIndex).requestFocus();
-            }
-          : onTabBarBack,
-      onNavigateRight: index < tabCount - 1
-          ? () {
-              final newIndex = index + 1;
-              setState(() {
-                suppressAutoFocus = true;
-                tabController.index = newIndex;
-              });
-              getTabChipFocusNode(newIndex).requestFocus();
-            }
-          : () => _actionBarKey.currentState?.requestFocusOnFirst(),
+    return buildTabChip(
+      label,
+      index,
+      onSelectWhenActive: _focusCurrentTab,
       onNavigateDown: _focusCurrentTab,
-      onBack: onTabBarBack,
+      onNavigateToActions: () => _actionBarKey.currentState?.requestFocusOnFirst(),
     );
   }
 
@@ -296,7 +263,7 @@ class DownloadsScreenState extends State<DownloadsScreen>
                 if (!PlatformDetector.shouldUseSideNavigation(context))
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                    alignment: Alignment.centerLeft,
+                    alignment: .centerLeft,
                     child: SingleChildScrollView(
                       scrollDirection: Axis.horizontal,
                       child: Row(
@@ -324,7 +291,7 @@ class DownloadsScreenState extends State<DownloadsScreen>
                           // (not a [PlexClient]) for both code paths.
                           getClient(String globalKey) {
                             final serverId = parseGlobalKey(globalKey)?.serverId ?? globalKey;
-                            return serverProvider.serverManager.getClient(serverId);
+                            return serverProvider.serverManager.getClient(ServerId(serverId));
                           }
 
                           return DownloadTreeView(
@@ -476,7 +443,7 @@ class _DownloadsGridContentState extends State<_DownloadsGridContent> {
         return SettingsBuilder(
           prefs: const [SettingsService.libraryDensity, SettingsService.tvFullCardLayout],
           builder: (context) {
-            final settings = SettingsService.instanceOrNull!;
+            final settings = SettingsService.instance;
             final density = settings.read(SettingsService.libraryDensity);
             final fullCardLayout = PlatformDetector.isTV() && settings.read(SettingsService.tvFullCardLayout);
             final maxCrossAxisExtent = GridSizeCalculator.getMaxCrossAxisExtent(context, density);

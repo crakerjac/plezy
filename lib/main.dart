@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'media/ids.dart';
 import 'dart:io' show Directory, Platform, ProcessInfo;
 import 'dart:ui' show AppExitResponse;
 import 'package:flutter/foundation.dart';
@@ -205,9 +206,11 @@ Future<void> _bootstrapApp() async {
   // Hook Windows native fullscreen callback (no-op elsewhere).
   NativeWindowService.initialize();
 
-  futures.add(StorageService.getInstance());
+  final storageFuture = StorageService.getInstance();
+  futures.add(storageFuture);
 
   await Future.wait(futures);
+  final storage = await storageFuture;
 
   // The PLEX_TOKEN dart-define (screenshot automation) is consumed by
   // [ConnectionBootstrap.seedFromDevTokenDefine] later, when the registry
@@ -257,7 +260,7 @@ Future<void> _bootstrapApp() async {
     return const ColoredBox(color: Color(0xFF000000));
   };
 
-  runApp(const MainApp());
+  runApp(MainApp(settings: settings, storage: storage));
 }
 
 Breadcrumb? _beforeBreadcrumb(Breadcrumb? breadcrumb, Hint _) {
@@ -423,7 +426,10 @@ Future<String?> _rootPinPrompt(Profile profile, {String? errorMessage}) {
 }
 
 class MainApp extends StatefulWidget {
-  const MainApp({super.key});
+  final SettingsService settings;
+  final StorageService storage;
+
+  const MainApp({super.key, required this.settings, required this.storage});
 
   @override
   State<MainApp> createState() => _MainAppState();
@@ -677,6 +683,8 @@ class _MainAppState extends State<MainApp> with WidgetsBindingObserver {
         // Expose AppDatabase + ConnectionRegistry so screens (Settings, Setup)
         // can manage stored Jellyfin/Plex connections without re-creating
         // the registry per-call site.
+        Provider<SettingsService>.value(value: widget.settings),
+        Provider<StorageService>.value(value: widget.storage),
         Provider<AppDatabase>.value(value: _appDatabase),
         Provider<ConnectionRegistry>(create: (_) => ConnectionRegistry(_appDatabase)),
         Provider<ProfileRegistry>(create: (_) => ProfileRegistry(_appDatabase)),
@@ -689,6 +697,7 @@ class _MainAppState extends State<MainApp> with WidgetsBindingObserver {
             final service = PlexHomeService(
               connections: context.read<ConnectionRegistry>(),
               profileConnections: context.read<ProfileConnectionRegistry>(),
+              storage: context.read<StorageService>(),
             );
             unawaited(service.start());
             return service;
@@ -701,6 +710,7 @@ class _MainAppState extends State<MainApp> with WidgetsBindingObserver {
               registry: context.read<ProfileRegistry>(),
               plexHome: context.read<PlexHomeService>(),
               connections: context.read<ConnectionRegistry>(),
+              storage: context.read<StorageService>(),
             );
             unawaited(provider.initialize());
             return provider;
@@ -772,7 +782,7 @@ class _MainAppState extends State<MainApp> with WidgetsBindingObserver {
             provider.setActiveProfileId(activeProfile.activeId);
             provider.setActiveClientScopesByServer({
               for (final serverId in multiServer.serverManager.serverIds)
-                serverId: multiServer.serverManager.getClient(serverId)?.cacheServerId,
+                serverId: multiServer.serverManager.getClient(ServerId(serverId))?.cacheServerId,
             });
             return provider;
           },
@@ -828,7 +838,7 @@ class _MainAppState extends State<MainApp> with WidgetsBindingObserver {
         ),
         ChangeNotifierProxyProvider2<OfflineWatchSyncService, DownloadProvider, OfflineWatchProvider>(
           create: (context) => OfflineWatchProvider(
-            syncService: _offlineWatchSyncService,
+            syncService: context.read<OfflineWatchSyncService>(),
             downloadProvider: context.read<DownloadProvider>(),
           ),
           update: (_, syncService, downloadProvider, previous) {
@@ -836,9 +846,9 @@ class _MainAppState extends State<MainApp> with WidgetsBindingObserver {
           },
         ),
         ChangeNotifierProxyProvider2<ActiveProfileProvider, ConnectionRegistry, UserProfileProvider>(
-          create: (_) => UserProfileProvider(),
+          create: (context) => UserProfileProvider(storageService: context.read<StorageService>()),
           update: (context, activeProfile, connections, previous) {
-            final provider = previous ?? UserProfileProvider();
+            final provider = previous ?? UserProfileProvider(storageService: context.read<StorageService>());
             provider.attach(
               connections: connections,
               activeProfile: activeProfile,
@@ -853,10 +863,13 @@ class _MainAppState extends State<MainApp> with WidgetsBindingObserver {
         // session scoping. Hydrated and rebound by `_TrackerProfileBootstrap`.
         ChangeNotifierProvider(create: (context) => TraktAccountProvider()),
         ChangeNotifierProvider(create: (context) => TrackersProvider()),
-        ChangeNotifierProvider(create: (context) => HiddenLibrariesProvider(), lazy: true),
+        ChangeNotifierProvider(
+          create: (context) => HiddenLibrariesProvider(storageService: context.read<StorageService>()),
+          lazy: true,
+        ),
         ChangeNotifierProvider(
           create: (context) {
-            final provider = LibrariesProvider();
+            final provider = LibrariesProvider(storageService: context.read<StorageService>());
             // Reload libraries when a new server comes online. Servers bind in
             // waves on sign-in / profile switch and slow ones reconnect after
             // the initial load; without this they stay missing from the sidebar
@@ -900,7 +913,7 @@ class _MainAppState extends State<MainApp> with WidgetsBindingObserver {
                         // Siri Remote select + gamepad A report as
                         // LogicalKeyboardKey.{select,gameButtonA} which aren't
                         // in Flutter's default shortcut set — Material-level
-                        // widgets (PopupMenuItem, showModalBottomSheet actions)
+                        // widgets (menu items, showModalBottomSheet actions)
                         // ignore them. Map both to ActivateIntent so tapping
                         // select on tvOS activates the focused widget.
                         shortcuts: <ShortcutActivator, Intent>{
@@ -957,7 +970,7 @@ class _AppleTvScale extends StatelessWidget {
         // dead margin and zero them out — the UI can use the full surface.
         return Transform.scale(
           scale: _scale,
-          alignment: Alignment.topLeft,
+          alignment: .topLeft,
           transformHitTests: true,
           child: SizedBox(
             width: logicalSize.width,
@@ -966,10 +979,10 @@ class _AppleTvScale extends StatelessWidget {
               data: outerQ.copyWith(
                 size: logicalSize,
                 devicePixelRatio: outerQ.devicePixelRatio * _scale,
-                padding: EdgeInsets.zero,
-                viewPadding: EdgeInsets.zero,
-                viewInsets: EdgeInsets.zero,
-                systemGestureInsets: EdgeInsets.zero,
+                padding: .zero,
+                viewPadding: .zero,
+                viewInsets: .zero,
+                systemGestureInsets: .zero,
               ),
               child: child!,
             ),
@@ -1346,7 +1359,7 @@ class _SetupScreenState extends State<SetupScreen> with MountedSetStateMixin {
     const failColor = Color(0xFFEF5350);
 
     return Column(
-      mainAxisSize: MainAxisSize.min,
+      mainAxisSize: .min,
       children: _serverStatus.entries.map((entry) {
         final (name, connected) = entry.value;
         final Widget statusIcon;
@@ -1365,7 +1378,7 @@ class _SetupScreenState extends State<SetupScreen> with MountedSetStateMixin {
           key: ValueKey(entry.key),
           padding: const EdgeInsets.symmetric(vertical: 2),
           child: Row(
-            mainAxisSize: MainAxisSize.min,
+            mainAxisSize: .min,
             children: [
               statusIcon,
               const SizedBox(width: 8),

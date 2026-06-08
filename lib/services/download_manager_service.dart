@@ -1,6 +1,7 @@
 // ignore_for_file: prefer_initializing_formals
 
 import 'dart:async';
+import '../media/ids.dart';
 import 'dart:io';
 import 'package:background_downloader/background_downloader.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
@@ -33,7 +34,7 @@ import '../utils/codec_utils.dart';
 import '../utils/global_key_utils.dart';
 import 'package:sentry_flutter/sentry_flutter.dart';
 
-typedef MediaClientResolver = MediaServerClient? Function(String serverId, {String? clientScopeId});
+typedef MediaClientResolver = MediaServerClient? Function(ServerId serverId, {String? clientScopeId});
 typedef _NativeTaskForId = Future<Task?> Function(String taskId);
 typedef _NativeResumeTask = Future<bool> Function(DownloadTask task);
 
@@ -193,7 +194,7 @@ class DownloadManagerService {
 
   /// Look up the correct client for [serverId].
   /// Returns null if the server is offline — callers should skip/defer the work.
-  MediaServerClient? _getClient(String? serverId, {String? clientScopeId}) {
+  MediaServerClient? _getClient(ServerId? serverId, {String? clientScopeId}) {
     if (serverId != null && _clientResolver != null) {
       return _clientResolver!(serverId, clientScopeId: clientScopeId);
     }
@@ -207,7 +208,7 @@ class DownloadManagerService {
     return _getClient(parsed.serverId, clientScopeId: record?.clientScopeId);
   }
 
-  String? activeClientScopeIdForServer(String serverId) {
+  String? activeClientScopeIdForServer(ServerId serverId) {
     final client = _getClient(serverId);
     final scopeId = client?.cacheServerId;
     if (scopeId == null || scopeId == serverId || scopeId.isEmpty) return null;
@@ -215,22 +216,22 @@ class DownloadManagerService {
   }
 
   /// Bulk-load every backend's pinned metadata into one map keyed by
-  /// `buildGlobalKey(serverId, itemId)`. Plex and Jellyfin entries never
+  /// `buildGlobalKey(ServerId(serverId), itemId)`. Plex and Jellyfin entries never
   /// collide because `serverId` is globally unique across backends.
   Future<Map<String, MediaItem>> getAllPinnedMetadata({bool preferActiveScope = false}) async {
     final results = await Future.wait(MediaBackend.values.map((b) => ApiCache.forBackend(b).getAllPinnedMetadata()));
     final merged = {for (final r in results) ...r};
 
     for (final item in await _database.getAllDownloadedMetadata()) {
-      final client = _getClient(item.serverId, clientScopeId: item.clientScopeId);
-      final backend = client?.backend ?? await _backendForServer(item.serverId);
+      final client = _getClient(ServerId(item.serverId), clientScopeId: item.clientScopeId);
+      final backend = client?.backend ?? await _backendForServer(ServerId(item.serverId));
       if (backend == null) continue;
       for (final scopeId in _metadataScopeCandidates(
-        item.serverId,
+        ServerId(item.serverId),
         downloadedClientScopeId: item.clientScopeId,
         preferActiveScope: preferActiveScope,
       )) {
-        final scoped = await ApiCache.forBackend(backend).getMetadata(scopeId, item.ratingKey);
+        final scoped = await ApiCache.forBackend(backend).getMetadata(ServerId(scopeId), item.ratingKey);
         if (scoped != null) {
           merged[item.globalKey] = scoped;
           break;
@@ -243,8 +244,8 @@ class DownloadManagerService {
 
   /// Public mirror of [_lookupMetadata] for callers that hydrate offline
   /// state outside the manager (e.g. [DownloadProvider]).
-  Future<MediaItem?> lookupMetadata(String serverId, String itemId, {bool preferActiveScope = false}) async {
-    final download = await _database.getDownloadedMedia(buildGlobalKey(serverId, itemId));
+  Future<MediaItem?> lookupMetadata(ServerId serverId, String itemId, {bool preferActiveScope = false}) async {
+    final download = await _database.getDownloadedMedia(buildGlobalKey(ServerId(serverId), itemId));
     for (final scopeId in _metadataScopeCandidates(
       serverId,
       downloadedClientScopeId: download?.clientScopeId,
@@ -257,14 +258,14 @@ class DownloadManagerService {
   }
 
   List<String> _metadataScopeCandidates(
-    String serverId, {
+    ServerId serverId, {
     String? downloadedClientScopeId,
     required bool preferActiveScope,
   }) {
     final candidates = <String>[
-      if (preferActiveScope) ?activeClientScopeIdForServer(serverId),
+      if (preferActiveScope) ?activeClientScopeIdForServer(ServerId(serverId)),
       ?downloadedClientScopeId,
-      ?_getClient(serverId, clientScopeId: downloadedClientScopeId)?.cacheServerId,
+      ?_getClient(ServerId(serverId), clientScopeId: downloadedClientScopeId)?.cacheServerId,
       serverId,
     ];
     return <String>{
@@ -283,8 +284,8 @@ class DownloadManagerService {
   /// data, schema reset, etc.) — without it, downloaded items render with
   /// no title and sync rules show their rating key instead of the show
   /// name.
-  Future<MediaItem?> fetchAndPinMetadata(String serverId, String itemId, {bool preferActiveScope = false}) async {
-    final download = await _database.getDownloadedMedia(buildGlobalKey(serverId, itemId));
+  Future<MediaItem?> fetchAndPinMetadata(ServerId serverId, String itemId, {bool preferActiveScope = false}) async {
+    final download = await _database.getDownloadedMedia(buildGlobalKey(ServerId(serverId), itemId));
     final clientScopeId = preferActiveScope
         ? activeClientScopeIdForServer(serverId) ?? download?.clientScopeId
         : download?.clientScopeId;
@@ -293,7 +294,7 @@ class DownloadManagerService {
     try {
       final metadata = await client.fetchItem(itemId);
       if (metadata == null) return null;
-      await ApiCache.forBackend(client.backend).pinForOffline(client.cacheServerId, itemId);
+      await ApiCache.forBackend(client.backend).pinForOffline(ServerId(client.cacheServerId), itemId);
       return metadata;
     } catch (e) {
       appLogger.d('fetchAndPinMetadata failed for $serverId:$itemId', error: e);
@@ -311,7 +312,7 @@ class DownloadManagerService {
   /// (mirrors [JellyfinApiCache._serverContext]) so any `_` / `%` chars in
   /// [serverId] are treated literally; `LIKE '$serverId/%'` would interpret
   /// them as wildcards.
-  Future<MediaBackend?> _backendForServer(String serverId) async {
+  Future<MediaBackend?> _backendForServer(ServerId serverId) async {
     // Prefer a live client — `MediaServerClient.backend` is in memory.
     final live = _getClient(serverId);
     if (live != null) return live.backend;
@@ -338,16 +339,18 @@ class DownloadManagerService {
   /// download rows still reference it), fan out to every registered backend
   /// cache instead of silently defaulting to Plex. Otherwise Jellyfin items
   /// would render with blank metadata after a connection is severed.
-  Future<MediaItem?> _lookupMetadata(String serverId, String itemId, {String? clientScopeId}) async {
+  Future<MediaItem?> _lookupMetadata(ServerId serverId, String itemId, {String? clientScopeId}) async {
     final backend = await _backendForServer(serverId);
     final live = _getClient(serverId, clientScopeId: clientScopeId);
     if (backend != null) {
-      return ApiCache.forBackend(backend).getMetadata(clientScopeId ?? live?.cacheServerId ?? serverId, itemId);
+      return ApiCache.forBackend(
+        backend,
+      ).getMetadata(ServerId(clientScopeId ?? live?.cacheServerId ?? serverId), itemId);
     }
     appLogger.w('Cache lookup for $serverId:$itemId — backend unresolved; trying all registered backends');
     for (final candidate in MediaBackend.values) {
       if (clientScopeId != null && clientScopeId.isNotEmpty) {
-        final scopedHit = await ApiCache.forBackend(candidate).getMetadata(clientScopeId, itemId);
+        final scopedHit = await ApiCache.forBackend(candidate).getMetadata(ServerId(clientScopeId), itemId);
         if (scopedHit != null) return scopedHit;
       }
       final hit = await ApiCache.forBackend(candidate).getMetadata(serverId, itemId);
@@ -379,14 +382,16 @@ class DownloadManagerService {
         appLogger.w('fetchItem failed during offline-pin for ${metadata.globalKey}', error: e);
       }
     }
-    await ApiCache.forBackend(client.backend).pinForOffline(client.cacheServerId, metadata.id);
+    await ApiCache.forBackend(client.backend).pinForOffline(ServerId(client.cacheServerId), metadata.id);
   }
 
-  Future<void> _deleteForItemByServer(String serverId, String itemId, {String? clientScopeId}) async {
+  Future<void> _deleteForItemByServer(ServerId serverId, String itemId, {String? clientScopeId}) async {
     final backend = await _backendForServer(serverId);
     final live = _getClient(serverId, clientScopeId: clientScopeId);
     if (backend != null) {
-      await ApiCache.forBackend(backend).deleteForItem(clientScopeId ?? live?.cacheServerId ?? serverId, itemId);
+      await ApiCache.forBackend(
+        backend,
+      ).deleteForItem(ServerId(clientScopeId ?? live?.cacheServerId ?? serverId), itemId);
       return;
     }
     // Backend unresolved — purge from every registered backend so a stale
@@ -395,7 +400,7 @@ class DownloadManagerService {
     appLogger.w('Cache delete for $serverId:$itemId — backend unresolved; clearing all registered backends');
     for (final candidate in MediaBackend.values) {
       if (clientScopeId != null && clientScopeId.isNotEmpty) {
-        await ApiCache.forBackend(candidate).deleteForItem(clientScopeId, itemId);
+        await ApiCache.forBackend(candidate).deleteForItem(ServerId(clientScopeId), itemId);
       }
       await ApiCache.forBackend(candidate).deleteForItem(serverId, itemId);
     }
@@ -729,22 +734,22 @@ class DownloadManagerService {
         final client = await _getClientForDownloadKey(row.globalKey);
         if (client == null) continue;
 
-        final metadata = await _lookupMetadata(row.serverId, row.ratingKey, clientScopeId: row.clientScopeId);
+        final metadata = await _lookupMetadata(ServerId(row.serverId), row.ratingKey, clientScopeId: row.clientScopeId);
         if (metadata == null) continue;
-        final withServer = _repairMetadataWithServer(metadata, row.serverId);
+        final withServer = _repairMetadataWithServer(metadata, ServerId(row.serverId));
         await _artworkService.ensureArtworkForMetadata(withServer, client);
         await _backfillArtworkPath(row, withServer);
 
         if (!withServer.isEpisode) continue;
         await _repairParentArtwork(
-          row.serverId,
+          ServerId(row.serverId),
           withServer.grandparentId,
           client,
           ensuredParentKeys,
           clientScopeId: row.clientScopeId,
         );
         await _repairParentArtwork(
-          row.serverId,
+          ServerId(row.serverId),
           withServer.parentId,
           client,
           ensuredParentKeys,
@@ -759,39 +764,39 @@ class DownloadManagerService {
   }
 
   Future<void> _repairParentArtwork(
-    String serverId,
+    ServerId serverId,
     String? ratingKey,
     MediaServerClient client,
     Set<String> ensuredKeys, {
     String? clientScopeId,
   }) async {
     if (ratingKey == null || ratingKey.isEmpty) return;
-    final globalKey = buildGlobalKey(serverId, ratingKey);
+    final globalKey = buildGlobalKey(ServerId(serverId), ratingKey);
     if (!ensuredKeys.add(globalKey)) return;
-    final cached = await _lookupMetadata(serverId, ratingKey, clientScopeId: clientScopeId);
+    final cached = await _lookupMetadata(ServerId(serverId), ratingKey, clientScopeId: clientScopeId);
     var metadata = cached;
     if (!_isOffline) {
       try {
         final fetched = await client.fetchItem(ratingKey);
         if (fetched != null) {
           metadata = _mergeFetchedRepairMetadata(serverId: serverId, cached: cached, fetched: fetched);
-          await ApiCache.forBackend(client.backend).pinForOffline(client.cacheServerId, metadata.id);
+          await ApiCache.forBackend(client.backend).pinForOffline(ServerId(client.cacheServerId), metadata.id);
         }
       } catch (e) {
         appLogger.d('Artwork repair parent metadata fetch failed for $globalKey', error: e);
       }
     }
     if (metadata == null) return;
-    final withServer = _repairMetadataWithServer(metadata, serverId);
+    final withServer = _repairMetadataWithServer(metadata, ServerId(serverId));
     await _artworkService.ensureArtworkForMetadata(withServer, client);
   }
 
-  MediaItem _repairMetadataWithServer(MediaItem metadata, String serverId) {
+  MediaItem _repairMetadataWithServer(MediaItem metadata, ServerId serverId) {
     return metadata.serverId == null ? metadata.copyWith(serverId: serverId) : metadata;
   }
 
   MediaItem _mergeFetchedRepairMetadata({
-    required String serverId,
+    required ServerId serverId,
     required MediaItem? cached,
     required MediaItem fetched,
   }) {
@@ -862,7 +867,7 @@ class DownloadManagerService {
         }
 
         await _downloadArtwork(globalKey, metadata, itemClient);
-        await _downloadChapterThumbnails(metadata.serverId!, metadata.id, itemClient);
+        await _downloadChapterThumbnails(ServerId(metadata.serverId!), metadata.id, itemClient);
 
         // Attempt subtitles
         try {
@@ -1018,7 +1023,7 @@ class DownloadManagerService {
     }
 
     await _database.insertDownload(
-      serverId: metadata.serverId!,
+      serverId: ServerId(metadata.serverId!),
       clientScopeId: client.cacheServerId == metadata.serverId ? null : client.cacheServerId,
       ratingKey: metadata.id,
       globalKey: globalKey,
@@ -1778,7 +1783,7 @@ class DownloadManagerService {
         if (metadata != null && client != null) {
           if (downloadArtwork) {
             await _downloadArtwork(globalKey, metadata, client);
-            await _downloadChapterThumbnails(metadata.serverId!, metadata.id, client);
+            await _downloadChapterThumbnails(ServerId(metadata.serverId!), metadata.id, client);
           }
           if (downloadSubtitles) {
             var subtitles = ctx?.subtitles;
@@ -1823,7 +1828,7 @@ class DownloadManagerService {
   }
 
   /// Look up the year of the parent show for an episode (used for folder naming).
-  Future<int?> _fetchShowYear(String serverId, String? grandparentRatingKey, {String? clientScopeId}) async {
+  Future<int?> _fetchShowYear(ServerId serverId, String? grandparentRatingKey, {String? clientScopeId}) async {
     if (grandparentRatingKey == null) return null;
     return (await _lookupMetadata(serverId, grandparentRatingKey, clientScopeId: clientScopeId))?.year;
   }
@@ -1866,7 +1871,7 @@ class DownloadManagerService {
   Future<int?> _resolveSafRecoveryShowYear(MediaItem metadata, {String? clientScopeId}) async {
     final serverId = metadata.serverId;
     if (!metadata.isEpisode || serverId == null) return null;
-    return _fetchShowYear(serverId, metadata.grandparentId, clientScopeId: clientScopeId);
+    return _fetchShowYear(ServerId(serverId), metadata.grandparentId, clientScopeId: clientScopeId);
   }
 
   Future<void> _downloadArtwork(String globalKey, MediaItem metadata, MediaServerClient client) async {
@@ -1877,7 +1882,7 @@ class DownloadManagerService {
 
       final serverId = metadata.serverId!;
       final specs = client.resolveDownloadArtwork(metadata);
-      await _artworkService.ensureArtworkSpecs(serverId, specs);
+      await _artworkService.ensureArtworkSpecs(ServerId(serverId), specs);
 
       final storedThumbPath = metadata.thumbPath == null ? null : artworkStorageKey(metadata.thumbPath!);
       await _database.updateArtworkPaths(globalKey: globalKey, thumbPath: storedThumbPath);
@@ -1893,7 +1898,7 @@ class DownloadManagerService {
   /// Download a single artwork blob if not already on disk. The [spec] carries
   /// both the storage key (used to hash the local filename) and the absolute
   /// URL to fetch.
-  Future<void> _downloadSingleArtwork(String serverId, DownloadArtworkSpec spec) async {
+  Future<void> _downloadSingleArtwork(ServerId serverId, DownloadArtworkSpec spec) async {
     await _artworkService.downloadSingleArtwork(serverId, spec);
   }
 
@@ -1902,14 +1907,14 @@ class DownloadManagerService {
   Future<void> downloadArtworkForMetadata(MediaItem metadata, MediaServerClient client) async {
     if (metadata.serverId == null) return;
     final serverId = metadata.serverId!;
-    await _artworkService.ensureArtworkSpecs(serverId, client.resolveDownloadArtwork(metadata));
+    await _artworkService.ensureArtworkSpecs(ServerId(serverId), client.resolveDownloadArtwork(metadata));
   }
 
   /// Download chapter thumbnail images for a media item. Works for any
   /// backend whose [MediaServerClient.fetchPlaybackExtras] returns chapters
   /// with a `thumb` path — Plex's `/library/parts/X/indexes/sd/Y` and
   /// Jellyfin's `/Items/X/Images/Chapter/N?tag=Y` both pass through.
-  Future<void> _downloadChapterThumbnails(String serverId, String ratingKey, MediaServerClient client) async {
+  Future<void> _downloadChapterThumbnails(ServerId serverId, String ratingKey, MediaServerClient client) async {
     try {
       final extras = await client.fetchPlaybackExtras(ratingKey);
 
@@ -1948,7 +1953,12 @@ class DownloadManagerService {
         // Get user-friendly subtitle path based on media type
         final String subtitlePath;
         if (_storageService.isUsingSaf) {
-          subtitlePath = await _storageService.getSubtitlePath(metadata.serverId!, metadata.id, subtitle.id, extension);
+          subtitlePath = await _storageService.getSubtitlePath(
+            ServerId(metadata.serverId!),
+            metadata.id,
+            subtitle.id,
+            extension,
+          );
         } else if (metadata.isEpisode) {
           subtitlePath = await _storageService.getEpisodeSubtitlePath(
             metadata,
@@ -1960,7 +1970,12 @@ class DownloadManagerService {
           subtitlePath = await _storageService.getMovieSubtitlePath(metadata, subtitle.id, extension);
         } else {
           // Fallback to old structure
-          subtitlePath = await _storageService.getSubtitlePath(metadata.serverId!, metadata.id, subtitle.id, extension);
+          subtitlePath = await _storageService.getSubtitlePath(
+            ServerId(metadata.serverId!),
+            metadata.id,
+            subtitle.id,
+            extension,
+          );
         }
 
         // Download subtitle file
@@ -2209,7 +2224,7 @@ class DownloadManagerService {
   }
 
   /// Calculate total items to delete (for progress tracking)
-  Future<int> _getTotalItemsToDelete(MediaItem metadata, String serverId, {String? clientScopeId}) async {
+  Future<int> _getTotalItemsToDelete(MediaItem metadata, ServerId serverId, {String? clientScopeId}) async {
     switch (metadata.kind) {
       case MediaKind.episode:
       case MediaKind.movie:
@@ -2225,9 +2240,9 @@ class DownloadManagerService {
     }
   }
 
-  Future<void> _deleteMediaFilesWithMetadata(String serverId, String ratingKey, {String? clientScopeId}) async {
+  Future<void> _deleteMediaFilesWithMetadata(ServerId serverId, String ratingKey, {String? clientScopeId}) async {
     try {
-      final gk = buildGlobalKey(serverId, ratingKey);
+      final gk = buildGlobalKey(ServerId(serverId), ratingKey);
       final downloadRecord = await _database.getDownloadedMedia(gk);
       final scopeId = clientScopeId ?? downloadRecord?.clientScopeId;
       final metadata = await _lookupMetadata(serverId, ratingKey, clientScopeId: scopeId);
@@ -2281,7 +2296,7 @@ class DownloadManagerService {
   /// `fetchPlaybackExtras` consults each backend's cache first, so this
   /// stays cheap during deletion (no network round-trip when the metadata
   /// is already cached, which it always is for downloaded items).
-  Future<List<String>> _getChapterThumbPaths(String serverId, String ratingKey, {String? clientScopeId}) async {
+  Future<List<String>> _getChapterThumbPaths(ServerId serverId, String ratingKey, {String? clientScopeId}) async {
     try {
       final client = _getClient(serverId, clientScopeId: clientScopeId);
       if (client == null) return [];
@@ -2302,9 +2317,9 @@ class DownloadManagerService {
   /// Pre-loads all chapter paths for other items on the same server in one pass,
   /// then checks membership in a Set — O(items * chapters) instead of
   /// O(thumbs * items * chapters) with repeated DB queries.
-  Future<void> _deleteChapterThumbnails(String serverId, String ratingKey, {String? clientScopeId}) async {
+  Future<void> _deleteChapterThumbnails(ServerId serverId, String ratingKey, {String? clientScopeId}) async {
     try {
-      final record = await _database.getDownloadedMedia(buildGlobalKey(serverId, ratingKey));
+      final record = await _database.getDownloadedMedia(buildGlobalKey(ServerId(serverId), ratingKey));
       final scopeId = clientScopeId ?? record?.clientScopeId;
       final thumbPaths = await _getChapterThumbPaths(serverId, ratingKey, clientScopeId: scopeId);
 
@@ -2353,7 +2368,7 @@ class DownloadManagerService {
     }
   }
 
-  Future<void> _deleteEpisodeFiles(MediaItem episode, String serverId, {String? clientScopeId}) async {
+  Future<void> _deleteEpisodeFiles(MediaItem episode, ServerId serverId, {String? clientScopeId}) async {
     try {
       final parentMetadata = episode.grandparentId != null
           ? await _lookupMetadata(serverId, episode.grandparentId!, clientScopeId: clientScopeId)
@@ -2389,7 +2404,7 @@ class DownloadManagerService {
     }
   }
 
-  Future<void> _deleteSeasonFiles(MediaItem season, String serverId, {String? clientScopeId}) async {
+  Future<void> _deleteSeasonFiles(MediaItem season, ServerId serverId, {String? clientScopeId}) async {
     try {
       final parentMetadata = season.parentId != null
           ? await _lookupMetadata(serverId, season.parentId!, clientScopeId: clientScopeId)
@@ -2424,7 +2439,7 @@ class DownloadManagerService {
   /// and parent directories are wiped in one recursive call by the caller.
   Future<void> _deleteEpisodesInCollection({
     required List<DownloadedMediaItem> episodes,
-    required String serverId,
+    required ServerId serverId,
     String? clientScopeId,
     required String parentKey,
     required String parentTitle,
@@ -2432,11 +2447,11 @@ class DownloadManagerService {
     final isSaf = _storageService.isUsingSaf;
     for (int i = 0; i < episodes.length; i++) {
       final episode = episodes[i];
-      final episodeGlobalKey = buildGlobalKey(serverId, episode.ratingKey);
+      final episodeGlobalKey = buildGlobalKey(ServerId(serverId), episode.ratingKey);
 
       _emitDeletionProgress(
         DeletionProgress(
-          globalKey: buildGlobalKey(serverId, parentKey),
+          globalKey: buildGlobalKey(ServerId(serverId), parentKey),
           itemTitle: parentTitle,
           currentItem: i + 1,
           totalItems: episodes.length,
@@ -2446,7 +2461,11 @@ class DownloadManagerService {
 
       if (isSaf) {
         final episodeScopeId = episode.clientScopeId ?? clientScopeId;
-        final episodeMetadata = await _lookupMetadata(serverId, episode.ratingKey, clientScopeId: episodeScopeId);
+        final episodeMetadata = await _lookupMetadata(
+          ServerId(serverId),
+          episode.ratingKey,
+          clientScopeId: episodeScopeId,
+        );
         if (episodeMetadata != null) {
           await _deleteEpisodeFilesSaf(
             episodeMetadata,
@@ -2455,24 +2474,28 @@ class DownloadManagerService {
             skipSafVideoAndParents: true,
           );
         } else {
-          await _deleteChapterThumbnails(serverId, episode.ratingKey, clientScopeId: episodeScopeId);
+          await _deleteChapterThumbnails(ServerId(serverId), episode.ratingKey, clientScopeId: episodeScopeId);
           await _deleteByFilePath(episode);
         }
       } else {
         await _deleteChapterThumbnails(
-          serverId,
+          ServerId(serverId),
           episode.ratingKey,
           clientScopeId: episode.clientScopeId ?? clientScopeId,
         );
         await _deleteByFilePath(episode);
       }
 
-      await _deleteForItemByServer(serverId, episode.ratingKey, clientScopeId: episode.clientScopeId ?? clientScopeId);
+      await _deleteForItemByServer(
+        ServerId(serverId),
+        episode.ratingKey,
+        clientScopeId: episode.clientScopeId ?? clientScopeId,
+      );
       await _database.deleteDownload(episodeGlobalKey);
     }
   }
 
-  Future<void> _deleteShowFiles(MediaItem show, String serverId, {String? clientScopeId}) async {
+  Future<void> _deleteShowFiles(MediaItem show, ServerId serverId, {String? clientScopeId}) async {
     try {
       final episodesInShow = await _database.getEpisodesByShow(show.id, serverId: serverId);
 
@@ -2495,7 +2518,7 @@ class DownloadManagerService {
     }
   }
 
-  Future<void> _deleteMovieFiles(MediaItem movie, String serverId, {String? clientScopeId}) async {
+  Future<void> _deleteMovieFiles(MediaItem movie, ServerId serverId, {String? clientScopeId}) async {
     try {
       final movieDir = await _storageService.getMovieDirectory(movie);
       if (await movieDir.exists()) {
@@ -2512,7 +2535,7 @@ class DownloadManagerService {
     }
   }
 
-  Future<void> _deleteMovieFilesSaf(MediaItem movie, String serverId, {String? clientScopeId}) async {
+  Future<void> _deleteMovieFilesSaf(MediaItem movie, ServerId serverId, {String? clientScopeId}) async {
     try {
       final safBaseUri = _storageService.safBaseUri;
       if (safBaseUri != null) {
@@ -2535,13 +2558,13 @@ class DownloadManagerService {
   /// dir — so we skip the SAF video delete and parent walk-up here.
   Future<void> _deleteEpisodeFilesSaf(
     MediaItem episode,
-    String serverId, {
+    ServerId serverId, {
     String? clientScopeId,
     bool skipSafVideoAndParents = false,
   }) async {
     try {
       final parentMetadata = episode.grandparentId != null
-          ? await _lookupMetadata(serverId, episode.grandparentId!, clientScopeId: clientScopeId)
+          ? await _lookupMetadata(ServerId(serverId), episode.grandparentId!, clientScopeId: clientScopeId)
           : null;
       final showYear = parentMetadata?.year;
 
@@ -2555,7 +2578,7 @@ class DownloadManagerService {
           saf.getChild(safBaseUri, _storageService.getEpisodeSafPathComponents(episode, showYear: showYear)),
           saf.getChild(safBaseUri, _storageService.getShowSafPathComponents(episode, showYear: showYear)),
         ]);
-        seasonDirUri = resolved[0]?.uri;
+        seasonDirUri = resolved.first?.uri;
         showDirUri = resolved[1]?.uri;
 
         if (seasonDirUri != null) {
@@ -2579,18 +2602,18 @@ class DownloadManagerService {
         appLogger.i('Deleted episode subtitles: ${subsDir.path}');
       }
 
-      await _deleteChapterThumbnails(serverId, episode.id, clientScopeId: clientScopeId);
+      await _deleteChapterThumbnails(ServerId(serverId), episode.id, clientScopeId: clientScopeId);
 
       if (!skipSafVideoAndParents) {
         await _deleteEmptySafDirsInOrder([seasonDirUri, showDirUri]);
-        await _ensureDbFileDeleted(serverId, episode.id);
+        await _ensureDbFileDeleted(ServerId(serverId), episode.id);
       }
     } catch (e, stack) {
       appLogger.e('Error deleting SAF episode files', error: e, stackTrace: stack);
     }
   }
 
-  Future<void> _deleteSeasonFilesSaf(MediaItem season, String serverId, {String? clientScopeId}) async {
+  Future<void> _deleteSeasonFilesSaf(MediaItem season, ServerId serverId, {String? clientScopeId}) async {
     try {
       final parentMetadata = season.parentId != null
           ? await _lookupMetadata(serverId, season.parentId!, clientScopeId: clientScopeId)
@@ -2630,7 +2653,7 @@ class DownloadManagerService {
     }
   }
 
-  Future<void> _deleteShowFilesSaf(MediaItem show, String serverId, {String? clientScopeId}) async {
+  Future<void> _deleteShowFilesSaf(MediaItem show, ServerId serverId, {String? clientScopeId}) async {
     try {
       final episodesInShow = await _database.getEpisodesByShow(show.id, serverId: serverId);
       appLogger.d('Deleting ${episodesInShow.length} episodes in show ${show.id} (SAF)');
@@ -2659,9 +2682,9 @@ class DownloadManagerService {
 
   /// Safety net: after metadata-based deletion, verify the actual DB-recorded
   /// video file is gone. If not, delete it and clean up parent directories.
-  Future<void> _ensureDbFileDeleted(String serverId, String ratingKey) async {
+  Future<void> _ensureDbFileDeleted(ServerId serverId, String ratingKey) async {
     try {
-      final globalKey = buildGlobalKey(serverId, ratingKey);
+      final globalKey = buildGlobalKey(ServerId(serverId), ratingKey);
       final record = await _database.getDownloadedMedia(globalKey);
       if (record?.videoFilePath == null) return;
 
@@ -2881,7 +2904,7 @@ class DownloadManagerService {
     await _cachePlexItemForOffline(serverId, ratingKey, metadata);
 
     await _database.insertDownload(
-      serverId:             serverId,
+      serverId:             ServerId(serverId),
       ratingKey:            ratingKey,
       globalKey:            globalKey,
       type:                 metadata.kind.id,
@@ -2942,7 +2965,7 @@ class DownloadManagerService {
       if (m.serverName != null)       'serverName':            m.serverName,
     };
 
-    final existing     = await plexCache.get(serverId, endpoint);
+    final existing     = await plexCache.get(ServerId(serverId), endpoint);
     final existingMeta = PlexCacheParser.extractFirstMetadata(existing);
 
     final Map<String, dynamic> merged;
@@ -2955,8 +2978,8 @@ class DownloadManagerService {
       merged = newJson;
     }
 
-    await plexCache.put(serverId, endpoint, {'MediaContainer': {'Metadata': [merged]}});
-    await plexCache.pinForOffline(serverId, ratingKey);
+    await plexCache.put(ServerId(serverId), endpoint, {'MediaContainer': {'Metadata': [merged]}});
+    await plexCache.pinForOffline(ServerId(serverId), ratingKey);
   }
 
   void dispose() {

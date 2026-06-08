@@ -442,11 +442,11 @@ class _AddJellyfinScreenState extends State<AddJellyfinScreen> with AsyncFormSta
       title: Text(t.addServer.addJellyfinTitle),
       slivers: [
         SliverPadding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+          padding: const EdgeInsets.all(16),
           sliver: SliverToBoxAdapter(
             child: Form(
               key: _formKey,
-              child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: _buildBodyChildren(theme)),
+              child: Column(crossAxisAlignment: .stretch, children: _buildBodyChildren(theme)),
             ),
           ),
         ),
@@ -471,6 +471,7 @@ class _AddJellyfinScreenState extends State<AddJellyfinScreen> with AsyncFormSta
         controller: _urlController,
         focusNode: _urlFocus,
         autofocus: true,
+        tvKeyboardAutoOpenBehavior: TvKeyboardAutoOpenBehavior.afterFirstFocus,
         keyboardType: TextInputType.url,
         minLines: 1,
         maxLines: 4,
@@ -587,7 +588,7 @@ class _AddJellyfinScreenState extends State<AddJellyfinScreen> with AsyncFormSta
           const SizedBox(width: 12),
           Expanded(
             child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+              crossAxisAlignment: .start,
               children: [
                 Text(_serverInfo!.serverName, style: theme.textTheme.titleSmall),
                 Text(
@@ -695,7 +696,7 @@ class _AddJellyfinScreenState extends State<AddJellyfinScreen> with AsyncFormSta
               textAlign: TextAlign.center,
               style: theme.textTheme.displayMedium?.copyWith(
                 fontFamily: 'monospace',
-                fontWeight: FontWeight.bold,
+                fontWeight: .bold,
                 letterSpacing: 8,
               ),
             ),
@@ -706,7 +707,7 @@ class _AddJellyfinScreenState extends State<AddJellyfinScreen> with AsyncFormSta
       Text(t.auth.quickConnectInstructions, style: theme.textTheme.bodyMedium),
       const SizedBox(height: 20),
       Row(
-        mainAxisAlignment: MainAxisAlignment.center,
+        mainAxisAlignment: .center,
         children: [
           const LoadingIndicatorBox(),
           const SizedBox(width: 12),
@@ -769,15 +770,15 @@ class _DiscoveredJellyfinServerTile extends StatelessWidget {
                 const SizedBox(width: 12),
                 Expanded(
                   child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: .start,
+                    mainAxisSize: .min,
                     children: [
                       Text(server.name, style: theme.textTheme.titleSmall),
                       const SizedBox(height: 2),
                       Text(
                         server.address,
                         maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
+                        overflow: .ellipsis,
                         style: theme.textTheme.bodySmall?.copyWith(
                           color: theme.colorScheme.onSurface.withValues(alpha: 0.7),
                         ),

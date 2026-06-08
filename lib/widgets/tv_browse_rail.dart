@@ -1,4 +1,5 @@
 import 'dart:async';
+import '../media/ids.dart';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -56,7 +57,7 @@ class TvBrowseRailLayoutMetrics {
 }
 
 class TvBrowseRailLayout {
-  static const double compactTallPosterScale = 0.80;
+  static const double compactTallPosterScale = 0.8;
   static const double compactEpisodeThumbnailScale = compactTallPosterScale;
   static const double fullCardFocusScale = FocusTheme.fullCardFocusScale;
 
@@ -77,15 +78,6 @@ class TvBrowseRailLayout {
   static double viewAllItemWidthForScale(double scale) => (104 * scale).clamp(88, 132).toDouble();
 
   static double viewAllPillHeightForScale(double scale) => (44 * scale).clamp(36, 54).toDouble();
-
-  static double fullCardFocusPaintOverflowForScale(double scale) {
-    return (FocusTheme.focusGlowOuterBlurRadius +
-            FocusTheme.focusGlowSpreadRadius +
-            FocusTheme.focusBorderWidth +
-            (10 * scale))
-        .clamp(42, 64)
-        .toDouble();
-  }
 
   static double hubStripHeightForScale(double scale) => 36 * scale;
 
@@ -136,7 +128,11 @@ class TvBrowseRailLayout {
     final railEdgePadding = focusExtra + (12 * scale);
     final itemGap = fullCardLayout ? fullCardItemGapForScale(scale) : itemGapForScale(scale);
     final isPersonHub = TvBrowseRailLayout.isPersonHub(hub);
-    final hasWide = !isPersonHub && hub.items.any((item) => item.usesWideAspectRatio(episodePosterMode));
+    final emptyEpisodeThumbnailHub =
+        hub.items.isEmpty && hub.type == 'episode' && episodePosterMode == EpisodePosterMode.episodeThumbnail;
+    final hasWide =
+        !isPersonHub &&
+        (emptyEpisodeThumbnailHub || hub.items.any((item) => item.usesWideAspectRatio(episodePosterMode)));
     final hasTall = !isPersonHub && hub.items.any((item) => !item.usesWideAspectRatio(episodePosterMode));
     final isMixedHub = hasWide && hasTall;
     final useWideLayout = hasWide && (!hasTall || episodePosterMode == EpisodePosterMode.episodeThumbnail);
@@ -204,9 +200,11 @@ class TvBrowseRailLayout {
     required TvBrowseRailLayoutMetrics metrics,
     required double viewportWidth,
     required double scale,
+    bool? hasTrailing,
   }) {
+    final showTrailing = hasTrailing ?? hub.more;
     final itemContentWidth = hub.items.length * (metrics.cardWidth + metrics.itemGap);
-    final moreContentWidth = hub.more ? viewAllItemWidthForScale(scale) + metrics.itemGap : 0.0;
+    final moreContentWidth = showTrailing ? viewAllItemWidthForScale(scale) + metrics.itemGap : 0.0;
     final contentWidth = (metrics.railEdgePadding * 2) + itemContentWidth + moreContentWidth;
     return (contentWidth - viewportWidth).clamp(0.0, double.infinity).toDouble();
   }
@@ -216,8 +214,10 @@ class TvBrowseRailLayout {
     required int index,
     required TvBrowseRailLayoutMetrics metrics,
     required double scale,
+    bool? hasTrailing,
   }) {
-    if (index == hub.items.length && hub.more) return viewAllItemWidthForScale(scale) + metrics.itemGap;
+    final showTrailing = hasTrailing ?? hub.more;
+    if (index == hub.items.length && showTrailing) return viewAllItemWidthForScale(scale) + metrics.itemGap;
     return metrics.cardWidth + metrics.itemGap;
   }
 
@@ -228,15 +228,23 @@ class TvBrowseRailLayout {
     required double viewportWidth,
     required double maxScrollExtent,
     required double scale,
+    bool? hasTrailing,
   }) {
-    final totalCount = hub.items.length + (hub.more ? 1 : 0);
+    final showTrailing = hasTrailing ?? hub.more;
+    final totalCount = hub.items.length + (showTrailing ? 1 : 0);
     if (totalCount == 0) return 0;
 
     final clampedIndex = index.clamp(0, totalCount - 1).toInt();
     final normalItemExtent = metrics.cardWidth + metrics.itemGap;
     final normalItemsBefore = clampedIndex < hub.items.length ? clampedIndex : hub.items.length;
     final leadingOffset = metrics.railEdgePadding + (normalItemsBefore * normalItemExtent);
-    final targetExtent = itemExtentForIndex(hub: hub, index: clampedIndex, metrics: metrics, scale: scale);
+    final targetExtent = itemExtentForIndex(
+      hub: hub,
+      index: clampedIndex,
+      metrics: metrics,
+      scale: scale,
+      hasTrailing: showTrailing,
+    );
     final targetCenter = leadingOffset + (targetExtent / 2);
     return (targetCenter - (viewportWidth / 2)).clamp(0.0, maxScrollExtent).toDouble();
   }
@@ -279,6 +287,9 @@ class TvBrowseRailLayout {
   }
 }
 
+/// What [TvBrowseRail] renders in a hub's trailing slot (after the last item).
+enum TvRailTrailing { none, loading, error, viewAll }
+
 class TvBrowseRail extends StatefulWidget {
   final List<MediaHub> hubs;
   final IconData Function(MediaHub hub, int index) iconForHub;
@@ -288,6 +299,13 @@ class TvBrowseRail extends StatefulWidget {
   final VoidCallback? onRemoveFromContinueWatching;
   final bool Function(MediaHub hub)? isContinueWatchingHub;
   final Future<List<MediaItem>> Function(MediaHub hub)? loadMoreItems;
+
+  /// Optional per-hub trailing-slot state (loading/error/viewAll). When null the
+  /// rail keeps the legacy "[MediaHub.more] → View All" behavior.
+  final TvRailTrailing Function(MediaHub hub)? trailingForHub;
+
+  /// Invoked when the user activates a hub's trailing retry tile.
+  final void Function(MediaHub hub)? onRetryHub;
   final void Function(MediaHub hub, int index)? onActiveHubChanged;
   final VoidCallback? onNavigateUp;
   final VoidCallback? onNavigateToSidebar;
@@ -312,6 +330,8 @@ class TvBrowseRail extends StatefulWidget {
     this.onRemoveFromContinueWatching,
     this.isContinueWatchingHub,
     this.loadMoreItems,
+    this.trailingForHub,
+    this.onRetryHub,
     this.onActiveHubChanged,
     this.onNavigateUp,
     this.onNavigateToSidebar,
@@ -333,6 +353,7 @@ class TvBrowseRail extends StatefulWidget {
 
 class TvBrowseRailState extends State<TvBrowseRail> {
   static const _longPressDuration = Duration(milliseconds: 500);
+  static const _selectSuppressionTimeout = Duration(milliseconds: 220);
   static const _navigationScrollDuration = Duration(milliseconds: 130);
   static const _repeatNavigationScrollDuration = Duration(milliseconds: 65);
   static const _scrollCatchUpViewportDistance = 2.5;
@@ -345,14 +366,17 @@ class TvBrowseRailState extends State<TvBrowseRail> {
   final Map<String, GlobalKey<MediaCardState>> _mediaCardKeys = {};
   final Map<String, TvBrowseRailLayoutMetrics> _metricsByHub = {};
   final Map<String, double> _scaleByHub = {};
+  final Map<String, TvRailTrailing> _lastTrailingByHubId = {};
 
   int _hubIndex = 0;
   int _itemIndex = 0;
   List<double> _sectionOffsets = const [];
   double _sectionMaxScrollExtent = 0;
   Timer? _longPressTimer;
+  Timer? _selectSuppressionTimer;
   bool _isSelectKeyDown = false;
   bool _longPressTriggered = false;
+  bool _suppressSelectUntilKeyUp = false;
   bool _hasUserChangedHub = false;
   bool _hasUserChangedItem = false;
 
@@ -363,12 +387,22 @@ class TvBrowseRailState extends State<TvBrowseRail> {
     _focusNode.requestFocus();
   }
 
+  void suppressSelectUntilKeyUp() {
+    _resetLongPressState();
+    _suppressSelectUntilKeyUp = true;
+    _selectSuppressionTimer?.cancel();
+    _selectSuppressionTimer = Timer(_selectSuppressionTimeout, () {
+      _suppressSelectUntilKeyUp = false;
+    });
+  }
+
   @override
   void initState() {
     super.initState();
     _focusNode.addListener(_handleFocusChange);
     _selectInitialHubIfPossible();
     final selectedInitialItem = _selectInitialItemIfPossible();
+    _rememberTrailingStates();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || widget.hubs.isEmpty) return;
       if (selectedInitialItem) _scrollToItem(animate: false);
@@ -382,11 +416,13 @@ class TvBrowseRailState extends State<TvBrowseRail> {
   @override
   void didUpdateWidget(covariant TvBrowseRail oldWidget) {
     super.didUpdateWidget(oldWidget);
-    final hubStateChanged = !_hasSameHubState(oldWidget.hubs, widget.hubs);
+    final trailingStateChanged = _hasTrailingStateChanged(widget.hubs);
+    final hubStateChanged = trailingStateChanged || !_hasSameHubState(oldWidget.hubs, widget.hubs);
     final initialSelectionChanged =
         oldWidget.initialHubId != widget.initialHubId || oldWidget.initialItemId != widget.initialItemId;
 
     if (!hubStateChanged && !initialSelectionChanged) {
+      _rememberTrailingStates();
       if (!oldWidget.autofocus && widget.autofocus) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (mounted) _focusNode.requestFocus();
@@ -402,6 +438,7 @@ class TvBrowseRailState extends State<TvBrowseRail> {
     if (widget.hubs.isEmpty) {
       _hubIndex = 0;
       _itemIndex = 0;
+      _rememberTrailingStates();
       return;
     }
 
@@ -422,11 +459,20 @@ class TvBrowseRailState extends State<TvBrowseRail> {
     _itemIndex = _itemIndex.clamp(0, _totalItemCount(hub) == 0 ? 0 : _totalItemCount(hub) - 1);
     final selectedInitialItem = _selectInitialItemIfPossible();
     final activeHubChanged = oldActiveHubId != _activeHub?.id;
-    final shouldAlignActiveHub = selectedInitialHub || activeHubChanged || !_hasUserChangedHub;
+    final activeHubStateChanged =
+        _hubStateChanged(oldWidget.hubs, widget.hubs, _hubIndex) ||
+        (_activeHub != null && _trailingStateChanged(_activeHub!));
+    final shouldJumpAlignActiveHub = selectedInitialHub || activeHubChanged || !_hasUserChangedHub;
+    final shouldAnimateAlignActiveHub = !shouldJumpAlignActiveHub && activeHubStateChanged;
+    _rememberTrailingStates();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       if (selectedInitialItem) _scrollToItem(animate: false);
-      if (shouldAlignActiveHub) _scrollActiveHubToTop(animate: false);
+      if (shouldJumpAlignActiveHub) {
+        _scrollActiveHubToTop(animate: false);
+      } else if (shouldAnimateAlignActiveHub) {
+        _scrollActiveHubToTop();
+      }
       if (!oldWidget.autofocus && widget.autofocus) _focusNode.requestFocus();
       if (activeHubChanged) _notifyActiveHubChanged();
       _notifyFocusedItem();
@@ -436,21 +482,46 @@ class TvBrowseRailState extends State<TvBrowseRail> {
   bool _hasSameHubState(List<MediaHub> oldHubs, List<MediaHub> newHubs) {
     if (oldHubs.length != newHubs.length) return false;
     for (var i = 0; i < oldHubs.length; i++) {
-      final oldHub = oldHubs[i];
-      final newHub = newHubs[i];
-      if (oldHub.id != newHub.id || oldHub.more != newHub.more || oldHub.items.length != newHub.items.length) {
-        return false;
-      }
-      for (var j = 0; j < oldHub.items.length; j++) {
-        if (oldHub.items[j].globalKey != newHub.items[j].globalKey) return false;
-      }
+      if (_hubStateChanged(oldHubs, newHubs, i)) return false;
     }
     return true;
+  }
+
+  bool _hubStateChanged(List<MediaHub> oldHubs, List<MediaHub> newHubs, int index) {
+    if (index < 0 || index >= oldHubs.length || index >= newHubs.length) return true;
+    final oldHub = oldHubs[index];
+    final newHub = newHubs[index];
+    if (oldHub.id != newHub.id || oldHub.more != newHub.more || oldHub.items.length != newHub.items.length) {
+      return true;
+    }
+    for (var j = 0; j < oldHub.items.length; j++) {
+      if (oldHub.items[j].globalKey != newHub.items[j].globalKey) return true;
+    }
+    return false;
+  }
+
+  bool _hasTrailingStateChanged(List<MediaHub> hubs) {
+    for (final hub in hubs) {
+      if (_trailingStateChanged(hub)) return true;
+    }
+    return false;
+  }
+
+  bool _trailingStateChanged(MediaHub hub) {
+    final previous = _lastTrailingByHubId[hub.id];
+    return previous != null && previous != _trailingFor(hub);
+  }
+
+  void _rememberTrailingStates() {
+    _lastTrailingByHubId
+      ..clear()
+      ..addEntries(widget.hubs.map((hub) => MapEntry(hub.id, _trailingFor(hub))));
   }
 
   @override
   void dispose() {
     _longPressTimer?.cancel();
+    _selectSuppressionTimer?.cancel();
     _focusNode.removeListener(_handleFocusChange);
     _focusNode.dispose();
     for (final controller in _scrollControllers.values) {
@@ -472,7 +543,15 @@ class TvBrowseRailState extends State<TvBrowseRail> {
     _longPressTriggered = false;
   }
 
-  int _totalItemCount(MediaHub hub) => hub.items.length + (hub.more ? 1 : 0);
+  void _clearSelectSuppression() {
+    _selectSuppressionTimer?.cancel();
+    _selectSuppressionTimer = null;
+    _suppressSelectUntilKeyUp = false;
+  }
+
+  bool _hasTrailingFor(MediaHub hub) => _trailingFor(hub) != TvRailTrailing.none;
+
+  int _totalItemCount(MediaHub hub) => hub.items.length + (_hasTrailingFor(hub) ? 1 : 0);
 
   bool _isPersonHub(MediaHub hub) => TvBrowseRailLayout.isPersonHub(hub);
 
@@ -516,6 +595,11 @@ class TvBrowseRailState extends State<TvBrowseRail> {
     final key = event.logicalKey;
 
     if (key.isSelectKey) {
+      if (_suppressSelectUntilKeyUp) {
+        if (event is KeyUpEvent) _clearSelectSuppression();
+        return KeyEventResult.handled;
+      }
+
       if (event is KeyDownEvent) {
         if (!_isSelectKeyDown) {
           _isSelectKeyDown = true;
@@ -710,6 +794,7 @@ class TvBrowseRailState extends State<TvBrowseRail> {
       viewportWidth: viewportWidth,
       maxScrollExtent: maxScrollExtent,
       scale: scale,
+      hasTrailing: _hasTrailingFor(hub),
     );
 
     final distance = (position.pixels - target).abs();
@@ -741,6 +826,7 @@ class TvBrowseRailState extends State<TvBrowseRail> {
         metrics: metrics,
         viewportWidth: viewportWidth,
         scale: scale,
+        hasTrailing: _hasTrailingFor(hub),
       );
       final initialScrollOffset = TvBrowseRailLayout.scrollOffsetForIndex(
         hub: hub,
@@ -749,6 +835,7 @@ class TvBrowseRailState extends State<TvBrowseRail> {
         viewportWidth: viewportWidth,
         maxScrollExtent: maxScrollExtent,
         scale: scale,
+        hasTrailing: _hasTrailingFor(hub),
       );
       return ScrollController(initialScrollOffset: initialScrollOffset);
     });
@@ -768,8 +855,17 @@ class TvBrowseRailState extends State<TvBrowseRail> {
   Future<void> _activateCurrentItem() async {
     final hub = _activeHub;
     if (hub == null) return;
-    if (_itemIndex == hub.items.length && hub.more) {
-      _navigateToHubDetail(hub);
+    if (_itemIndex == hub.items.length && _hasTrailingFor(hub)) {
+      switch (_trailingFor(hub)) {
+        case TvRailTrailing.error:
+          widget.onRetryHub?.call(hub);
+          break;
+        case TvRailTrailing.loading:
+          break; // no-op while the page loads
+        case TvRailTrailing.viewAll:
+        case TvRailTrailing.none:
+          _navigateToHubDetail(hub);
+      }
       return;
     }
     if (_itemIndex >= hub.items.length) return;
@@ -814,7 +910,7 @@ class TvBrowseRailState extends State<TvBrowseRail> {
       ],
       builder: (context) => LayoutBuilder(
         builder: (context, constraints) {
-          final svc = SettingsService.instanceOrNull!;
+          final svc = SettingsService.instance;
           final hasFocus = _focusNode.hasFocus;
           final theme = Theme.of(context);
           final scale = _scale(context);
@@ -874,14 +970,11 @@ class TvBrowseRailState extends State<TvBrowseRail> {
               TvBrowseRailLayout.railTopPaddingForScale(scale) +
               viewportHeight +
               TvBrowseRailLayout.railBottomPaddingForScale(scale);
-          final paintOverflow = fullCardLayout && hasFocus
-              ? TvBrowseRailLayout.fullCardFocusPaintOverflowForScale(scale)
-              : 0.0;
           return Focus(
             focusNode: _focusNode,
             onKeyEvent: _handleKeyEvent,
             child: Align(
-              alignment: Alignment.bottomCenter,
+              alignment: .bottomCenter,
               heightFactor: 1,
               child: SizedBox(
                 height: totalHeight,
@@ -894,7 +987,7 @@ class TvBrowseRailState extends State<TvBrowseRail> {
                       backgroundColor: theme.scaffoldBackgroundColor,
                     ),
                     Padding(
-                      padding: EdgeInsets.fromLTRB(
+                      padding: .fromLTRB(
                         horizontalInset,
                         TvBrowseRailLayout.railTopPaddingForScale(scale),
                         0,
@@ -905,12 +998,7 @@ class TvBrowseRailState extends State<TvBrowseRail> {
                         duration: FocusTheme.getAnimationDuration(context),
                         curve: Curves.easeOutCubic,
                         child: ClipRect(
-                          clipper: _RailClipper(
-                            leftOverflow: horizontalInset,
-                            rightOverflow: paintOverflow,
-                            topOverflow: 0,
-                            bottomOverflow: paintOverflow,
-                          ),
+                          clipper: _RailClipper(leftOverflow: horizontalInset, rightOverflow: 0),
                           child: SizedBox(
                             height: viewportHeight,
                             child: _buildHubSectionList(
@@ -956,7 +1044,7 @@ class TvBrowseRailState extends State<TvBrowseRail> {
       controller: _verticalController,
       physics: const NeverScrollableScrollPhysics(),
       clipBehavior: Clip.none,
-      padding: EdgeInsets.only(bottom: bottomPadding),
+      padding: .only(bottom: bottomPadding),
       itemExtentBuilder: (index, _) => sectionHeights[index],
       itemCount: widget.hubs.length,
       itemBuilder: (context, hubIndex) {
@@ -969,7 +1057,7 @@ class TvBrowseRailState extends State<TvBrowseRail> {
           key: _hubSectionKeys.putIfAbsent(hubIndex, () => GlobalKey()),
           height: sectionHeight,
           child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
+            crossAxisAlignment: .stretch,
             children: [
               _buildHubHeader(context, hub: hub, hubIndex: hubIndex, isActive: isActive, scale: scale),
               SizedBox(height: TvBrowseRailLayout.hubStripGapForScale(scale)),
@@ -1012,7 +1100,7 @@ class TvBrowseRailState extends State<TvBrowseRail> {
       height: TvBrowseRailLayout.hubStripHeightForScale(scale),
       child: ExcludeFocus(
         child: Align(
-          alignment: Alignment.centerLeft,
+          alignment: .centerLeft,
           child: Row(
             children: [
               AppIcon(widget.iconForHub(hub, hubIndex), fill: 1, size: 20 * scale, color: iconColor),
@@ -1021,7 +1109,7 @@ class TvBrowseRailState extends State<TvBrowseRail> {
                 child: Text(
                   hub.title,
                   maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
+                  overflow: .ellipsis,
                   style: Theme.of(context).textTheme.titleMedium?.copyWith(
                     color: titleColor,
                     fontSize: 18 * scale,
@@ -1030,7 +1118,7 @@ class TvBrowseRailState extends State<TvBrowseRail> {
                   ),
                 ),
               ),
-              if (hub.more) ...[
+              if (_trailingFor(hub) == TvRailTrailing.viewAll) ...[
                 SizedBox(width: 8 * scale),
                 AppIcon(Symbols.chevron_right_rounded, fill: 1, size: 20 * scale, color: iconColor),
                 SizedBox(width: 30 * scale),
@@ -1059,9 +1147,6 @@ class TvBrowseRailState extends State<TvBrowseRail> {
     final inactiveIndex = HubFocusMemory.getForHubOnly(hub.id, totalCount);
     final focusedIndex = isActiveHub ? _itemIndex : inactiveIndex;
     final scrollController = _scrollControllerForHub(hub, metrics, railViewportWidth, scale, focusedIndex);
-    final paintOverflow = fullCardLayout && hasFocus && isActiveHub
-        ? TvBrowseRailLayout.fullCardFocusPaintOverflowForScale(scale)
-        : 0.0;
     _metricsByHub[hub.id] = metrics;
     _scaleByHub[hub.id] = scale;
 
@@ -1073,8 +1158,8 @@ class TvBrowseRailState extends State<TvBrowseRail> {
         child: ClipRect(
           clipper: _RailClipper(
             leftOverflow: leftOverflow,
-            rightOverflow: metrics.railEdgePadding + metrics.cardWidth + metrics.itemGap + paintOverflow,
-            verticalOverflow: fullCardLayout ? math.max(metrics.focusExtra, paintOverflow) : metrics.focusExtra,
+            rightOverflow: metrics.railEdgePadding + metrics.cardWidth + metrics.itemGap,
+            verticalOverflow: metrics.focusExtra,
           ),
           child: HorizontalScrollWithArrows(
             controller: scrollController,
@@ -1082,26 +1167,23 @@ class TvBrowseRailState extends State<TvBrowseRail> {
               controller: scrollController,
               scrollDirection: Axis.horizontal,
               clipBehavior: Clip.none,
-              padding: EdgeInsets.fromLTRB(metrics.railEdgePadding, 2 * scale, metrics.railEdgePadding, 6 * scale),
-              itemExtentBuilder: (itemIndex, _) =>
-                  TvBrowseRailLayout.itemExtentForIndex(hub: hub, index: itemIndex, metrics: metrics, scale: scale),
+              padding: .fromLTRB(metrics.railEdgePadding, 2 * scale, metrics.railEdgePadding, 6 * scale),
+              itemExtentBuilder: (itemIndex, _) => TvBrowseRailLayout.itemExtentForIndex(
+                hub: hub,
+                index: itemIndex,
+                metrics: metrics,
+                scale: scale,
+                hasTrailing: _hasTrailingFor(hub),
+              ),
               itemCount: totalCount,
               itemBuilder: (context, itemIndex) {
                 final isFocused = hasFocus && isActiveHub && itemIndex == _itemIndex;
                 if (itemIndex == hub.items.length) {
                   return Padding(
-                    padding: EdgeInsets.only(right: metrics.itemGap),
+                    padding: .only(right: metrics.itemGap),
                     child: Align(
-                      alignment: Alignment.centerLeft,
-                      child: _buildViewAllButton(
-                        context,
-                        isFocused: isFocused,
-                        scale: scale,
-                        onTap: () {
-                          _selectHubItem(hub, hubIndex, itemIndex);
-                          _navigateToHubDetail(hub);
-                        },
-                      ),
+                      alignment: .centerLeft,
+                      child: _buildTrailingSlot(context, hub, hubIndex, itemIndex, isFocused: isFocused, scale: scale),
                     ),
                   );
                 }
@@ -1115,6 +1197,7 @@ class TvBrowseRailState extends State<TvBrowseRail> {
                   focusBorderStrokeAlign: fullCardLayout ? BorderSide.strokeAlignOutside : BorderSide.strokeAlignInside,
                   useFocusGlow: fullCardLayout,
                   useForegroundFocusDecoration: fullCardLayout,
+                  glowSize: fullCardLayout ? Size(metrics.cardWidth, metrics.posterHeight) : null,
                   onTap: () {
                     _selectHubItem(hub, hubIndex, itemIndex);
                     unawaited(_activateCurrentItem());
@@ -1150,10 +1233,10 @@ class TvBrowseRailState extends State<TvBrowseRail> {
                 );
 
                 return Padding(
-                  padding: EdgeInsets.only(right: metrics.itemGap),
+                  padding: .only(right: metrics.itemGap),
                   child: MouseRegion(
                     onEnter: (_) => _setHoveredItem(hub, itemIndex),
-                    child: Align(alignment: Alignment.topLeft, child: focusableCard),
+                    child: Align(alignment: .topLeft, child: focusableCard),
                   ),
                 );
               },
@@ -1185,7 +1268,7 @@ class TvBrowseRailState extends State<TvBrowseRail> {
             fit: StackFit.expand,
             children: [
               OptimizedMediaImage(
-                client: context.tryGetMediaClientWithFallback(item.serverId),
+                client: context.tryGetMediaClientWithFallback(serverIdOrNull(item.serverId)),
                 imagePath: item.thumbPath,
                 width: cardWidth,
                 height: imageSize,
@@ -1208,31 +1291,26 @@ class TvBrowseRailState extends State<TvBrowseRail> {
                 right: 10 * scale,
                 bottom: 9 * scale,
                 child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: .min,
+                  crossAxisAlignment: .start,
                   children: [
                     Text(
                       item.displayTitle,
                       maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 13 * scale,
-                        height: 1.1,
-                        fontWeight: FontWeight.w800,
-                      ),
+                      overflow: .ellipsis,
+                      style: TextStyle(color: Colors.white, fontSize: 13 * scale, height: 1.1, fontWeight: .w800),
                     ),
                     if (characterName != null && characterName.isNotEmpty) ...[
                       SizedBox(height: 2 * scale),
                       Text(
                         characterName,
                         maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
+                        overflow: .ellipsis,
                         style: TextStyle(
                           color: Colors.white.withValues(alpha: 0.82),
                           fontSize: 11 * scale,
                           height: 1.1,
-                          fontWeight: FontWeight.w600,
+                          fontWeight: .w600,
                         ),
                       ),
                     ],
@@ -1248,15 +1326,15 @@ class TvBrowseRailState extends State<TvBrowseRail> {
     return SizedBox(
       width: cardWidth,
       child: Padding(
-        padding: EdgeInsets.fromLTRB(3 * scale, 3 * scale, 3 * scale, scale),
+        padding: .fromLTRB(3 * scale, 3 * scale, 3 * scale, scale),
         child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: .min,
+          crossAxisAlignment: .start,
           children: [
             ClipRRect(
               borderRadius: BorderRadius.circular(tokens(context).radiusSm),
               child: OptimizedMediaImage(
-                client: context.tryGetMediaClientWithFallback(item.serverId),
+                client: context.tryGetMediaClientWithFallback(serverIdOrNull(item.serverId)),
                 imagePath: item.thumbPath,
                 width: imageSize,
                 height: imageSize,
@@ -1269,12 +1347,12 @@ class TvBrowseRailState extends State<TvBrowseRail> {
             Text(
               item.displayTitle,
               maxLines: 1,
-              overflow: TextOverflow.ellipsis,
+              overflow: .ellipsis,
               style: theme.textTheme.bodyMedium?.copyWith(
                 color: tokens(context).text,
                 fontSize: 13 * scale,
                 height: 1.1,
-                fontWeight: FontWeight.w700,
+                fontWeight: .w700,
               ),
             ),
             if (characterName != null && characterName.isNotEmpty) ...[
@@ -1282,7 +1360,7 @@ class TvBrowseRailState extends State<TvBrowseRail> {
               Text(
                 characterName,
                 maxLines: 1,
-                overflow: TextOverflow.ellipsis,
+                overflow: .ellipsis,
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: tokens(context).textMuted,
                   fontSize: 11 * scale,
@@ -1296,11 +1374,88 @@ class TvBrowseRailState extends State<TvBrowseRail> {
     );
   }
 
+  /// Resolve the trailing-slot state for [hub], defaulting to the legacy
+  /// "[MediaHub.more] → View All" behavior when no resolver was supplied.
+  TvRailTrailing _trailingFor(MediaHub hub) =>
+      widget.trailingForHub?.call(hub) ?? (hub.more ? TvRailTrailing.viewAll : TvRailTrailing.none);
+
+  Widget _buildTrailingSlot(
+    BuildContext context,
+    MediaHub hub,
+    int hubIndex,
+    int itemIndex, {
+    required bool isFocused,
+    required double scale,
+  }) {
+    switch (_trailingFor(hub)) {
+      case TvRailTrailing.loading:
+        return _buildTrailingSpinner(context, isFocused: isFocused, scale: scale);
+      case TvRailTrailing.error:
+        return _buildViewAllButton(
+          context,
+          isFocused: isFocused,
+          scale: scale,
+          label: t.common.retry,
+          icon: Symbols.refresh_rounded,
+          onTap: () {
+            _selectHubItem(hub, hubIndex, itemIndex);
+            widget.onRetryHub?.call(hub);
+          },
+        );
+      case TvRailTrailing.viewAll:
+        return _buildViewAllButton(
+          context,
+          isFocused: isFocused,
+          scale: scale,
+          onTap: () {
+            _selectHubItem(hub, hubIndex, itemIndex);
+            _navigateToHubDetail(hub);
+          },
+        );
+      case TvRailTrailing.none:
+        return const SizedBox.shrink();
+    }
+  }
+
+  Widget _buildTrailingSpinner(BuildContext context, {required bool isFocused, required double scale}) {
+    final theme = Theme.of(context);
+    final duration = FocusTheme.getAnimationDuration(context);
+    final width = TvBrowseRailLayout.viewAllItemWidthForScale(scale);
+    final height = TvBrowseRailLayout.viewAllPillHeightForScale(scale);
+    final foreground = isFocused ? theme.colorScheme.primary : theme.colorScheme.onSurface.withValues(alpha: 0.78);
+    final background = isFocused
+        ? theme.colorScheme.primary.withValues(alpha: 0.2)
+        : theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.18);
+    return AnimatedScale(
+      scale: isFocused ? 1.04 : 1.0,
+      duration: duration,
+      curve: Curves.easeOutCubic,
+      child: AnimatedContainer(
+        duration: duration,
+        curve: Curves.easeOutCubic,
+        width: width,
+        height: height,
+        decoration: BoxDecoration(
+          color: background,
+          borderRadius: BorderRadius.circular(height / 2),
+          boxShadow: isFocused
+              ? [BoxShadow(color: theme.colorScheme.primary.withValues(alpha: 0.2), blurRadius: 18, spreadRadius: 1)]
+              : null,
+        ),
+        child: Center(
+          child: SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2, color: foreground)),
+        ),
+      ),
+    );
+  }
+
   Widget _buildViewAllButton(
     BuildContext context, {
     required bool isFocused,
     required double scale,
     required VoidCallback onTap,
+    String? label,
+    IconData icon = Symbols.arrow_forward_rounded,
   }) {
     final theme = Theme.of(context);
     final duration = FocusTheme.getAnimationDuration(context);
@@ -1308,7 +1463,7 @@ class TvBrowseRailState extends State<TvBrowseRail> {
     final height = TvBrowseRailLayout.viewAllPillHeightForScale(scale);
     final foreground = isFocused ? theme.colorScheme.primary : theme.colorScheme.onSurface.withValues(alpha: 0.78);
     final background = isFocused
-        ? theme.colorScheme.primary.withValues(alpha: 0.20)
+        ? theme.colorScheme.primary.withValues(alpha: 0.2)
         : theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.42);
 
     return ClickableCursor(
@@ -1323,14 +1478,14 @@ class TvBrowseRailState extends State<TvBrowseRail> {
             curve: Curves.easeOutCubic,
             width: width,
             height: height,
-            padding: EdgeInsets.symmetric(horizontal: (12 * scale).clamp(10, 16).toDouble()),
+            padding: .symmetric(horizontal: (12 * scale).clamp(10, 16).toDouble()),
             decoration: BoxDecoration(
               color: background,
               borderRadius: BorderRadius.circular(height / 2),
               boxShadow: isFocused
                   ? [
                       BoxShadow(
-                        color: theme.colorScheme.primary.withValues(alpha: 0.20),
+                        color: theme.colorScheme.primary.withValues(alpha: 0.2),
                         blurRadius: 18,
                         spreadRadius: 1,
                       ),
@@ -1338,28 +1493,23 @@ class TvBrowseRailState extends State<TvBrowseRail> {
                   : null,
             ),
             child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
+              mainAxisAlignment: .center,
               children: [
                 Flexible(
                   child: Text(
-                    t.common.viewAll,
+                    label ?? t.common.viewAll,
                     maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
+                    overflow: .ellipsis,
                     style: TextStyle(
                       color: foreground,
                       fontSize: (13 * scale).clamp(12, 16).toDouble(),
-                      fontWeight: FontWeight.w800,
+                      fontWeight: .w800,
                       letterSpacing: 0.1,
                     ),
                   ),
                 ),
                 SizedBox(width: (5 * scale).clamp(4, 7).toDouble()),
-                AppIcon(
-                  Symbols.arrow_forward_rounded,
-                  fill: 1,
-                  size: (18 * scale).clamp(16, 22).toDouble(),
-                  color: foreground,
-                ),
+                AppIcon(icon, fill: 1, size: (18 * scale).clamp(16, 22).toDouble(), color: foreground),
               ],
             ),
           ),

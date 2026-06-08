@@ -79,7 +79,7 @@ class _SettingsMenuItem extends StatelessWidget {
       leading: AppIcon(icon, fill: 1, color: isHighlighted ? Colors.amber : t.textMuted),
       title: Text(title),
       trailing: Row(
-        mainAxisSize: MainAxisSize.min,
+        mainAxisSize: .min,
         children: [
           if (allowValueOverflow) Flexible(child: valueWidget) else valueWidget,
           const SizedBox(width: 8),
@@ -101,7 +101,7 @@ class _SettingsToggleItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final settings = SettingsService.instanceOrNull!;
+    final settings = SettingsService.instance;
     return ValueListenableBuilder<bool>(
       valueListenable: settings.listenable(pref),
       builder: (context, value, _) {
@@ -215,15 +215,16 @@ class _VideoSettingsSheetState extends State<VideoSettingsSheet> {
     super.initState();
     _audioSyncOffset = widget.audioSyncOffset;
     _subtitleSyncOffset = widget.subtitleSyncOffset;
-    _zoomScale = widget.videoZoomScale;
+    _zoomScale = VideoFilterManager.normalizeZoomScale(widget.videoZoomScale);
     _loadDebugDvConversionMode();
   }
 
   @override
   void didUpdateWidget(covariant VideoSettingsSheet oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if ((widget.videoZoomScale - oldWidget.videoZoomScale).abs() > 0.0001) {
-      _zoomScale = widget.videoZoomScale;
+    final nextZoomScale = VideoFilterManager.normalizeZoomScale(widget.videoZoomScale);
+    if (_zoomScale != nextZoomScale) {
+      _zoomScale = nextZoomScale;
     }
   }
 
@@ -276,7 +277,7 @@ class _VideoSettingsSheetState extends State<VideoSettingsSheet> {
     // whenComplete in track_chapter_controls). Cancel it again here.
     controller
         .show(
-          alignment: Alignment.topCenter,
+          alignment: .topCenter,
           constraints: const BoxConstraints(maxHeight: 80, maxWidth: 900),
           initialFocusNode: sliderFocusNode,
           builder: (_) => _CompactSyncBar(
@@ -287,7 +288,7 @@ class _VideoSettingsSheetState extends State<VideoSettingsSheet> {
             initialOffset: initialOffset,
             sliderFocusNode: sliderFocusNode,
             onOffsetChanged: (offset) async {
-              final settings = SettingsService.instanceOrNull!;
+              final settings = SettingsService.instance;
               if (isSubtitle) {
                 await settings.write(SettingsService.subtitleSyncOffset, offset);
               } else {
@@ -375,10 +376,10 @@ class _VideoSettingsSheetState extends State<VideoSettingsSheet> {
 
   String _formatDvConversionMode(String mode) {
     return switch (_normalizeDvConversionMode(mode)) {
-      'disabled' => 'Native / Disabled',
-      'dv81' => 'P7 → P8.1',
-      'hevc_strip' => 'P7 → HEVC',
-      _ => 'Auto',
+      'disabled' => t.settings.dvConversionNative,
+      'dv81' => t.settings.dvConversionDv81,
+      'hevc_strip' => t.settings.dvConversionHevcStrip,
+      _ => t.settings.dvConversionAuto,
     };
   }
 
@@ -392,7 +393,7 @@ class _VideoSettingsSheetState extends State<VideoSettingsSheet> {
   String _formatZoomScale(double scale) => '${(scale * 100).round()}%';
 
   void _setZoomScale(double scale) {
-    final next = scale.clamp(VideoFilterManager.minZoomScale, VideoFilterManager.maxZoomScale).toDouble();
+    final next = VideoFilterManager.normalizeZoomScale(scale);
     setState(() {
       _zoomScale = next;
     });
@@ -569,7 +570,9 @@ class _VideoSettingsSheetState extends State<VideoSettingsSheet> {
           _SettingsMenuItem(
             icon: Symbols.auto_fix_high_rounded,
             title: t.shaders.title,
-            valueText: widget.shaderService!.currentPreset.name,
+            valueText: widget.shaderService!.currentPreset.id == ShaderPreset.none.id
+                ? t.common.off
+                : widget.shaderService!.currentPreset.name,
             isHighlighted: widget.shaderService!.currentPreset.isEnabled,
             onTap: () => _navigateTo(_SettingsView.shader),
           ),
@@ -607,7 +610,7 @@ class _VideoSettingsSheetState extends State<VideoSettingsSheet> {
         if (_showDebugDvConversionMode)
           _SettingsMenuItem(
             icon: Symbols.hdr_strong_rounded,
-            title: 'DV Conversion Mode',
+            title: t.settings.dvConversionMode,
             valueText: _formatDvConversionMode(_dvConversionMode),
             isHighlighted: _dvConversionMode != 'auto',
             onTap: () => _navigateTo(_SettingsView.dvConversion),
@@ -641,11 +644,15 @@ class _VideoSettingsSheetState extends State<VideoSettingsSheet> {
   }
 
   Widget _buildDvConversionView() {
-    const modes = [
-      (value: 'auto', title: 'Auto', subtitle: 'Use device capability detection and normal fallback behavior'),
-      (value: 'disabled', title: 'Native / Disabled', subtitle: 'Force native DV7 and suppress DV conversion retry'),
-      (value: 'dv81', title: 'P7 → P8.1', subtitle: 'Force inline RPU conversion to Dolby Vision profile 8.1'),
-      (value: 'hevc_strip', title: 'P7 → HEVC', subtitle: 'Strip Dolby Vision RPU/EL layers and present plain HEVC'),
+    final modes = [
+      (value: 'auto', title: t.settings.dvConversionAuto, subtitle: t.settings.dvConversionAutoDescription),
+      (value: 'disabled', title: t.settings.dvConversionNative, subtitle: t.settings.dvConversionNativeDescription),
+      (value: 'dv81', title: t.settings.dvConversionDv81, subtitle: t.settings.dvConversionDv81Description),
+      (
+        value: 'hevc_strip',
+        title: t.settings.dvConversionHevcStrip,
+        subtitle: t.settings.dvConversionHevcStripDescription,
+      ),
     ];
     final primary = Theme.of(context).colorScheme.primary;
 
@@ -684,7 +691,7 @@ class _VideoSettingsSheetState extends State<VideoSettingsSheet> {
               onTap: () async {
                 await widget.player.setRate(speed);
                 // Save as default playback speed
-                await SettingsService.instanceOrNull!.write(SettingsService.defaultPlaybackSpeed, speed);
+                await SettingsService.instance.write(SettingsService.defaultPlaybackSpeed, speed);
                 if (context.mounted) {
                   OverlaySheetController.of(context).close(); // Close sheet after selection
                 }
@@ -809,7 +816,7 @@ class _VideoSettingsSheetState extends State<VideoSettingsSheet> {
                     padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
                     child: Text(
                       _formatBackend(entry.key),
-                      style: TextStyle(color: tokens(context).textMuted, fontSize: 12, fontWeight: FontWeight.w600),
+                      style: TextStyle(color: tokens(context).textMuted, fontSize: 12, fontWeight: .w600),
                     ),
                   ),
                   for (final d in entry.value) _buildDeviceTile(d, currentDevice),
@@ -867,14 +874,15 @@ class _VideoSettingsSheetState extends State<VideoSettingsSheet> {
             final preset = presets[index];
             final isSelected = preset.id == currentPreset.id;
             final isCustom = preset.type == ShaderPresetType.custom;
+            final presetName = preset.id == ShaderPreset.none.id ? t.common.off : preset.name;
 
             return FocusableListTile(
-              title: Text(preset.name, style: TextStyle(color: isSelected ? Colors.amber : null)),
+              title: Text(presetName, style: TextStyle(color: isSelected ? Colors.amber : null)),
               subtitle: _getShaderSubtitle(preset) != null
                   ? Text(_getShaderSubtitle(preset)!, style: TextStyle(color: tokens(context).textMuted, fontSize: 12))
                   : null,
               trailing: Row(
-                mainAxisSize: MainAxisSize.min,
+                mainAxisSize: .min,
                 children: [
                   if (isSelected) const AppIcon(Symbols.check_rounded, fill: 1, color: Colors.amber),
                   if (isCustom) ...[
@@ -1067,7 +1075,7 @@ class _CompactSyncBarState extends State<_CompactSyncBar> {
         const SizedBox(width: 16),
         AppIcon(widget.icon, fill: 1, color: tokens(context).textMuted, size: 20),
         const SizedBox(width: 8),
-        Text(widget.title, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+        Text(widget.title, style: const TextStyle(fontWeight: .w600, fontSize: 14)),
         Expanded(
           child: SyncOffsetControl(
             player: widget.player,
@@ -1094,7 +1102,7 @@ class _CompactSyncBarState extends State<_CompactSyncBar> {
             child: Container(
               width: 36,
               height: 36,
-              alignment: Alignment.center,
+              alignment: .center,
               child: AppIcon(Symbols.close_rounded, fill: 1, color: tokens(context).textMuted, size: 22),
             ),
           ),

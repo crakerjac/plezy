@@ -1,4 +1,5 @@
 import 'dart:async';
+import '../media/ids.dart';
 
 import 'package:flutter/foundation.dart';
 
@@ -62,7 +63,7 @@ class WatchStateOverlayProvider extends ChangeNotifier with DisposableChangeNoti
     if (parsed != null) {
       final scoped = _activeClientScopesByServer[parsed.serverId];
       if (scoped != null && scoped.isNotEmpty) {
-        scopedEntry = _patches[buildGlobalKey(scoped, parsed.ratingKey)];
+        scopedEntry = _patches[buildGlobalKey(ServerId(scoped), parsed.ratingKey)];
       }
     }
     final unscopedEntry = _patches[globalKey];
@@ -79,16 +80,11 @@ class WatchStateOverlayProvider extends ChangeNotifier with DisposableChangeNoti
 
   static MediaItem applyPatch(MediaItem item, WatchStateOverlayPatch? patch) {
     if (patch == null) return item;
-
-    var updated = item;
-    final isWatched = patch.isWatched;
-    if (isWatched != null) {
-      updated = updated.copyWith(viewCount: isWatched ? 1 : 0);
-    }
-    if (patch.hasViewOffsetMs) {
-      updated = updated.copyWith(viewOffsetMs: patch.viewOffsetMs);
-    }
-    return updated;
+    return WatchStateSnapshot(
+      isWatched: patch.isWatched,
+      hasViewOffsetMs: patch.hasViewOffsetMs,
+      viewOffsetMs: patch.viewOffsetMs,
+    ).apply(item);
   }
 
   void setActiveProfileId(String? profileId) {
@@ -116,7 +112,7 @@ class WatchStateOverlayProvider extends ChangeNotifier with DisposableChangeNoti
 
     final cacheServerId = event.cacheServerId;
     final key = cacheServerId != null && cacheServerId.isNotEmpty && cacheServerId != event.serverId
-        ? buildGlobalKey(cacheServerId, event.itemId)
+        ? buildGlobalKey(ServerId(cacheServerId), event.itemId)
         : event.globalKey;
     _patches[key] = _WatchStateOverlayEntry(patch, ++_sequence);
     safeNotifyListeners();

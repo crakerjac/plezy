@@ -1,4 +1,5 @@
 import 'dart:ui';
+import '../media/ids.dart';
 
 import 'package:flutter/material.dart';
 import 'package:plezy/widgets/app_icon.dart';
@@ -199,7 +200,7 @@ class MediaCardState extends State<MediaCard> with ContextMenuTapMixin<MediaCard
 
     // Get artwork reference and resolve to local path using hash (includes serverId)
     final artwork = downloadProvider.getArtworkPaths(globalKey);
-    return artwork?.getLocalPath(DownloadStorageService.instance, item.serverId!);
+    return artwork?.getLocalPath(DownloadStorageService.instance, ServerId(item.serverId!));
   }
 
   @override
@@ -225,7 +226,7 @@ class MediaCardState extends State<MediaCard> with ContextMenuTapMixin<MediaCard
     } else if (widget.forceGridMode) {
       viewMode = ViewMode.grid;
     } else {
-      viewMode = SettingsService.instanceOrNull!.read(SettingsService.viewMode);
+      viewMode = SettingsService.instance.read(SettingsService.viewMode);
     }
 
     final semanticLabel = _buildSemanticLabel(item);
@@ -241,7 +242,7 @@ class MediaCardState extends State<MediaCard> with ContextMenuTapMixin<MediaCard
             onLongPress: showContextMenuFromTap,
             onSecondaryTapDown: storeTapPosition,
             onSecondaryTap: showContextMenuFromTap,
-            density: SettingsService.instanceOrNull!.read(SettingsService.libraryDensity),
+            density: SettingsService.instance.read(SettingsService.libraryDensity),
             isOffline: widget.isOffline,
             localPosterPath: localPosterPath,
             showServerName: widget.showServerName,
@@ -341,8 +342,8 @@ class MediaCardState extends State<MediaCard> with ContextMenuTapMixin<MediaCard
         child: Padding(
           padding: const EdgeInsets.fromLTRB(3, 3, 3, 1),
           child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: .min,
+            crossAxisAlignment: .start,
             children: [
               // Poster with overlay
               if (posterHeight != null)
@@ -392,15 +393,15 @@ class MediaCardState extends State<MediaCard> with ContextMenuTapMixin<MediaCard
               if (item is MediaItem && _hasClickableTitle(item))
                 _ClickableText(
                   text: item.displayTitle,
-                  style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13, height: 1.1),
+                  style: const TextStyle(fontWeight: .w600, fontSize: 13, height: 1.1),
                   onTap: () => _navigateToDetail(context, item, isOffline: widget.isOffline),
                 )
               else
                 Text(
                   item is MediaPlaylist ? item.title : (item as MediaItem).displayTitle,
                   maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13, height: 1.1),
+                  overflow: .ellipsis,
+                  style: const TextStyle(fontWeight: .w600, fontSize: 13, height: 1.1),
                 ),
               // Subtitle
               if (item is MediaPlaylist)
@@ -448,7 +449,7 @@ class _MediaCardList extends StatelessWidget {
   bool _usesWideAspectRatio() {
     if (item is! MediaItem) return false;
     final EpisodePosterMode mode =
-        episodePosterModeOverride ?? SettingsService.instanceOrNull!.read(SettingsService.episodePosterMode);
+        episodePosterModeOverride ?? SettingsService.instance.read(SettingsService.episodePosterMode);
     return (item as MediaItem).usesWideAspectRatio(mode);
   }
 
@@ -535,7 +536,7 @@ class _MediaCardList extends StatelessWidget {
       final mi = item as MediaItem;
 
       if (mi.parentIndex != null && mi.index != null) {
-        final showEp = SettingsService.instanceOrNull!.read(SettingsService.showEpisodeNumberOnCards);
+        final showEp = SettingsService.instance.read(SettingsService.showEpisodeNumberOnCards);
         return showEp ? 'S${mi.parentIndex} E${mi.index}' : 'S${mi.parentIndex}';
       }
 
@@ -570,7 +571,7 @@ class _MediaCardList extends StatelessWidget {
       fontSize: _subtitleFontSize,
     );
     final episodeTitle = mi.displaySubtitle ?? mi.displayTitle;
-    final showEp = SettingsService.instanceOrNull!.read(SettingsService.showEpisodeNumberOnCards);
+    final showEp = SettingsService.instance.read(SettingsService.showEpisodeNumberOnCards);
     final episodeNum = (showEp && mi.index != null) ? ' E${mi.index}' : '';
     return Row(
       children: [
@@ -581,7 +582,7 @@ class _MediaCardList extends StatelessWidget {
         ),
         Text('$episodeNum · ', style: style),
         Expanded(
-          child: Text(episodeTitle, maxLines: 1, overflow: TextOverflow.ellipsis, style: style),
+          child: Text(episodeTitle, maxLines: 1, overflow: .ellipsis, style: style),
         ),
       ],
     );
@@ -604,7 +605,7 @@ class _MediaCardList extends StatelessWidget {
       child: Padding(
         padding: const EdgeInsets.all(8),
         child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
+          crossAxisAlignment: .start,
           children: [
             SizedBox(
               width: _posterWidth(),
@@ -628,32 +629,32 @@ class _MediaCardList extends StatelessWidget {
             const SizedBox(width: 12),
             Expanded(
               child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisAlignment: MainAxisAlignment.start,
+                crossAxisAlignment: .start,
+                mainAxisAlignment: .start,
                 children: [
                   if (item is MediaItem && _hasClickableTitle(item as MediaItem))
                     _ClickableText(
                       text: (item as MediaItem).displayTitle,
-                      style: TextStyle(fontWeight: FontWeight.w600, fontSize: _titleFontSize, height: 1.2),
+                      style: TextStyle(fontWeight: .w600, fontSize: _titleFontSize, height: 1.2),
                       onTap: () => _navigateToDetail(context, item as MediaItem, isOffline: isOffline),
                     )
                   else
                     Text(
                       _displayTitle(),
                       maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(fontWeight: FontWeight.w600, fontSize: _titleFontSize, height: 1.2),
+                      overflow: .ellipsis,
+                      style: TextStyle(fontWeight: .w600, fontSize: _titleFontSize, height: 1.2),
                     ),
                   const SizedBox(height: 4),
                   if (metadataLine.isNotEmpty) ...[
                     Text(
                       metadataLine,
                       maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
+                      overflow: .ellipsis,
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(
                         color: tokens(context).textMuted.withValues(alpha: 0.9),
                         fontSize: _metadataFontSize,
-                        fontWeight: FontWeight.w500,
+                        fontWeight: .w500,
                       ),
                     ),
                     const SizedBox(height: 2),
@@ -668,7 +669,7 @@ class _MediaCardList extends StatelessWidget {
                     Text(
                       subtitle,
                       maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
+                      overflow: .ellipsis,
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(
                         color: tokens(context).textMuted.withValues(alpha: 0.85),
                         fontSize: _subtitleFontSize,
@@ -677,13 +678,13 @@ class _MediaCardList extends StatelessWidget {
                     const SizedBox(height: 4),
                   ],
                   if (!(item is MediaItem &&
-                          SettingsService.instanceOrNull!.read(SettingsService.hideSpoilers) &&
+                          SettingsService.instance.read(SettingsService.hideSpoilers) &&
                           (item as MediaItem).shouldHideSpoiler) &&
                       _summary() != null) ...[
                     Text(
                       _summary()!,
                       maxLines: _summaryMaxLines,
-                      overflow: TextOverflow.ellipsis,
+                      overflow: .ellipsis,
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(
                         color: tokens(context).textMuted.withValues(alpha: 0.7),
                         fontSize: _summaryFontSize,
@@ -705,7 +706,7 @@ class _MediaCardList extends StatelessWidget {
                           child: Text(
                             (item as MediaItem).serverName!,
                             maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
+                            overflow: .ellipsis,
                             style: Theme.of(context).textTheme.bodySmall?.copyWith(
                               color: tokens(context).textMuted.withValues(alpha: 0.6),
                               fontSize: _metadataFontSize,
@@ -750,7 +751,7 @@ Widget _buildPosterImage(
     posterUrl = item.displayImagePath;
 
     return OptimizedMediaImage.playlist(
-      client: isOffline ? null : context.tryGetMediaClientWithFallback(item.serverId),
+      client: isOffline ? null : context.tryGetMediaClientWithFallback(serverIdOrNull(item.serverId)),
       imagePath: posterUrl,
       width: knownWidth ?? double.infinity,
       height: knownHeight ?? double.infinity,
@@ -760,15 +761,15 @@ Widget _buildPosterImage(
     );
   } else if (item is MediaItem) {
     final EpisodePosterMode episodePosterMode =
-        episodePosterModeOverride ?? SettingsService.instanceOrNull!.read(SettingsService.episodePosterMode);
-    final hideSpoilers = SettingsService.instanceOrNull!.read(SettingsService.hideSpoilers);
+        episodePosterModeOverride ?? SettingsService.instance.read(SettingsService.episodePosterMode);
+    final hideSpoilers = SettingsService.instance.read(SettingsService.hideSpoilers);
     final shouldBlur =
         hideSpoilers && item.shouldHideSpoiler && episodePosterMode == EpisodePosterMode.episodeThumbnail;
     final primaryPosterUrl = item.posterThumb(mode: episodePosterMode, mixedHubContext: mixedHubContext);
     final posterFallbackUrl = item.posterThumbFallback(mode: episodePosterMode, mixedHubContext: mixedHubContext);
     final useRememberedFallback = posterFallbackUrl != null && _hasFailedPosterUrl(primaryPosterUrl);
     posterUrl = useRememberedFallback ? posterFallbackUrl : primaryPosterUrl;
-    final mediaClient = isOffline ? null : context.tryGetMediaClientWithFallback(item.serverId);
+    final mediaClient = isOffline ? null : context.tryGetMediaClientWithFallback(serverIdOrNull(item.serverId));
     final fallbackIcon = _mediaPosterFallbackIcon(item);
 
     Widget image;
@@ -831,7 +832,7 @@ class _MediaCardHelpers {
       return Text(
         t.playlists.itemCount(count: playlist.leafCount!),
         maxLines: 1,
-        overflow: TextOverflow.ellipsis,
+        overflow: .ellipsis,
         style: Theme.of(
           context,
         ).textTheme.bodySmall?.copyWith(color: tokens(context).textMuted, fontSize: 11, height: 1.1),
@@ -853,7 +854,7 @@ class _MediaCardHelpers {
         return Text(
           t.playlists.itemCount(count: count),
           maxLines: 1,
-          overflow: TextOverflow.ellipsis,
+          overflow: .ellipsis,
           style: subtitleStyle,
         );
       }
@@ -862,7 +863,7 @@ class _MediaCardHelpers {
     // For episodes, show "S# · Episode Title" with clickable season link
     if (mi.isEpisode && mi.parentIndex != null) {
       final episodeTitle = mi.displaySubtitle ?? mi.displayTitle;
-      final showEp = SettingsService.instanceOrNull!.read(SettingsService.showEpisodeNumberOnCards);
+      final showEp = SettingsService.instance.read(SettingsService.showEpisodeNumberOnCards);
       final episodeSuffix = (showEp && mi.index != null) ? ' E${mi.index}' : '';
       if (mi.parentId != null) {
         return Row(
@@ -874,7 +875,7 @@ class _MediaCardHelpers {
             ),
             Text('$episodeSuffix · ', style: subtitleStyle),
             Expanded(
-              child: Text(episodeTitle, maxLines: 1, overflow: TextOverflow.ellipsis, style: subtitleStyle),
+              child: Text(episodeTitle, maxLines: 1, overflow: .ellipsis, style: subtitleStyle),
             ),
           ],
         );
@@ -882,22 +883,22 @@ class _MediaCardHelpers {
       return Text(
         'S${mi.parentIndex}$episodeSuffix · $episodeTitle',
         maxLines: 1,
-        overflow: TextOverflow.ellipsis,
+        overflow: .ellipsis,
         style: subtitleStyle,
       );
     }
 
     // For other media types, show subtitle/parent/year
     if (mi.displaySubtitle != null) {
-      return Text(mi.displaySubtitle!, maxLines: 1, overflow: TextOverflow.ellipsis, style: subtitleStyle);
+      return Text(mi.displaySubtitle!, maxLines: 1, overflow: .ellipsis, style: subtitleStyle);
     } else if (mi.parentTitle != null) {
-      return Text(mi.parentTitle!, maxLines: 1, overflow: TextOverflow.ellipsis, style: subtitleStyle);
+      return Text(mi.parentTitle!, maxLines: 1, overflow: .ellipsis, style: subtitleStyle);
     } else if (mi.year != null) {
       final edition = mi.editionTitle;
       return Text(
         edition != null ? '${mi.year} · $edition' : '${mi.year}',
         maxLines: 1,
-        overflow: TextOverflow.ellipsis,
+        overflow: .ellipsis,
         style: subtitleStyle,
       );
     }
@@ -907,7 +908,7 @@ class _MediaCardHelpers {
 
   /// Builds watch progress overlay (checkmark for watched, progress bar for in-progress)
   static Widget buildWatchProgress(BuildContext context, MediaItem mi) {
-    final showUnwatchedCount = SettingsService.instanceOrNull!.read(SettingsService.showUnwatchedCount);
+    final showUnwatchedCount = SettingsService.instance.read(SettingsService.showUnwatchedCount);
 
     final hasActiveProgress =
         mi.viewOffsetMs != null && mi.durationMs != null && mi.viewOffsetMs! > 0 && mi.viewOffsetMs! < mi.durationMs!;
@@ -944,10 +945,10 @@ class _MediaCardHelpers {
                 shape: BoxShape.circle,
                 boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.3), blurRadius: 4)],
               ),
-              alignment: Alignment.center,
+              alignment: .center,
               child: Text(
                 '${mi.leafCount! - mi.viewedLeafCount!}',
-                style: TextStyle(color: tokens(context).bg, fontSize: 12, fontWeight: FontWeight.bold),
+                style: TextStyle(color: tokens(context).bg, fontSize: 12, fontWeight: .bold),
               ),
             ),
           ),
@@ -1016,7 +1017,7 @@ void _navigateToSeason(BuildContext context, MediaItem episode, {bool isOffline 
       id: episode.parentId!,
       backend: episode.backend,
       kind: MediaKind.season,
-      title: episode.parentTitle ?? 'Season ${episode.parentIndex ?? ''}',
+      title: episode.parentTitle ?? t.common.seasonNumber(number: episode.parentIndex ?? ''),
       index: episode.parentIndex,
       parentId: episode.grandparentId,
       thumbPath: episode.parentThumbPath,
@@ -1093,7 +1094,7 @@ class _ClickableTextState extends State<_ClickableText> {
     final baseStyle = widget.style ?? const TextStyle();
 
     if (isKeyboard) {
-      return Text(widget.text, maxLines: 1, overflow: TextOverflow.ellipsis, style: baseStyle);
+      return Text(widget.text, maxLines: 1, overflow: .ellipsis, style: baseStyle);
     }
 
     return MouseRegion(
@@ -1105,7 +1106,7 @@ class _ClickableTextState extends State<_ClickableText> {
         child: Text(
           widget.text,
           maxLines: 1,
-          overflow: TextOverflow.ellipsis,
+          overflow: .ellipsis,
           style: baseStyle.copyWith(
             decoration: _isHovered ? TextDecoration.underline : null,
             decorationColor: baseStyle.color,
