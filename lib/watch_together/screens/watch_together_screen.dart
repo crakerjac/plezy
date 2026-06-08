@@ -1,4 +1,5 @@
 import 'dart:io';
+import '../../media/ids.dart';
 
 import 'package:flutter/material.dart';
 import '../../utils/future_extensions.dart';
@@ -19,6 +20,7 @@ import '../../utils/snackbar_helper.dart';
 import '../../widgets/dialog_action_button.dart';
 import '../../utils/video_player_navigation.dart';
 import '../../widgets/focused_scroll_scaffold.dart';
+import '../../widgets/app_menu.dart';
 import '../../widgets/overlay_sheet.dart';
 import '../models/watch_session.dart';
 import '../providers/watch_together_provider.dart';
@@ -35,7 +37,11 @@ class WatchTogetherScreen extends StatelessWidget {
     return Consumer<WatchTogetherProvider>(
       builder: (context, watchTogether, child) {
         final canGoBack = watchTogether.isHost || !watchTogether.isInSession;
-        return PopScope(
+        // The host owns sheet + system back: a back with the actions sheet open
+        // closes it; otherwise the route pops only when [canGoBack] (a guest in
+        // an active session can't leave). canGoBack==true also preserves the iOS
+        // interactive swipe-back.
+        return OverlaySheetHost(
           canPop: canGoBack,
           child: FocusedScrollScaffold(
             title: Text(t.watchTogether.title),
@@ -127,7 +133,7 @@ class _NotInSessionViewState extends State<_NotInSessionView> with MountedSetSta
         child: Padding(
           padding: const EdgeInsets.all(24),
           child: Column(
-            mainAxisSize: MainAxisSize.min,
+            mainAxisSize: .min,
             children: [
               Icon(Symbols.group_rounded, size: 80, color: theme.colorScheme.primary),
               const SizedBox(height: 24),
@@ -187,7 +193,7 @@ class _NotInSessionViewState extends State<_NotInSessionView> with MountedSetSta
               if (_recentRooms.isNotEmpty) ...[
                 const SizedBox(height: 32),
                 Align(
-                  alignment: Alignment.centerLeft,
+                  alignment: .centerLeft,
                   child: Text(t.watchTogether.recentRooms, style: theme.textTheme.titleSmall),
                 ),
                 const SizedBox(height: 8),
@@ -404,6 +410,11 @@ class _RecentRoomTile extends StatelessWidget {
       child: FocusableWrapper(
         useBackgroundFocus: true,
         borderRadius: 12,
+        // Hold SELECT/OK to open the rename/remove menu on TV/dpad (matches media cards).
+        enableLongPress: true,
+        // The wrapper owns key handling; the ListTile's InkWell and the trailing
+        // more_vert IconButton must not steal focus from the long-press handler.
+        descendantsAreFocusable: false,
         onSelect: isBusy ? null : onTap,
         onLongPress: () => _showActions(context),
         child: Material(
@@ -411,7 +422,7 @@ class _RecentRoomTile extends StatelessWidget {
           child: ListTile(
             shape: const RoundedRectangleBorder(borderRadius: BorderRadius.all(Radius.circular(12))),
             leading: isEntering ? const LoadingIndicatorBox(size: 24) : const Icon(Symbols.meeting_room_rounded),
-            title: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis),
+            title: Text(title, maxLines: 1, overflow: .ellipsis),
             subtitle: room.name != null
                 ? Text(
                     room.code,
@@ -429,28 +440,23 @@ class _RecentRoomTile extends StatelessWidget {
   void _showActions(BuildContext context) {
     OverlaySheetController.showAdaptive(
       context,
-      builder: (context) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              leading: const Icon(Symbols.edit_rounded),
-              title: Text(t.watchTogether.renameRoom),
-              onTap: () {
-                OverlaySheetController.closeAdaptive(context);
-                onRename();
-              },
-            ),
-            ListTile(
-              leading: Icon(Symbols.delete_rounded, color: Theme.of(context).colorScheme.error),
-              title: Text(t.watchTogether.removeRoom, style: TextStyle(color: Theme.of(context).colorScheme.error)),
-              onTap: () {
-                OverlaySheetController.closeAdaptive(context);
-                onRemove();
-              },
-            ),
-          ],
-        ),
+      builder: (context) => AppMenuSheet<String>(
+        entries: [
+          AppMenuItem(value: 'rename', icon: Symbols.edit_rounded, label: t.watchTogether.renameRoom),
+          AppMenuItem(
+            value: 'remove',
+            icon: Symbols.delete_rounded,
+            label: t.watchTogether.removeRoom,
+            destructive: true,
+          ),
+        ],
+        onSelected: (value) {
+          if (value == 'rename') {
+            onRename();
+          } else if (value == 'remove') {
+            onRemove();
+          }
+        },
       ),
     );
   }
@@ -467,13 +473,13 @@ class _ActiveSessionContent extends StatelessWidget {
     final session = watchTogether.session!;
 
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
+      crossAxisAlignment: .stretch,
       children: [
         Card(
           child: Padding(
             padding: const EdgeInsets.all(16),
             child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+              crossAxisAlignment: .start,
               children: [
                 Row(
                   children: [
@@ -484,7 +490,7 @@ class _ActiveSessionContent extends StatelessWidget {
                     const SizedBox(width: 12),
                     Expanded(
                       child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
+                        crossAxisAlignment: .start,
                         children: [
                           Text(
                             watchTogether.isHost ? t.watchTogether.hostingSession : t.watchTogether.inSession,
@@ -528,7 +534,7 @@ class _ActiveSessionContent extends StatelessWidget {
           child: Padding(
             padding: const EdgeInsets.all(16),
             child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+              crossAxisAlignment: .start,
               children: [
                 Row(
                   children: [
@@ -650,9 +656,9 @@ class _JoinCurrentPlaybackCardState extends State<_JoinCurrentPlaybackCard> {
       await navigateToWatchTogetherPlayback(
         context,
         ratingKey: ratingKey,
-        serverId: serverId,
+        serverId: ServerId(serverId),
         onBeforeNavigate: () {
-          widget.watchTogether.markCurrentPlaybackHandled(ratingKey: ratingKey, serverId: serverId);
+          widget.watchTogether.markCurrentPlaybackHandled(ratingKey: ratingKey, serverId: ServerId(serverId));
         },
       );
     } catch (e, stackTrace) {
@@ -679,7 +685,7 @@ class _JoinCurrentPlaybackCardState extends State<_JoinCurrentPlaybackCard> {
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+          crossAxisAlignment: .start,
           children: [
             Row(
               children: [
@@ -687,7 +693,7 @@ class _JoinCurrentPlaybackCardState extends State<_JoinCurrentPlaybackCard> {
                 const SizedBox(width: 12),
                 Expanded(
                   child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+                    crossAxisAlignment: .start,
                     children: [
                       Text(t.watchTogether.currentPlayback, style: theme.textTheme.titleMedium),
                       const SizedBox(height: 4),
@@ -743,7 +749,7 @@ class _SessionCodeRow extends StatelessWidget {
         child: Padding(
           padding: const EdgeInsets.symmetric(vertical: 2),
           child: Row(
-            mainAxisSize: MainAxisSize.min,
+            mainAxisSize: .min,
             children: [
               Text(
                 '${t.watchTogether.sessionCode}: $sessionId',

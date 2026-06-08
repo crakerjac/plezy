@@ -108,6 +108,11 @@ extension _VideoPlayerPlaybackServiceMethods on VideoPlayerScreenState {
         return;
       }
 
+      if (PlatformDetector.isAppleTV() && _isPlaybackMediaControlEvent(event)) {
+        appLogger.d('Media control: ${event.runtimeType} ignored on Apple TV; using native remote bridge');
+        return;
+      }
+
       if (activePlayer == null && event is! NextTrackEvent && event is! PreviousTrackEvent) return;
 
       if (event is PlayEvent) {
@@ -248,6 +253,9 @@ extension _VideoPlayerPlaybackServiceMethods on VideoPlayerScreenState {
       event is AudioRouteOldDeviceUnavailableEvent ||
       event is AudioRouteNewDeviceAvailableEvent;
 
+  bool _isPlaybackMediaControlEvent(Object event) =>
+      event is PlayEvent || event is PauseEvent || event is TogglePlayPauseEvent;
+
   Future<void> _handleAppleAudioSessionEvent(Object event) async {
     if (!Platform.isIOS || PlatformDetector.isTV()) return;
 
@@ -323,9 +331,7 @@ extension _VideoPlayerPlaybackServiceMethods on VideoPlayerScreenState {
     appLogger.i('Network restored while buffering, forcing stream reconnect at ${pos.inSeconds}s');
     // Clear any stale completion latch caused by a spurious EOF during the drop,
     // so the real end-of-file can trigger Play Next after we recover.
-    if (_completionTriggered && !_showPlayNextDialog && _autoPlayTimer?.isActive != true) {
-      _completionTriggered = false;
-    }
+    _rearmCompletionLatch();
     unawaited(_seekPlayback(pos));
   }
 }

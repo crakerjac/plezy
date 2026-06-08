@@ -77,6 +77,7 @@ class TranslationsFr extends Translations with BaseTranslations<AppLocale, Trans
 	@override late final _TranslationsShadersFr shaders = _TranslationsShadersFr._(_root);
 	@override late final _TranslationsCompanionRemoteFr companionRemote = _TranslationsCompanionRemoteFr._(_root);
 	@override late final _TranslationsVideoSettingsFr videoSettings = _TranslationsVideoSettingsFr._(_root);
+	@override late final _TranslationsPerformanceOverlayFr performanceOverlay = _TranslationsPerformanceOverlayFr._(_root);
 	@override late final _TranslationsExternalPlayerFr externalPlayer = _TranslationsExternalPlayerFr._(_root);
 	@override late final _TranslationsMetadataEditFr metadataEdit = _TranslationsMetadataEditFr._(_root);
 	@override late final _TranslationsMatchScreenFr matchScreen = _TranslationsMatchScreenFr._(_root);
@@ -159,6 +160,9 @@ class _TranslationsCommonFr extends TranslationsCommonEn {
 	@override String get settings => 'Réglages';
 	@override String get mute => 'Muet';
 	@override String get ok => 'OK';
+	@override String get off => 'Désactivé';
+	@override String seasonNumber({required Object number}) => 'Saison ${number}';
+	@override String chapterNumber({required Object number}) => 'Chapitre ${number}';
 	@override String get reconnect => 'Reconnecter';
 	@override String get exit => 'Quitter';
 	@override String get viewAll => 'Tout afficher';
@@ -385,6 +389,10 @@ class _TranslationsSettingsFr extends TranslationsSettingsEn {
 	@override String get dvConversionNative => 'Natif / désactivé';
 	@override String get dvConversionDv81 => 'P7 → P8.1';
 	@override String get dvConversionHevcStrip => 'P7 → HEVC';
+	@override String get dvConversionAutoDescription => 'Utiliser la détection des capacités de l’appareil et le comportement de repli normal';
+	@override String get dvConversionNativeDescription => 'Forcer le DV7 natif et bloquer la nouvelle tentative de conversion DV';
+	@override String get dvConversionDv81Description => 'Forcer la conversion RPU intégrée vers Dolby Vision profil 8.1';
+	@override String get dvConversionHevcStripDescription => 'Supprimer les couches RPU/EL Dolby Vision et présenter du HEVC simple';
 	@override String get requireProfileSelectionOnOpen => 'Demander le profil à l\'ouverture';
 	@override String get requireProfileSelectionOnOpenDescription => 'Afficher la sélection de profil à chaque ouverture de l\'application';
 	@override String get forceTvMode => 'Forcer le mode TV';
@@ -397,6 +405,8 @@ class _TranslationsSettingsFr extends TranslationsSettingsEn {
 	@override String get autoHidePerformanceOverlayDescription => 'Faire apparaître/disparaître la superposition avec les contrôles de lecture';
 	@override String get showNavBarLabels => 'Afficher les libellés de la barre de navigation';
 	@override String get showNavBarLabelsDescription => 'Afficher les libellés sous les icônes de la barre de navigation';
+	@override String get startupSection => 'Section de démarrage';
+	@override String get startupSectionDescription => 'Choisissez la section que Plezy ouvre au démarrage';
 	@override String get liveTvDefaultFavorites => 'Chaînes favorites par défaut';
 	@override String get liveTvDefaultFavoritesDescription => 'Afficher uniquement les chaînes favorites à l\'ouverture de la TV en direct';
 	@override String get display => 'Affichage';
@@ -432,6 +442,8 @@ class _TranslationsHotkeysFr extends TranslationsHotkeysEn {
 	// Translations
 	@override String setShortcutFor({required Object actionName}) => 'Définir un raccourci pour ${actionName}';
 	@override String get clearShortcut => 'Effacer le raccourci';
+	@override String get noShortcutSet => 'Aucun raccourci défini';
+	@override String get currentShortcut => 'Raccourci actuel :';
 	@override late final _TranslationsHotkeysActionsFr actions = _TranslationsHotkeysActionsFr._(_root);
 }
 
@@ -482,6 +494,7 @@ class _TranslationsMediaMenuFr extends TranslationsMediaMenuEn {
 	@override String get goToSeries => 'Aller à la série';
 	@override String get goToSeason => 'Aller à la saison';
 	@override String get shufflePlay => 'Lecture aléatoire';
+	@override String get shuffleNotAvailableOffline => 'La lecture aléatoire n’est pas disponible hors ligne';
 	@override String get fileInfo => 'Informations sur le fichier';
 	@override String get deleteFromServer => 'Supprimer du serveur';
 	@override String get confirmDelete => 'Supprimer ce média et ses fichiers de votre serveur ?';
@@ -620,6 +633,10 @@ class _TranslationsVideoControlsFr extends TranslationsVideoControlsEn {
 	@override String get searchSubtitles => 'Rechercher des sous-titres';
 	@override String get language => 'Langue';
 	@override String get noSubtitlesFound => 'Aucun sous-titre trouvé';
+	@override String get downloadedSubtitle => 'Téléchargé';
+	@override String get noSubtitlesAvailable => 'Aucun sous-titre disponible';
+	@override String get noAudioTracksAvailable => 'Aucune piste audio disponible';
+	@override String get noTracksAvailable => 'Aucune piste disponible';
 	@override String get subtitleDownloaded => 'Sous-titre téléchargé';
 	@override String get subtitleDownloadFailed => 'Échec du téléchargement du sous-titre';
 	@override String get searchLanguages => 'Rechercher des langues...';
@@ -672,8 +689,10 @@ class _TranslationsMessagesFr extends TranslationsMessagesEn {
 	@override String metadataRefreshFailed({required Object error}) => 'Échec de l\'actualisation des métadonnées: ${error}';
 	@override String get logoutConfirm => 'Êtes-vous sûr de vouloir vous déconnecter ?';
 	@override String get noSeasonsFound => 'Aucune saison trouvée';
+	@override String get seasonsLoadFailed => 'Impossible de charger les saisons';
 	@override String get noEpisodesFound => 'Aucun épisode trouvé dans la première saison';
 	@override String get noEpisodesFoundGeneral => 'Aucun épisode trouvé';
+	@override String get episodesLoadFailed => 'Impossible de charger les épisodes';
 	@override String get noResultsFound => 'Aucun résultat trouvé';
 	@override String sleepTimerSet({required Object label}) => 'Minuterie de mise en veille réglée sur ${label}';
 	@override String get noItemsAvailable => 'Aucun élément disponible';
@@ -806,6 +825,7 @@ class _TranslationsProfilesFr extends TranslationsProfilesEn {
 	@override String get pinExplain => 'PIN à 4 chiffres requis pour changer de profil.';
 	@override String get continueButton => 'Continuer';
 	@override String get pinsDontMatch => 'Les PIN ne correspondent pas';
+	@override String get initializeServicesFailed => 'Impossible d’initialiser les services de profil';
 }
 
 // Path: connections
@@ -852,6 +872,7 @@ class _TranslationsDiscoverFr extends TranslationsDiscoverEn {
 	@override String get movie => 'Film';
 	@override String get tvShow => 'Show TV';
 	@override String minutesLeft({required Object minutes}) => '${minutes} min restantes';
+	@override String get moreLikeThis => 'Plus de contenus similaires';
 }
 
 // Path: errors
@@ -884,6 +905,7 @@ class _TranslationsLibrariesFr extends TranslationsLibrariesEn {
 
 	// Translations
 	@override String get title => 'Bibliothèques';
+	@override String get fallbackTitle => 'Bibliothèque';
 	@override String get scanLibraryFiles => 'Scanner les fichiers de la bibliothèque';
 	@override String get scanLibrary => 'Scanner la bibliothèque';
 	@override String get analyze => 'Analyser';
@@ -1016,6 +1038,12 @@ class _TranslationsLiveTvFr extends TranslationsLiveTvEn {
 	@override String get noChannels => 'Aucune chaîne disponible';
 	@override String get noDvr => 'Aucun DVR configuré sur les serveurs';
 	@override String get noPrograms => 'Aucune donnée de programme disponible';
+	@override String get liveStreamFailed => 'Échec du direct';
+	@override String get unknownProgram => 'Programme inconnu';
+	@override String get unknownHub => 'Inconnu';
+	@override String get unknownError => 'Erreur inconnue';
+	@override String channelNumber({required Object number}) => 'Chaîne ${number}';
+	@override String get unknownChannel => 'Chaîne inconnue';
 	@override String get live => 'EN DIRECT';
 	@override String get reloadGuide => 'Recharger le guide';
 	@override String get now => 'Maintenant';
@@ -1222,12 +1250,21 @@ class _TranslationsDownloadsFr extends TranslationsDownloadsEn {
 	@override String get deleteDownload => 'Supprimer le téléchargement';
 	@override String get retryDownload => 'Réessayer le téléchargement';
 	@override String get downloadQueued => 'Téléchargement en attente';
+	@override String get downloadResumed => 'Téléchargement repris';
 	@override String get serverErrorBitrate => 'Erreur serveur : le fichier peut dépasser la limite de bitrate distant';
 	@override String episodesQueued({required Object count}) => '${count} épisodes en attente de téléchargement';
 	@override String get downloadDeleted => 'Télécharger supprimé';
 	@override String deleteConfirm({required Object title}) => 'Supprimer "${title}" de cet appareil ?';
-	@override String deletingWithProgress({required Object title, required Object current, required Object total}) => 'Suppression de ${title}... (${current} sur ${total})';
+	@override String get cancelledDownloadTitle => 'Téléchargement annulé';
+	@override String get cancelledDownloadMessage => 'Ce téléchargement a été annulé. Que voulez-vous faire ?';
+	@override String get allEpisodesAlreadyDownloaded => 'Tous les épisodes sont déjà téléchargés';
+	@override String get resumeDownload => 'Reprendre le téléchargement';
+	@override String get cancelledDownload => 'Téléchargement annulé';
+	@override String syncingFile({required Object file, required Object status}) => '${file} (synchronisation ${status})';
+	@override String downloadedFileClickToComplete({required Object file}) => '${file} téléchargé — cliquez pour terminer';
+	@override String get partialDownloadClickToComplete => 'Téléchargement partiel — cliquez pour terminer';
 	@override String get deleting => 'Suppression...';
+	@override String deletingWithProgress({required Object title, required Object current, required Object total}) => 'Suppression de ${title}... (${current} sur ${total})';
 	@override String get queuedTooltip => 'En attente';
 	@override String queuedFilesTooltip({required Object files}) => 'En attente : ${files}';
 	@override String get downloadingTooltip => 'Téléchargement...';
@@ -1302,9 +1339,11 @@ class _TranslationsCompanionRemoteFr extends TranslationsCompanionRemoteEn {
 	// Translations
 	@override String get title => 'Télécommande compagnon';
 	@override String connectedTo({required Object name}) => 'Connecté à ${name}';
+	@override String get unknownDevice => 'Appareil inconnu';
 	@override late final _TranslationsCompanionRemoteSessionFr session = _TranslationsCompanionRemoteSessionFr._(_root);
 	@override late final _TranslationsCompanionRemotePairingFr pairing = _TranslationsCompanionRemotePairingFr._(_root);
 	@override late final _TranslationsCompanionRemoteRemoteFr remote = _TranslationsCompanionRemoteRemoteFr._(_root);
+	@override late final _TranslationsCompanionRemoteErrorsFr errors = _TranslationsCompanionRemoteErrorsFr._(_root);
 }
 
 // Path: videoSettings
@@ -1326,6 +1365,49 @@ class _TranslationsVideoSettingsFr extends TranslationsVideoSettingsEn {
 	@override String get audioNormalization => 'Normaliser le volume';
 }
 
+// Path: performanceOverlay
+class _TranslationsPerformanceOverlayFr extends TranslationsPerformanceOverlayEn {
+	_TranslationsPerformanceOverlayFr._(TranslationsFr root) : this._root = root, super.internal(root);
+
+	final TranslationsFr _root; // ignore: unused_field
+
+	// Translations
+	@override String get color => 'Couleur';
+	@override String get performance => 'Performances';
+	@override String get buffer => 'Tampon';
+	@override String get app => 'App';
+	@override String get decoder => 'Décodeur';
+	@override String get rawDecoder => 'Décodeur brut';
+	@override String get tunneling => 'Tunneling';
+	@override String get aspect => 'Format';
+	@override String get rotation => 'Rotation';
+	@override String get dvSource => 'Source DV';
+	@override String get dvPath => 'Chemin DV';
+	@override String get p7Conversion => 'Conv. P7';
+	@override String get sampleRate => 'Fréquence';
+	@override String get pixelFormat => 'Fmt pixel';
+	@override String get hwFormat => 'Fmt HW';
+	@override String get matrix => 'Matrice';
+	@override String get primaries => 'Primaires';
+	@override String get transfer => 'Transfert';
+	@override String get renderFps => 'FPS rendu';
+	@override String get displayFps => 'FPS écran';
+	@override String get avSync => 'Synchro A/V';
+	@override String get dropped => 'Perdues';
+	@override String get dvRpus => 'DV RPU';
+	@override String get dvRpuAverage => 'Moy. DV RPU';
+	@override String get dvSampleAverage => 'Moy. échant. DV';
+	@override String get maxLuma => 'Luma max.';
+	@override String get minLuma => 'Luma min.';
+	@override String get maxCll => 'MaxCLL';
+	@override String get maxFall => 'MaxFALL';
+	@override String get cacheUsed => 'Cache utilisé';
+	@override String get speed => 'Vitesse';
+	@override String get player => 'Lecteur';
+	@override String get memory => 'Mémoire';
+	@override String get uiFps => 'FPS UI';
+}
+
 // Path: externalPlayer
 class _TranslationsExternalPlayerFr extends TranslationsExternalPlayerEn {
 	_TranslationsExternalPlayerFr._(TranslationsFr root) : this._root = root, super.internal(root);
@@ -1341,6 +1423,7 @@ class _TranslationsExternalPlayerFr extends TranslationsExternalPlayerEn {
 	@override String get systemDefault => 'Par défaut du système';
 	@override String get addCustomPlayer => 'Ajouter un lecteur personnalisé';
 	@override String get playerName => 'Nom du lecteur';
+	@override String get playerNameHint => 'Mon lecteur';
 	@override String get playerCommand => 'Commande';
 	@override String get playerPackage => 'Nom du paquet';
 	@override String get playerUrlScheme => 'Schéma URL';
@@ -1515,7 +1598,7 @@ class _TranslationsAddServerFr extends TranslationsAddServerEn {
 	// Translations
 	@override String get addJellyfinTitle => 'Ajouter un serveur Jellyfin';
 	@override String get jellyfinUrlIntro => 'Saisissez l\'URL du serveur, par ex. `https://jellyfin.example.com`.';
-	@override String get jellyfinUrlsIntro => 'Saisissez une ou plusieurs URL de serveur, séparées par des virgules ou des retours à la ligne. Plezy utilisera l\'URL joignable avec la latence la plus faible.';
+	@override String get jellyfinUrlsIntro => 'Saisissez une ou plusieurs URL de serveur, séparées par des virgules. Plezy utilisera l\'URL joignable avec la latence la plus faible.';
 	@override String get serverUrl => 'URL du serveur';
 	@override String get serverUrls => 'URL du serveur';
 	@override String get findServer => 'Rechercher un serveur';
@@ -1753,6 +1836,21 @@ class _TranslationsCompanionRemoteRemoteFr extends TranslationsCompanionRemoteRe
 	@override String get searchHint => 'Rechercher sur le bureau...';
 }
 
+// Path: companionRemote.errors
+class _TranslationsCompanionRemoteErrorsFr extends TranslationsCompanionRemoteErrorsEn {
+	_TranslationsCompanionRemoteErrorsFr._(TranslationsFr root) : this._root = root, super.internal(root);
+
+	final TranslationsFr _root; // ignore: unused_field
+
+	// Translations
+	@override String get noNetworkInterface => 'Aucune interface réseau trouvée';
+	@override String get authenticationFailed => 'Échec de l’authentification';
+	@override String get joinTimedOut => 'Délai dépassé lors de la connexion à la session';
+	@override String get failedToConnectAnyAddress => 'Impossible de se connecter à une adresse';
+	@override String connectionLostAfterAttempts({required Object attempts}) => 'Connexion perdue après ${attempts} tentatives';
+	@override String get connectionLost => 'Connexion perdue';
+}
+
 // Path: trackers.services
 class _TranslationsTrackersServicesFr extends TranslationsTrackersServicesEn {
 	_TranslationsTrackersServicesFr._(TranslationsFr root) : this._root = root, super.internal(root);
@@ -1869,6 +1967,9 @@ extension on TranslationsFr {
 			'common.settings' => 'Réglages',
 			'common.mute' => 'Muet',
 			'common.ok' => 'OK',
+			'common.off' => 'Désactivé',
+			'common.seasonNumber' => ({required Object number}) => 'Saison ${number}',
+			'common.chapterNumber' => ({required Object number}) => 'Chapitre ${number}',
 			'common.reconnect' => 'Reconnecter',
 			'common.exit' => 'Quitter',
 			'common.viewAll' => 'Tout afficher',
@@ -2068,6 +2169,10 @@ extension on TranslationsFr {
 			'settings.dvConversionNative' => 'Natif / désactivé',
 			'settings.dvConversionDv81' => 'P7 → P8.1',
 			'settings.dvConversionHevcStrip' => 'P7 → HEVC',
+			'settings.dvConversionAutoDescription' => 'Utiliser la détection des capacités de l’appareil et le comportement de repli normal',
+			'settings.dvConversionNativeDescription' => 'Forcer le DV7 natif et bloquer la nouvelle tentative de conversion DV',
+			'settings.dvConversionDv81Description' => 'Forcer la conversion RPU intégrée vers Dolby Vision profil 8.1',
+			'settings.dvConversionHevcStripDescription' => 'Supprimer les couches RPU/EL Dolby Vision et présenter du HEVC simple',
 			'settings.requireProfileSelectionOnOpen' => 'Demander le profil à l\'ouverture',
 			'settings.requireProfileSelectionOnOpenDescription' => 'Afficher la sélection de profil à chaque ouverture de l\'application',
 			'settings.forceTvMode' => 'Forcer le mode TV',
@@ -2080,6 +2185,8 @@ extension on TranslationsFr {
 			'settings.autoHidePerformanceOverlayDescription' => 'Faire apparaître/disparaître la superposition avec les contrôles de lecture',
 			'settings.showNavBarLabels' => 'Afficher les libellés de la barre de navigation',
 			'settings.showNavBarLabelsDescription' => 'Afficher les libellés sous les icônes de la barre de navigation',
+			'settings.startupSection' => 'Section de démarrage',
+			'settings.startupSectionDescription' => 'Choisissez la section que Plezy ouvre au démarrage',
 			'settings.liveTvDefaultFavorites' => 'Chaînes favorites par défaut',
 			'settings.liveTvDefaultFavoritesDescription' => 'Afficher uniquement les chaînes favorites à l\'ouverture de la TV en direct',
 			'settings.display' => 'Affichage',
@@ -2097,6 +2204,8 @@ extension on TranslationsFr {
 			'search.enterTitleActorOrKeyword' => 'Entrez un titre, un acteur ou un mot-clé',
 			'hotkeys.setShortcutFor' => ({required Object actionName}) => 'Définir un raccourci pour ${actionName}',
 			'hotkeys.clearShortcut' => 'Effacer le raccourci',
+			'hotkeys.noShortcutSet' => 'Aucun raccourci défini',
+			'hotkeys.currentShortcut' => 'Raccourci actuel :',
 			'hotkeys.actions.playPause' => 'Lecture/Pause',
 			'hotkeys.actions.volumeUp' => 'Augmenter le volume',
 			'hotkeys.actions.volumeDown' => 'Baisser le volume',
@@ -2153,6 +2262,7 @@ extension on TranslationsFr {
 			'mediaMenu.goToSeries' => 'Aller à la série',
 			'mediaMenu.goToSeason' => 'Aller à la saison',
 			'mediaMenu.shufflePlay' => 'Lecture aléatoire',
+			'mediaMenu.shuffleNotAvailableOffline' => 'La lecture aléatoire n’est pas disponible hors ligne',
 			'mediaMenu.fileInfo' => 'Informations sur le fichier',
 			'mediaMenu.deleteFromServer' => 'Supprimer du serveur',
 			'mediaMenu.confirmDelete' => 'Supprimer ce média et ses fichiers de votre serveur ?',
@@ -2261,6 +2371,10 @@ extension on TranslationsFr {
 			'videoControls.searchSubtitles' => 'Rechercher des sous-titres',
 			'videoControls.language' => 'Langue',
 			'videoControls.noSubtitlesFound' => 'Aucun sous-titre trouvé',
+			'videoControls.downloadedSubtitle' => 'Téléchargé',
+			'videoControls.noSubtitlesAvailable' => 'Aucun sous-titre disponible',
+			'videoControls.noAudioTracksAvailable' => 'Aucune piste audio disponible',
+			'videoControls.noTracksAvailable' => 'Aucune piste disponible',
 			'videoControls.subtitleDownloaded' => 'Sous-titre téléchargé',
 			'videoControls.subtitleDownloadFailed' => 'Échec du téléchargement du sous-titre',
 			'videoControls.searchLanguages' => 'Rechercher des langues...',
@@ -2295,8 +2409,10 @@ extension on TranslationsFr {
 			'messages.metadataRefreshFailed' => ({required Object error}) => 'Échec de l\'actualisation des métadonnées: ${error}',
 			'messages.logoutConfirm' => 'Êtes-vous sûr de vouloir vous déconnecter ?',
 			'messages.noSeasonsFound' => 'Aucune saison trouvée',
+			'messages.seasonsLoadFailed' => 'Impossible de charger les saisons',
 			'messages.noEpisodesFound' => 'Aucun épisode trouvé dans la première saison',
 			'messages.noEpisodesFoundGeneral' => 'Aucun épisode trouvé',
+			'messages.episodesLoadFailed' => 'Impossible de charger les épisodes',
 			'messages.noResultsFound' => 'Aucun résultat trouvé',
 			'messages.sleepTimerSet' => ({required Object label}) => 'Minuterie de mise en veille réglée sur ${label}',
 			'messages.noItemsAvailable' => 'Aucun élément disponible',
@@ -2315,6 +2431,8 @@ extension on TranslationsFr {
 			'subtitlingStyling.textColor' => 'Couleur du texte',
 			'subtitlingStyling.borderSize' => 'Taille de la bordure',
 			'subtitlingStyling.borderColor' => 'Couleur de la bordure',
+			_ => null,
+		} ?? switch (path) {
 			'subtitlingStyling.backgroundOpacity' => 'Opacité d\'arrière-plan',
 			'subtitlingStyling.backgroundColor' => 'Couleur d\'arrière-plan',
 			'subtitlingStyling.position' => 'Position',
@@ -2333,8 +2451,6 @@ extension on TranslationsFr {
 			'mpvConfig.presetSaved' => 'Préréglage enregistré',
 			'mpvConfig.presetLoaded' => 'Préréglage chargé',
 			'mpvConfig.presetDeleted' => 'Préréglage supprimé',
-			_ => null,
-		} ?? switch (path) {
 			'mpvConfig.confirmDeletePreset' => 'Êtes-vous sûr de vouloir supprimer ce préréglage ?',
 			'mpvConfig.configPlaceholder' => 'gpu-api=vulkan\nhwdec=auto\n# comment',
 			'dialog.confirmAction' => 'Confirmer l\'action',
@@ -2395,6 +2511,7 @@ extension on TranslationsFr {
 			'profiles.pinExplain' => 'PIN à 4 chiffres requis pour changer de profil.',
 			'profiles.continueButton' => 'Continuer',
 			'profiles.pinsDontMatch' => 'Les PIN ne correspondent pas',
+			'profiles.initializeServicesFailed' => 'Impossible d’initialiser les services de profil',
 			'connections.sectionTitle' => 'Connexions',
 			'connections.addConnection' => 'Ajouter une connexion',
 			'connections.addConnectionSubtitleNoProfile' => 'Connectez-vous avec Plex ou connectez un serveur Jellyfin',
@@ -2423,6 +2540,7 @@ extension on TranslationsFr {
 			'discover.movie' => 'Film',
 			'discover.tvShow' => 'Show TV',
 			'discover.minutesLeft' => ({required Object minutes}) => '${minutes} min restantes',
+			'discover.moreLikeThis' => 'Plus de contenus similaires',
 			'errors.searchFailed' => ({required Object error}) => 'Recherche échouée: ${error}',
 			'errors.connectionTimeout' => ({required Object context}) => 'Délai d\'attente de connexion dépassé pendant le chargement ${context}',
 			'errors.connectionFailed' => 'Impossible de se connecter au serveur multimédia',
@@ -2437,6 +2555,7 @@ extension on TranslationsFr {
 			'errors.failedToDeleteProfile' => ({required Object displayName}) => 'Impossible de supprimer ${displayName}',
 			'errors.failedToRate' => 'Impossible de mettre à jour la note',
 			'libraries.title' => 'Bibliothèques',
+			'libraries.fallbackTitle' => 'Bibliothèque',
 			'libraries.scanLibraryFiles' => 'Scanner les fichiers de la bibliothèque',
 			'libraries.scanLibrary' => 'Scanner la bibliothèque',
 			'libraries.analyze' => 'Analyser',
@@ -2537,6 +2656,12 @@ extension on TranslationsFr {
 			'liveTv.noChannels' => 'Aucune chaîne disponible',
 			'liveTv.noDvr' => 'Aucun DVR configuré sur les serveurs',
 			'liveTv.noPrograms' => 'Aucune donnée de programme disponible',
+			'liveTv.liveStreamFailed' => 'Échec du direct',
+			'liveTv.unknownProgram' => 'Programme inconnu',
+			'liveTv.unknownHub' => 'Inconnu',
+			'liveTv.unknownError' => 'Erreur inconnue',
+			'liveTv.channelNumber' => ({required Object number}) => 'Chaîne ${number}',
+			'liveTv.unknownChannel' => 'Chaîne inconnue',
 			'liveTv.live' => 'EN DIRECT',
 			'liveTv.reloadGuide' => 'Recharger le guide',
 			'liveTv.now' => 'Maintenant',
@@ -2707,12 +2832,21 @@ extension on TranslationsFr {
 			'downloads.deleteDownload' => 'Supprimer le téléchargement',
 			'downloads.retryDownload' => 'Réessayer le téléchargement',
 			'downloads.downloadQueued' => 'Téléchargement en attente',
+			'downloads.downloadResumed' => 'Téléchargement repris',
 			'downloads.serverErrorBitrate' => 'Erreur serveur : le fichier peut dépasser la limite de bitrate distant',
 			'downloads.episodesQueued' => ({required Object count}) => '${count} épisodes en attente de téléchargement',
 			'downloads.downloadDeleted' => 'Télécharger supprimé',
 			'downloads.deleteConfirm' => ({required Object title}) => 'Supprimer "${title}" de cet appareil ?',
-			'downloads.deletingWithProgress' => ({required Object title, required Object current, required Object total}) => 'Suppression de ${title}... (${current} sur ${total})',
+			'downloads.cancelledDownloadTitle' => 'Téléchargement annulé',
+			'downloads.cancelledDownloadMessage' => 'Ce téléchargement a été annulé. Que voulez-vous faire ?',
+			'downloads.allEpisodesAlreadyDownloaded' => 'Tous les épisodes sont déjà téléchargés',
+			'downloads.resumeDownload' => 'Reprendre le téléchargement',
+			'downloads.cancelledDownload' => 'Téléchargement annulé',
+			'downloads.syncingFile' => ({required Object file, required Object status}) => '${file} (synchronisation ${status})',
+			'downloads.downloadedFileClickToComplete' => ({required Object file}) => '${file} téléchargé — cliquez pour terminer',
+			'downloads.partialDownloadClickToComplete' => 'Téléchargement partiel — cliquez pour terminer',
 			'downloads.deleting' => 'Suppression...',
+			'downloads.deletingWithProgress' => ({required Object title, required Object current, required Object total}) => 'Suppression de ${title}... (${current} sur ${total})',
 			'downloads.queuedTooltip' => 'En attente',
 			'downloads.queuedFilesTooltip' => ({required Object files}) => 'En attente : ${files}',
 			'downloads.downloadingTooltip' => 'Téléchargement...',
@@ -2769,6 +2903,7 @@ extension on TranslationsFr {
 			'shaders.deleteShaderConfirm' => ({required Object name}) => 'Supprimer "${name}" ?',
 			'companionRemote.title' => 'Télécommande compagnon',
 			'companionRemote.connectedTo' => ({required Object name}) => 'Connecté à ${name}',
+			'companionRemote.unknownDevice' => 'Appareil inconnu',
 			'companionRemote.session.startingServer' => 'Démarrage du serveur distant...',
 			'companionRemote.session.failedToCreate' => 'Échec du démarrage du serveur distant :',
 			'companionRemote.session.hostAddress' => 'Adresse de l\'hôte',
@@ -2810,6 +2945,8 @@ extension on TranslationsFr {
 			'companionRemote.remote.tabSearch' => 'Rechercher',
 			'companionRemote.remote.tabDownloads' => 'Téléchargements',
 			'companionRemote.remote.tabSettings' => 'Paramètres',
+			_ => null,
+		} ?? switch (path) {
 			'companionRemote.remote.previous' => 'Précédent',
 			'companionRemote.remote.playPause' => 'Lecture/Pause',
 			'companionRemote.remote.next' => 'Suivant',
@@ -2823,6 +2960,12 @@ extension on TranslationsFr {
 			'companionRemote.remote.subtitles' => 'Sous-titres',
 			'companionRemote.remote.audio' => 'Audio',
 			'companionRemote.remote.searchHint' => 'Rechercher sur le bureau...',
+			'companionRemote.errors.noNetworkInterface' => 'Aucune interface réseau trouvée',
+			'companionRemote.errors.authenticationFailed' => 'Échec de l’authentification',
+			'companionRemote.errors.joinTimedOut' => 'Délai dépassé lors de la connexion à la session',
+			'companionRemote.errors.failedToConnectAnyAddress' => 'Impossible de se connecter à une adresse',
+			'companionRemote.errors.connectionLostAfterAttempts' => ({required Object attempts}) => 'Connexion perdue après ${attempts} tentatives',
+			'companionRemote.errors.connectionLost' => 'Connexion perdue',
 			'videoSettings.playbackSpeed' => 'Vitesse de lecture',
 			'videoSettings.zoom' => 'Zoom',
 			'videoSettings.sleepTimer' => 'Minuterie de mise en veille',
@@ -2833,6 +2976,40 @@ extension on TranslationsFr {
 			'videoSettings.performanceOverlay' => 'Superposition de performance',
 			'videoSettings.audioPassthrough' => 'Audio Pass-Through',
 			'videoSettings.audioNormalization' => 'Normaliser le volume',
+			'performanceOverlay.color' => 'Couleur',
+			'performanceOverlay.performance' => 'Performances',
+			'performanceOverlay.buffer' => 'Tampon',
+			'performanceOverlay.app' => 'App',
+			'performanceOverlay.decoder' => 'Décodeur',
+			'performanceOverlay.rawDecoder' => 'Décodeur brut',
+			'performanceOverlay.tunneling' => 'Tunneling',
+			'performanceOverlay.aspect' => 'Format',
+			'performanceOverlay.rotation' => 'Rotation',
+			'performanceOverlay.dvSource' => 'Source DV',
+			'performanceOverlay.dvPath' => 'Chemin DV',
+			'performanceOverlay.p7Conversion' => 'Conv. P7',
+			'performanceOverlay.sampleRate' => 'Fréquence',
+			'performanceOverlay.pixelFormat' => 'Fmt pixel',
+			'performanceOverlay.hwFormat' => 'Fmt HW',
+			'performanceOverlay.matrix' => 'Matrice',
+			'performanceOverlay.primaries' => 'Primaires',
+			'performanceOverlay.transfer' => 'Transfert',
+			'performanceOverlay.renderFps' => 'FPS rendu',
+			'performanceOverlay.displayFps' => 'FPS écran',
+			'performanceOverlay.avSync' => 'Synchro A/V',
+			'performanceOverlay.dropped' => 'Perdues',
+			'performanceOverlay.dvRpus' => 'DV RPU',
+			'performanceOverlay.dvRpuAverage' => 'Moy. DV RPU',
+			'performanceOverlay.dvSampleAverage' => 'Moy. échant. DV',
+			'performanceOverlay.maxLuma' => 'Luma max.',
+			'performanceOverlay.minLuma' => 'Luma min.',
+			'performanceOverlay.maxCll' => 'MaxCLL',
+			'performanceOverlay.maxFall' => 'MaxFALL',
+			'performanceOverlay.cacheUsed' => 'Cache utilisé',
+			'performanceOverlay.speed' => 'Vitesse',
+			'performanceOverlay.player' => 'Lecteur',
+			'performanceOverlay.memory' => 'Mémoire',
+			'performanceOverlay.uiFps' => 'FPS UI',
 			'externalPlayer.title' => 'Lecteur externe',
 			'externalPlayer.useExternalPlayer' => 'Utiliser un lecteur externe',
 			'externalPlayer.useExternalPlayerDescription' => 'Ouvrir les vidéos dans une autre app',
@@ -2841,14 +3018,13 @@ extension on TranslationsFr {
 			'externalPlayer.systemDefault' => 'Par défaut du système',
 			'externalPlayer.addCustomPlayer' => 'Ajouter un lecteur personnalisé',
 			'externalPlayer.playerName' => 'Nom du lecteur',
+			'externalPlayer.playerNameHint' => 'Mon lecteur',
 			'externalPlayer.playerCommand' => 'Commande',
 			'externalPlayer.playerPackage' => 'Nom du paquet',
 			'externalPlayer.playerUrlScheme' => 'Schéma URL',
 			'externalPlayer.off' => 'Désactivé',
 			'externalPlayer.launchFailed' => 'Impossible d\'ouvrir le lecteur externe',
 			'externalPlayer.appNotInstalled' => ({required Object name}) => '${name} n\'est pas installé',
-			_ => null,
-		} ?? switch (path) {
 			'externalPlayer.playInExternalPlayer' => 'Lire dans un lecteur externe',
 			'metadataEdit.editMetadata' => 'Modifier...',
 			'metadataEdit.screenTitle' => 'Modifier les métadonnées',
@@ -2983,7 +3159,7 @@ extension on TranslationsFr {
 			'trackers.libraryFilter.noLibraries' => 'Aucune bibliothèque disponible',
 			'addServer.addJellyfinTitle' => 'Ajouter un serveur Jellyfin',
 			'addServer.jellyfinUrlIntro' => 'Saisissez l\'URL du serveur, par ex. `https://jellyfin.example.com`.',
-			'addServer.jellyfinUrlsIntro' => 'Saisissez une ou plusieurs URL de serveur, séparées par des virgules ou des retours à la ligne. Plezy utilisera l\'URL joignable avec la latence la plus faible.',
+			'addServer.jellyfinUrlsIntro' => 'Saisissez une ou plusieurs URL de serveur, séparées par des virgules. Plezy utilisera l\'URL joignable avec la latence la plus faible.',
 			'addServer.serverUrl' => 'URL du serveur',
 			'addServer.serverUrls' => 'URL du serveur',
 			'addServer.findServer' => 'Rechercher un serveur',

@@ -1,5 +1,6 @@
 import 'package:json_annotation/json_annotation.dart';
 
+import '../i18n/strings.g.dart';
 import '../utils/codec_utils.dart';
 import '../utils/formatters.dart';
 import '../utils/json_utils.dart';
@@ -88,7 +89,7 @@ class MediaVersion {
       parts.add(container!.toUpperCase());
     }
 
-    String label = parts.isNotEmpty ? parts.join(' ') : 'Unknown';
+    String label = parts.isNotEmpty ? parts.join(' ') : t.common.unknown;
 
     if (bitrate != null && bitrate! > 0) {
       label += ' (${ByteFormatter.formatBitrate(bitrate!)})';
@@ -121,7 +122,7 @@ class MediaVersion {
     for (final sig in acceptedSignatures) {
       final parts = sig.split(':');
       if (parts.length != 3) continue;
-      final targetRes = parts[0];
+      final targetRes = parts.first;
       final targetCodec = parts[1];
 
       for (int i = 0; i < versions.length; i++) {

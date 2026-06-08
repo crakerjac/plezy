@@ -17,6 +17,7 @@ import '../media/media_server_client.dart';
 import '../services/download_manager_service.dart';
 import '../services/manifest_import_service.dart';
 import '../utils/app_logger.dart';
+import '../media/ids.dart';
 import '../utils/global_key_utils.dart';
 
 /// Summary returned by [PlexSyncerImportService.doImport].
@@ -93,7 +94,7 @@ class PlexSyncerImportService {
       // Yield to the UI thread every 10 items to prevent jank on slow devices.
       if (++_loopCount % 10 == 0) await Future.delayed(Duration.zero);
 
-      final globalKey = buildGlobalKey(serverId, item.ratingKey);
+      final globalKey = buildGlobalKey(ServerId(serverId), item.ratingKey);
       if (existingKeys.contains(globalKey)) {
         skipped++;
         continue;

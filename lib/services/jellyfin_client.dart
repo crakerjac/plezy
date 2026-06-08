@@ -20,6 +20,7 @@ import '../media/media_item.dart';
 import '../media/media_kind.dart';
 import '../media/media_library.dart';
 import '../media/media_playlist.dart';
+import '../media/ids.dart';
 import '../media/media_server_client.dart';
 import '../media/playback_report_metadata.dart';
 import '../media/server_capabilities.dart';
@@ -69,6 +70,7 @@ part 'jellyfin_client/parts/collections.dart';
 part 'jellyfin_client/parts/file_info.dart';
 part 'jellyfin_client/parts/live_tv.dart';
 part 'jellyfin_client/parts/images_downloads.dart';
+part 'jellyfin_client/parts/metadata_edit.dart';
 
 /// [MediaServerClient] over a Jellyfin server.
 ///
@@ -86,7 +88,8 @@ class JellyfinClient
         _JellyfinCollectionMethods,
         _JellyfinFileInfoMethods,
         _JellyfinLiveTvMethods,
-        _JellyfinImageDownloadMethods
+        _JellyfinImageDownloadMethods,
+        _JellyfinMetadataEditMethods
     implements MediaServerClient, ScopedMediaServerClient, GracefullyCloseable {
   JellyfinClient._({required this._connection, required this._http, FavoriteChannelsRepository? favoritesRepository})
     : _favoritesRepository = favoritesRepository ?? const SharedPreferencesFavoriteChannelsRepository();
@@ -220,7 +223,7 @@ class JellyfinClient
       items.map(_mapItem).whereType<MediaItem>().toList();
 
   @override
-  String get serverId => connection.serverMachineId;
+  ServerId get serverId => ServerId(connection.serverMachineId);
 
   @override
   String get scopedServerId => connection.id;
