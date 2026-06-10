@@ -8,7 +8,7 @@ import '../focus/focusable_wrapper.dart';
 import '../mixins/context_menu_tap_mixin.dart';
 import '../models/download_models.dart';
 import '../providers/download_provider.dart';
-import '../providers/watch_state_overlay_provider.dart';
+import '../providers/watch_state_store.dart';
 import 'package:provider/provider.dart';
 
 import '../services/settings_service.dart';
@@ -58,16 +58,7 @@ class EpisodeCard extends StatefulWidget {
 }
 
 class _EpisodeCardState extends State<EpisodeCard> with ContextMenuTapMixin<EpisodeCard> {
-  MediaItem _effectiveEpisode(BuildContext context) {
-    try {
-      final patch = context.select<WatchStateOverlayProvider, WatchStateOverlayPatch?>(
-        (provider) => provider.patchForGlobalKey(widget.episode.globalKey),
-      );
-      return WatchStateOverlayProvider.applyPatch(widget.episode, patch);
-    } on ProviderNotFoundException {
-      return widget.episode;
-    }
-  }
+  MediaItem _effectiveEpisode(BuildContext context) => context.withFreshWatchState(widget.episode);
 
   Widget _buildEpisodeMetaRow(BuildContext context, MediaItem episode, List<String> qualityLabels) {
     final mutedStyle = Theme.of(context).textTheme.bodySmall?.copyWith(color: tokens(context).textMuted, fontSize: 12);

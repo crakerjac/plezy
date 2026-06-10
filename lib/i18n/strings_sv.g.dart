@@ -162,6 +162,7 @@ class _TranslationsCommonSv extends TranslationsCommonEn {
 	@override String get ok => 'OK';
 	@override String get off => 'Av';
 	@override String seasonNumber({required Object number}) => 'Säsong ${number}';
+	@override String episodeNumberTitle({required Object number, required Object title}) => 'Avsnitt ${number} - ${title}';
 	@override String chapterNumber({required Object number}) => 'Kapitel ${number}';
 	@override String get reconnect => 'Återanslut';
 	@override String get exit => 'Avsluta';
@@ -244,6 +245,9 @@ class _TranslationsSettingsSv extends TranslationsSettingsEn {
 	@override String get gridView => 'Rutnät';
 	@override String get listView => 'Lista';
 	@override String get showHeroSection => 'Visa hjältesektion';
+	@override String get continueWatchingAction => 'Åtgärd för Fortsätt titta';
+	@override String get continueWatchingPlay => 'Spela';
+	@override String get continueWatchingDetails => 'Öppna detaljer';
 	@override String get useGlobalHubs => 'Använd startlayout';
 	@override String get useGlobalHubsDescription => 'Visa enhetliga startsideshubbar. Annars används biblioteksrekommendationer.';
 	@override String get showServerNameOnHubs => 'Visa servernamn på hubbar';
@@ -491,8 +495,8 @@ class _TranslationsMediaMenuSv extends TranslationsMediaMenuEn {
 	@override String get markAsWatched => 'Markera som sedd';
 	@override String get markAsUnwatched => 'Markera som osedd';
 	@override String get removeFromContinueWatching => 'Ta bort från Fortsätt titta';
+	@override String get viewDetails => 'Visa detaljer';
 	@override String get goToSeries => 'Gå till serie';
-	@override String get goToSeason => 'Gå till säsong';
 	@override String get shufflePlay => 'Blanda uppspelning';
 	@override String get shuffleNotAvailableOffline => 'Blandad uppspelning är inte tillgänglig offline';
 	@override String get fileInfo => 'Filinformation';
@@ -672,7 +676,6 @@ class _TranslationsMessagesSv extends TranslationsMessagesEn {
 	@override String get fileInfoNotAvailable => 'Filinformation inte tillgänglig';
 	@override String errorLoadingFileInfo({required Object error}) => 'Fel vid laddning av filinformation: ${error}';
 	@override String get errorLoadingSeries => 'Fel vid laddning av serie';
-	@override String get errorLoadingSeason => 'Fel vid laddning av säsong';
 	@override String get musicNotSupported => 'Musikuppspelning stöds inte ännu';
 	@override String get noDescriptionAvailable => 'Ingen beskrivning tillgänglig';
 	@override String get noProfilesAvailable => 'Inga profiler tillgängliga';
@@ -1740,6 +1743,7 @@ class _TranslationsLibrariesSortLabelsSv extends TranslationsLibrariesSortLabels
 	@override String get rating => 'Betyg';
 	@override String get communityRating => 'Användarbetyg';
 	@override String get criticRating => 'Kritikerbetyg';
+	@override String get userRating => 'Användarbetyg';
 	@override String get lastPlayed => 'Senast spelad';
 	@override String get datePlayed => 'Speldatum';
 	@override String get playCount => 'Antal spelningar';
@@ -1969,6 +1973,7 @@ extension on TranslationsSv {
 			'common.ok' => 'OK',
 			'common.off' => 'Av',
 			'common.seasonNumber' => ({required Object number}) => 'Säsong ${number}',
+			'common.episodeNumberTitle' => ({required Object number, required Object title}) => 'Avsnitt ${number} - ${title}',
 			'common.chapterNumber' => ({required Object number}) => 'Kapitel ${number}',
 			'common.reconnect' => 'Återanslut',
 			'common.exit' => 'Avsluta',
@@ -2024,6 +2029,9 @@ extension on TranslationsSv {
 			'settings.gridView' => 'Rutnät',
 			'settings.listView' => 'Lista',
 			'settings.showHeroSection' => 'Visa hjältesektion',
+			'settings.continueWatchingAction' => 'Åtgärd för Fortsätt titta',
+			'settings.continueWatchingPlay' => 'Spela',
+			'settings.continueWatchingDetails' => 'Öppna detaljer',
 			'settings.useGlobalHubs' => 'Använd startlayout',
 			'settings.useGlobalHubsDescription' => 'Visa enhetliga startsideshubbar. Annars används biblioteksrekommendationer.',
 			'settings.showServerNameOnHubs' => 'Visa servernamn på hubbar',
@@ -2259,8 +2267,8 @@ extension on TranslationsSv {
 			'mediaMenu.markAsWatched' => 'Markera som sedd',
 			'mediaMenu.markAsUnwatched' => 'Markera som osedd',
 			'mediaMenu.removeFromContinueWatching' => 'Ta bort från Fortsätt titta',
+			'mediaMenu.viewDetails' => 'Visa detaljer',
 			'mediaMenu.goToSeries' => 'Gå till serie',
-			'mediaMenu.goToSeason' => 'Gå till säsong',
 			'mediaMenu.shufflePlay' => 'Blanda uppspelning',
 			'mediaMenu.shuffleNotAvailableOffline' => 'Blandad uppspelning är inte tillgänglig offline',
 			'mediaMenu.fileInfo' => 'Filinformation',
@@ -2392,7 +2400,6 @@ extension on TranslationsSv {
 			'messages.fileInfoNotAvailable' => 'Filinformation inte tillgänglig',
 			'messages.errorLoadingFileInfo' => ({required Object error}) => 'Fel vid laddning av filinformation: ${error}',
 			'messages.errorLoadingSeries' => 'Fel vid laddning av serie',
-			'messages.errorLoadingSeason' => 'Fel vid laddning av säsong',
 			'messages.musicNotSupported' => 'Musikuppspelning stöds inte ännu',
 			'messages.noDescriptionAvailable' => 'Ingen beskrivning tillgänglig',
 			'messages.noProfilesAvailable' => 'Inga profiler tillgängliga',
@@ -2428,11 +2435,11 @@ extension on TranslationsSv {
 			'subtitlingStyling.border' => 'Kantlinje',
 			'subtitlingStyling.background' => 'Bakgrund',
 			'subtitlingStyling.fontSize' => 'Teckenstorlek',
+			_ => null,
+		} ?? switch (path) {
 			'subtitlingStyling.textColor' => 'Textfärg',
 			'subtitlingStyling.borderSize' => 'Kantstorlek',
 			'subtitlingStyling.borderColor' => 'Kantfärg',
-			_ => null,
-		} ?? switch (path) {
 			'subtitlingStyling.backgroundOpacity' => 'Bakgrundsopacitet',
 			'subtitlingStyling.backgroundColor' => 'Bakgrundsfärg',
 			'subtitlingStyling.position' => 'Position',
@@ -2615,6 +2622,7 @@ extension on TranslationsSv {
 			'libraries.sortLabels.rating' => 'Betyg',
 			'libraries.sortLabels.communityRating' => 'Användarbetyg',
 			'libraries.sortLabels.criticRating' => 'Kritikerbetyg',
+			'libraries.sortLabels.userRating' => 'Användarbetyg',
 			'libraries.sortLabels.lastPlayed' => 'Senast spelad',
 			'libraries.sortLabels.datePlayed' => 'Speldatum',
 			'libraries.sortLabels.playCount' => 'Antal spelningar',
@@ -2941,12 +2949,12 @@ extension on TranslationsSv {
 			'companionRemote.remote.menu' => 'Meny',
 			'companionRemote.remote.tabNavigation' => 'Fliknavigering',
 			'companionRemote.remote.tabDiscover' => 'Upptäck',
+			_ => null,
+		} ?? switch (path) {
 			'companionRemote.remote.tabLibraries' => 'Bibliotek',
 			'companionRemote.remote.tabSearch' => 'Sök',
 			'companionRemote.remote.tabDownloads' => 'Nedladdningar',
 			'companionRemote.remote.tabSettings' => 'Inställningar',
-			_ => null,
-		} ?? switch (path) {
 			'companionRemote.remote.previous' => 'Föregående',
 			'companionRemote.remote.playPause' => 'Spela/Pausa',
 			'companionRemote.remote.next' => 'Nästa',
