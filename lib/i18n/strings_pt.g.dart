@@ -162,6 +162,7 @@ class _TranslationsCommonPt extends TranslationsCommonEn {
 	@override String get ok => 'OK';
 	@override String get off => 'Desativado';
 	@override String seasonNumber({required Object number}) => 'Temporada ${number}';
+	@override String episodeNumberTitle({required Object number, required Object title}) => 'Episódio ${number} - ${title}';
 	@override String chapterNumber({required Object number}) => 'Capítulo ${number}';
 	@override String get reconnect => 'Reconectar';
 	@override String get exit => 'Sair';
@@ -244,6 +245,9 @@ class _TranslationsSettingsPt extends TranslationsSettingsEn {
 	@override String get gridView => 'Grade';
 	@override String get listView => 'Lista';
 	@override String get showHeroSection => 'Mostrar Seção de Destaque';
+	@override String get continueWatchingAction => 'Ação de Continuar Assistindo';
+	@override String get continueWatchingPlay => 'Reproduzir';
+	@override String get continueWatchingDetails => 'Abrir detalhes';
 	@override String get useGlobalHubs => 'Usar layout inicial';
 	@override String get useGlobalHubsDescription => 'Mostrar hubs iniciais unificados. Caso contrário, usar recomendações da biblioteca.';
 	@override String get showServerNameOnHubs => 'Mostrar Nome do Servidor nos Hubs';
@@ -491,8 +495,8 @@ class _TranslationsMediaMenuPt extends TranslationsMediaMenuEn {
 	@override String get markAsWatched => 'Marcar como Assistido';
 	@override String get markAsUnwatched => 'Marcar como Não Assistido';
 	@override String get removeFromContinueWatching => 'Remover de Continuar Assistindo';
+	@override String get viewDetails => 'Ver detalhes';
 	@override String get goToSeries => 'Ir para a série';
-	@override String get goToSeason => 'Ir para a temporada';
 	@override String get shufflePlay => 'Reprodução Aleatória';
 	@override String get shuffleNotAvailableOffline => 'Reprodução aleatória indisponível offline';
 	@override String get fileInfo => 'Info do Arquivo';
@@ -672,7 +676,6 @@ class _TranslationsMessagesPt extends TranslationsMessagesEn {
 	@override String get fileInfoNotAvailable => 'Informações do arquivo não disponíveis';
 	@override String errorLoadingFileInfo({required Object error}) => 'Erro ao carregar info do arquivo: ${error}';
 	@override String get errorLoadingSeries => 'Erro ao carregar série';
-	@override String get errorLoadingSeason => 'Erro ao carregar temporada';
 	@override String get musicNotSupported => 'Reprodução de música ainda não é suportada';
 	@override String get noDescriptionAvailable => 'Nenhuma descrição disponível';
 	@override String get noProfilesAvailable => 'Nenhum perfil disponível';
@@ -1740,6 +1743,7 @@ class _TranslationsLibrariesSortLabelsPt extends TranslationsLibrariesSortLabels
 	@override String get rating => 'Avaliação';
 	@override String get communityRating => 'Avaliação da comunidade';
 	@override String get criticRating => 'Avaliação da crítica';
+	@override String get userRating => 'Avaliação do usuário';
 	@override String get lastPlayed => 'Última reprodução';
 	@override String get datePlayed => 'Data de reprodução';
 	@override String get playCount => 'Reproduções';
@@ -1969,6 +1973,7 @@ extension on TranslationsPt {
 			'common.ok' => 'OK',
 			'common.off' => 'Desativado',
 			'common.seasonNumber' => ({required Object number}) => 'Temporada ${number}',
+			'common.episodeNumberTitle' => ({required Object number, required Object title}) => 'Episódio ${number} - ${title}',
 			'common.chapterNumber' => ({required Object number}) => 'Capítulo ${number}',
 			'common.reconnect' => 'Reconectar',
 			'common.exit' => 'Sair',
@@ -2024,6 +2029,9 @@ extension on TranslationsPt {
 			'settings.gridView' => 'Grade',
 			'settings.listView' => 'Lista',
 			'settings.showHeroSection' => 'Mostrar Seção de Destaque',
+			'settings.continueWatchingAction' => 'Ação de Continuar Assistindo',
+			'settings.continueWatchingPlay' => 'Reproduzir',
+			'settings.continueWatchingDetails' => 'Abrir detalhes',
 			'settings.useGlobalHubs' => 'Usar layout inicial',
 			'settings.useGlobalHubsDescription' => 'Mostrar hubs iniciais unificados. Caso contrário, usar recomendações da biblioteca.',
 			'settings.showServerNameOnHubs' => 'Mostrar Nome do Servidor nos Hubs',
@@ -2259,8 +2267,8 @@ extension on TranslationsPt {
 			'mediaMenu.markAsWatched' => 'Marcar como Assistido',
 			'mediaMenu.markAsUnwatched' => 'Marcar como Não Assistido',
 			'mediaMenu.removeFromContinueWatching' => 'Remover de Continuar Assistindo',
+			'mediaMenu.viewDetails' => 'Ver detalhes',
 			'mediaMenu.goToSeries' => 'Ir para a série',
-			'mediaMenu.goToSeason' => 'Ir para a temporada',
 			'mediaMenu.shufflePlay' => 'Reprodução Aleatória',
 			'mediaMenu.shuffleNotAvailableOffline' => 'Reprodução aleatória indisponível offline',
 			'mediaMenu.fileInfo' => 'Info do Arquivo',
@@ -2392,7 +2400,6 @@ extension on TranslationsPt {
 			'messages.fileInfoNotAvailable' => 'Informações do arquivo não disponíveis',
 			'messages.errorLoadingFileInfo' => ({required Object error}) => 'Erro ao carregar info do arquivo: ${error}',
 			'messages.errorLoadingSeries' => 'Erro ao carregar série',
-			'messages.errorLoadingSeason' => 'Erro ao carregar temporada',
 			'messages.musicNotSupported' => 'Reprodução de música ainda não é suportada',
 			'messages.noDescriptionAvailable' => 'Nenhuma descrição disponível',
 			'messages.noProfilesAvailable' => 'Nenhum perfil disponível',
@@ -2428,11 +2435,11 @@ extension on TranslationsPt {
 			'subtitlingStyling.border' => 'Borda',
 			'subtitlingStyling.background' => 'Fundo',
 			'subtitlingStyling.fontSize' => 'Tamanho da Fonte',
+			_ => null,
+		} ?? switch (path) {
 			'subtitlingStyling.textColor' => 'Cor do Texto',
 			'subtitlingStyling.borderSize' => 'Tamanho da Borda',
 			'subtitlingStyling.borderColor' => 'Cor da Borda',
-			_ => null,
-		} ?? switch (path) {
 			'subtitlingStyling.backgroundOpacity' => 'Opacidade do Fundo',
 			'subtitlingStyling.backgroundColor' => 'Cor de Fundo',
 			'subtitlingStyling.position' => 'Posição',
@@ -2615,6 +2622,7 @@ extension on TranslationsPt {
 			'libraries.sortLabels.rating' => 'Avaliação',
 			'libraries.sortLabels.communityRating' => 'Avaliação da comunidade',
 			'libraries.sortLabels.criticRating' => 'Avaliação da crítica',
+			'libraries.sortLabels.userRating' => 'Avaliação do usuário',
 			'libraries.sortLabels.lastPlayed' => 'Última reprodução',
 			'libraries.sortLabels.datePlayed' => 'Data de reprodução',
 			'libraries.sortLabels.playCount' => 'Reproduções',
@@ -2941,12 +2949,12 @@ extension on TranslationsPt {
 			'companionRemote.remote.menu' => 'Menu',
 			'companionRemote.remote.tabNavigation' => 'Navegação',
 			'companionRemote.remote.tabDiscover' => 'Descobrir',
+			_ => null,
+		} ?? switch (path) {
 			'companionRemote.remote.tabLibraries' => 'Bibliotecas',
 			'companionRemote.remote.tabSearch' => 'Buscar',
 			'companionRemote.remote.tabDownloads' => 'Downloads',
 			'companionRemote.remote.tabSettings' => 'Configurações',
-			_ => null,
-		} ?? switch (path) {
 			'companionRemote.remote.previous' => 'Anterior',
 			'companionRemote.remote.playPause' => 'Reproduzir/Pausar',
 			'companionRemote.remote.next' => 'Próximo',

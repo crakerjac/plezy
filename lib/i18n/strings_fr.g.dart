@@ -162,6 +162,7 @@ class _TranslationsCommonFr extends TranslationsCommonEn {
 	@override String get ok => 'OK';
 	@override String get off => 'Désactivé';
 	@override String seasonNumber({required Object number}) => 'Saison ${number}';
+	@override String episodeNumberTitle({required Object number, required Object title}) => 'Épisode ${number} - ${title}';
 	@override String chapterNumber({required Object number}) => 'Chapitre ${number}';
 	@override String get reconnect => 'Reconnecter';
 	@override String get exit => 'Quitter';
@@ -244,6 +245,9 @@ class _TranslationsSettingsFr extends TranslationsSettingsEn {
 	@override String get gridView => 'Grille';
 	@override String get listView => 'Liste';
 	@override String get showHeroSection => 'Afficher la section Hero';
+	@override String get continueWatchingAction => 'Action Continuer à regarder';
+	@override String get continueWatchingPlay => 'Lire';
+	@override String get continueWatchingDetails => 'Ouvrir les détails';
 	@override String get useGlobalHubs => 'Utiliser la mise en page d\'accueil';
 	@override String get useGlobalHubsDescription => 'Afficher des hubs d\'accueil unifiés. Sinon, utiliser les recommandations de bibliothèque.';
 	@override String get showServerNameOnHubs => 'Afficher le nom du serveur sur les hubs';
@@ -491,8 +495,8 @@ class _TranslationsMediaMenuFr extends TranslationsMediaMenuEn {
 	@override String get markAsWatched => 'Marquer comme vu';
 	@override String get markAsUnwatched => 'Marquer comme non visionné';
 	@override String get removeFromContinueWatching => 'Supprimer de la liste "Continuer à regarder"';
+	@override String get viewDetails => 'Voir les détails';
 	@override String get goToSeries => 'Aller à la série';
-	@override String get goToSeason => 'Aller à la saison';
 	@override String get shufflePlay => 'Lecture aléatoire';
 	@override String get shuffleNotAvailableOffline => 'La lecture aléatoire n’est pas disponible hors ligne';
 	@override String get fileInfo => 'Informations sur le fichier';
@@ -672,7 +676,6 @@ class _TranslationsMessagesFr extends TranslationsMessagesEn {
 	@override String get fileInfoNotAvailable => 'Informations sur le fichier non disponibles';
 	@override String errorLoadingFileInfo({required Object error}) => 'Erreur lors du chargement des informations sur le fichier: ${error}';
 	@override String get errorLoadingSeries => 'Erreur lors du chargement de la série';
-	@override String get errorLoadingSeason => 'Erreur lors du chargement de la saison';
 	@override String get musicNotSupported => 'La lecture de musique n\'est pas encore prise en charge';
 	@override String get noDescriptionAvailable => 'Aucune description disponible';
 	@override String get noProfilesAvailable => 'Aucun profil disponible';
@@ -1740,6 +1743,7 @@ class _TranslationsLibrariesSortLabelsFr extends TranslationsLibrariesSortLabels
 	@override String get rating => 'Note';
 	@override String get communityRating => 'Note communautaire';
 	@override String get criticRating => 'Note critique';
+	@override String get userRating => 'Note utilisateur';
 	@override String get lastPlayed => 'Dernière lecture';
 	@override String get datePlayed => 'Date de lecture';
 	@override String get playCount => 'Lectures';
@@ -1969,6 +1973,7 @@ extension on TranslationsFr {
 			'common.ok' => 'OK',
 			'common.off' => 'Désactivé',
 			'common.seasonNumber' => ({required Object number}) => 'Saison ${number}',
+			'common.episodeNumberTitle' => ({required Object number, required Object title}) => 'Épisode ${number} - ${title}',
 			'common.chapterNumber' => ({required Object number}) => 'Chapitre ${number}',
 			'common.reconnect' => 'Reconnecter',
 			'common.exit' => 'Quitter',
@@ -2024,6 +2029,9 @@ extension on TranslationsFr {
 			'settings.gridView' => 'Grille',
 			'settings.listView' => 'Liste',
 			'settings.showHeroSection' => 'Afficher la section Hero',
+			'settings.continueWatchingAction' => 'Action Continuer à regarder',
+			'settings.continueWatchingPlay' => 'Lire',
+			'settings.continueWatchingDetails' => 'Ouvrir les détails',
 			'settings.useGlobalHubs' => 'Utiliser la mise en page d\'accueil',
 			'settings.useGlobalHubsDescription' => 'Afficher des hubs d\'accueil unifiés. Sinon, utiliser les recommandations de bibliothèque.',
 			'settings.showServerNameOnHubs' => 'Afficher le nom du serveur sur les hubs',
@@ -2259,8 +2267,8 @@ extension on TranslationsFr {
 			'mediaMenu.markAsWatched' => 'Marquer comme vu',
 			'mediaMenu.markAsUnwatched' => 'Marquer comme non visionné',
 			'mediaMenu.removeFromContinueWatching' => 'Supprimer de la liste "Continuer à regarder"',
+			'mediaMenu.viewDetails' => 'Voir les détails',
 			'mediaMenu.goToSeries' => 'Aller à la série',
-			'mediaMenu.goToSeason' => 'Aller à la saison',
 			'mediaMenu.shufflePlay' => 'Lecture aléatoire',
 			'mediaMenu.shuffleNotAvailableOffline' => 'La lecture aléatoire n’est pas disponible hors ligne',
 			'mediaMenu.fileInfo' => 'Informations sur le fichier',
@@ -2392,7 +2400,6 @@ extension on TranslationsFr {
 			'messages.fileInfoNotAvailable' => 'Informations sur le fichier non disponibles',
 			'messages.errorLoadingFileInfo' => ({required Object error}) => 'Erreur lors du chargement des informations sur le fichier: ${error}',
 			'messages.errorLoadingSeries' => 'Erreur lors du chargement de la série',
-			'messages.errorLoadingSeason' => 'Erreur lors du chargement de la saison',
 			'messages.musicNotSupported' => 'La lecture de musique n\'est pas encore prise en charge',
 			'messages.noDescriptionAvailable' => 'Aucune description disponible',
 			'messages.noProfilesAvailable' => 'Aucun profil disponible',
@@ -2428,11 +2435,11 @@ extension on TranslationsFr {
 			'subtitlingStyling.border' => 'Bordure',
 			'subtitlingStyling.background' => 'Arrière-plan',
 			'subtitlingStyling.fontSize' => 'Taille de la police',
+			_ => null,
+		} ?? switch (path) {
 			'subtitlingStyling.textColor' => 'Couleur du texte',
 			'subtitlingStyling.borderSize' => 'Taille de la bordure',
 			'subtitlingStyling.borderColor' => 'Couleur de la bordure',
-			_ => null,
-		} ?? switch (path) {
 			'subtitlingStyling.backgroundOpacity' => 'Opacité d\'arrière-plan',
 			'subtitlingStyling.backgroundColor' => 'Couleur d\'arrière-plan',
 			'subtitlingStyling.position' => 'Position',
@@ -2615,6 +2622,7 @@ extension on TranslationsFr {
 			'libraries.sortLabels.rating' => 'Note',
 			'libraries.sortLabels.communityRating' => 'Note communautaire',
 			'libraries.sortLabels.criticRating' => 'Note critique',
+			'libraries.sortLabels.userRating' => 'Note utilisateur',
 			'libraries.sortLabels.lastPlayed' => 'Dernière lecture',
 			'libraries.sortLabels.datePlayed' => 'Date de lecture',
 			'libraries.sortLabels.playCount' => 'Lectures',
@@ -2941,12 +2949,12 @@ extension on TranslationsFr {
 			'companionRemote.remote.menu' => 'Menu',
 			'companionRemote.remote.tabNavigation' => 'Navigation par onglets',
 			'companionRemote.remote.tabDiscover' => 'Découvrir',
+			_ => null,
+		} ?? switch (path) {
 			'companionRemote.remote.tabLibraries' => 'Bibliothèques',
 			'companionRemote.remote.tabSearch' => 'Rechercher',
 			'companionRemote.remote.tabDownloads' => 'Téléchargements',
 			'companionRemote.remote.tabSettings' => 'Paramètres',
-			_ => null,
-		} ?? switch (path) {
 			'companionRemote.remote.previous' => 'Précédent',
 			'companionRemote.remote.playPause' => 'Lecture/Pause',
 			'companionRemote.remote.next' => 'Suivant',

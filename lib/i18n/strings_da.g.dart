@@ -162,6 +162,7 @@ class _TranslationsCommonDa extends TranslationsCommonEn {
 	@override String get ok => 'OK';
 	@override String get off => 'Fra';
 	@override String seasonNumber({required Object number}) => 'Sæson ${number}';
+	@override String episodeNumberTitle({required Object number, required Object title}) => 'Episode ${number} - ${title}';
 	@override String chapterNumber({required Object number}) => 'Kapitel ${number}';
 	@override String get reconnect => 'Genopret forbindelse';
 	@override String get exit => 'Afslut';
@@ -244,6 +245,9 @@ class _TranslationsSettingsDa extends TranslationsSettingsEn {
 	@override String get gridView => 'Gitter';
 	@override String get listView => 'Liste';
 	@override String get showHeroSection => 'Vis hero-sektion';
+	@override String get continueWatchingAction => 'Handling for Fortsæt med at se';
+	@override String get continueWatchingPlay => 'Afspil';
+	@override String get continueWatchingDetails => 'Åbn detaljer';
 	@override String get useGlobalHubs => 'Brug startlayout';
 	@override String get useGlobalHubsDescription => 'Vis samlet startsideindhold. Brug ellers biblioteksanbefalinger.';
 	@override String get showServerNameOnHubs => 'Vis servernavn på hubbe';
@@ -491,8 +495,8 @@ class _TranslationsMediaMenuDa extends TranslationsMediaMenuEn {
 	@override String get markAsWatched => 'Markér som set';
 	@override String get markAsUnwatched => 'Markér som uset';
 	@override String get removeFromContinueWatching => 'Fjern fra Fortsæt med at se';
+	@override String get viewDetails => 'Vis detaljer';
 	@override String get goToSeries => 'Gå til serie';
-	@override String get goToSeason => 'Gå til sæson';
 	@override String get shufflePlay => 'Afspil tilfældigt';
 	@override String get shuffleNotAvailableOffline => 'Bland afspilning er ikke tilgængelig offline';
 	@override String get fileInfo => 'Filinfo';
@@ -672,7 +676,6 @@ class _TranslationsMessagesDa extends TranslationsMessagesEn {
 	@override String get fileInfoNotAvailable => 'Filinfo ikke tilgængelig';
 	@override String errorLoadingFileInfo({required Object error}) => 'Fejl ved indlæsning af filinfo: ${error}';
 	@override String get errorLoadingSeries => 'Fejl ved indlæsning af serie';
-	@override String get errorLoadingSeason => 'Fejl ved indlæsning af sæson';
 	@override String get musicNotSupported => 'Musikafspilning understøttes endnu ikke';
 	@override String get noDescriptionAvailable => 'Ingen beskrivelse tilgængelig';
 	@override String get noProfilesAvailable => 'Ingen profiler tilgængelige';
@@ -1740,6 +1743,7 @@ class _TranslationsLibrariesSortLabelsDa extends TranslationsLibrariesSortLabels
 	@override String get rating => 'Vurdering';
 	@override String get communityRating => 'Fællesskabsvurdering';
 	@override String get criticRating => 'Kritikerbedømmelse';
+	@override String get userRating => 'Brugerbedømmelse';
 	@override String get lastPlayed => 'Sidst afspillet';
 	@override String get datePlayed => 'Afspilningsdato';
 	@override String get playCount => 'Antal afspilninger';
@@ -1969,6 +1973,7 @@ extension on TranslationsDa {
 			'common.ok' => 'OK',
 			'common.off' => 'Fra',
 			'common.seasonNumber' => ({required Object number}) => 'Sæson ${number}',
+			'common.episodeNumberTitle' => ({required Object number, required Object title}) => 'Episode ${number} - ${title}',
 			'common.chapterNumber' => ({required Object number}) => 'Kapitel ${number}',
 			'common.reconnect' => 'Genopret forbindelse',
 			'common.exit' => 'Afslut',
@@ -2024,6 +2029,9 @@ extension on TranslationsDa {
 			'settings.gridView' => 'Gitter',
 			'settings.listView' => 'Liste',
 			'settings.showHeroSection' => 'Vis hero-sektion',
+			'settings.continueWatchingAction' => 'Handling for Fortsæt med at se',
+			'settings.continueWatchingPlay' => 'Afspil',
+			'settings.continueWatchingDetails' => 'Åbn detaljer',
 			'settings.useGlobalHubs' => 'Brug startlayout',
 			'settings.useGlobalHubsDescription' => 'Vis samlet startsideindhold. Brug ellers biblioteksanbefalinger.',
 			'settings.showServerNameOnHubs' => 'Vis servernavn på hubbe',
@@ -2259,8 +2267,8 @@ extension on TranslationsDa {
 			'mediaMenu.markAsWatched' => 'Markér som set',
 			'mediaMenu.markAsUnwatched' => 'Markér som uset',
 			'mediaMenu.removeFromContinueWatching' => 'Fjern fra Fortsæt med at se',
+			'mediaMenu.viewDetails' => 'Vis detaljer',
 			'mediaMenu.goToSeries' => 'Gå til serie',
-			'mediaMenu.goToSeason' => 'Gå til sæson',
 			'mediaMenu.shufflePlay' => 'Afspil tilfældigt',
 			'mediaMenu.shuffleNotAvailableOffline' => 'Bland afspilning er ikke tilgængelig offline',
 			'mediaMenu.fileInfo' => 'Filinfo',
@@ -2392,7 +2400,6 @@ extension on TranslationsDa {
 			'messages.fileInfoNotAvailable' => 'Filinfo ikke tilgængelig',
 			'messages.errorLoadingFileInfo' => ({required Object error}) => 'Fejl ved indlæsning af filinfo: ${error}',
 			'messages.errorLoadingSeries' => 'Fejl ved indlæsning af serie',
-			'messages.errorLoadingSeason' => 'Fejl ved indlæsning af sæson',
 			'messages.musicNotSupported' => 'Musikafspilning understøttes endnu ikke',
 			'messages.noDescriptionAvailable' => 'Ingen beskrivelse tilgængelig',
 			'messages.noProfilesAvailable' => 'Ingen profiler tilgængelige',
@@ -2428,11 +2435,11 @@ extension on TranslationsDa {
 			'subtitlingStyling.border' => 'Kant',
 			'subtitlingStyling.background' => 'Baggrund',
 			'subtitlingStyling.fontSize' => 'Skriftstørrelse',
+			_ => null,
+		} ?? switch (path) {
 			'subtitlingStyling.textColor' => 'Tekstfarve',
 			'subtitlingStyling.borderSize' => 'Kantstørrelse',
 			'subtitlingStyling.borderColor' => 'Kantfarve',
-			_ => null,
-		} ?? switch (path) {
 			'subtitlingStyling.backgroundOpacity' => 'Baggrundsgennemsigtighed',
 			'subtitlingStyling.backgroundColor' => 'Baggrundsfarve',
 			'subtitlingStyling.position' => 'Position',
@@ -2615,6 +2622,7 @@ extension on TranslationsDa {
 			'libraries.sortLabels.rating' => 'Vurdering',
 			'libraries.sortLabels.communityRating' => 'Fællesskabsvurdering',
 			'libraries.sortLabels.criticRating' => 'Kritikerbedømmelse',
+			'libraries.sortLabels.userRating' => 'Brugerbedømmelse',
 			'libraries.sortLabels.lastPlayed' => 'Sidst afspillet',
 			'libraries.sortLabels.datePlayed' => 'Afspilningsdato',
 			'libraries.sortLabels.playCount' => 'Antal afspilninger',
@@ -2941,12 +2949,12 @@ extension on TranslationsDa {
 			'companionRemote.remote.menu' => 'Menu',
 			'companionRemote.remote.tabNavigation' => 'Fanenavigation',
 			'companionRemote.remote.tabDiscover' => 'Opdag',
+			_ => null,
+		} ?? switch (path) {
 			'companionRemote.remote.tabLibraries' => 'Biblioteker',
 			'companionRemote.remote.tabSearch' => 'Søg',
 			'companionRemote.remote.tabDownloads' => 'Downloads',
 			'companionRemote.remote.tabSettings' => 'Indstillinger',
-			_ => null,
-		} ?? switch (path) {
 			'companionRemote.remote.previous' => 'Forrige',
 			'companionRemote.remote.playPause' => 'Afspil/Pause',
 			'companionRemote.remote.next' => 'Næste',

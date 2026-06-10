@@ -8,6 +8,7 @@ import 'package:plezy/media/library_query.dart';
 import 'package:plezy/media/media_backend.dart';
 import 'package:plezy/media/media_item.dart';
 import 'package:plezy/media/media_kind.dart';
+import 'package:plezy/media/media_server_client.dart';
 import 'package:plezy/models/transcode_quality_preset.dart';
 import 'package:plezy/services/jellyfin_client.dart';
 import 'package:plezy/services/playback_initialization_types.dart';
@@ -1939,6 +1940,143 @@ void main() {
       expect(nextUp.queryParameters.containsKey('NextUpDateCutoff'), isFalse);
     });
 
+    test('fetchContinueWatching orders a recently watched series Next Up above an older resume item', () async {
+      final requests = <Uri>[];
+      final scoped = JellyfinClient.forTesting(
+        connection: _conn(),
+        httpClient: MockClient((req) async {
+          requests.add(req.url);
+          if (req.url.path == '/UserItems/Resume') {
+            return http.Response(
+              jsonEncode({
+                'Items': [
+                  {
+                    'Id': 'resume-old',
+                    'Type': 'Movie',
+                    'Name': 'Old Movie',
+                    'UserData': {'LastPlayedDate': '2020-01-01T00:00:00.0000000Z'},
+                  },
+                ],
+              }),
+              200,
+              headers: {'content-type': 'application/json'},
+            );
+          }
+          if (req.url.path == '/Shows/NextUp') {
+            return http.Response(
+              jsonEncode({
+                'Items': [
+                  {'Id': 'next-recent', 'Type': 'Episode', 'Name': 'Next Recent', 'SeriesId': 'show-recent'},
+                ],
+              }),
+              200,
+              headers: {'content-type': 'application/json'},
+            );
+          }
+          if (req.url.path == '/Items') {
+            return http.Response(
+              jsonEncode({
+                'Items': [
+                  {
+                    'Id': 'ep-played',
+                    'Type': 'Episode',
+                    'SeriesId': 'show-recent',
+                    'UserData': {'LastPlayedDate': '2026-06-01T00:00:00.0000000Z'},
+                  },
+                ],
+              }),
+              200,
+              headers: {'content-type': 'application/json'},
+            );
+          }
+          return http.Response('not found', 404);
+        }),
+      );
+      addTearDown(scoped.close);
+
+      final items = await scoped.fetchContinueWatching(count: 10);
+
+      // The Next Up episode inherits its series' recent last-played date, so it
+      // sorts above the older resume item (issue #1266).
+      expect(items.map((item) => item.id), ['next-recent', 'resume-old']);
+
+      final lookup = requests.singleWhere((uri) => uri.path == '/Items');
+      expect(lookup.queryParameters['userId'], 'user-1');
+      expect(lookup.queryParameters['IncludeItemTypes'], 'Episode');
+      expect(lookup.queryParameters['Recursive'], 'true');
+      expect(lookup.queryParameters['SortBy'], 'DatePlayed');
+      expect(lookup.queryParameters['SortOrder'], 'Descending');
+      expect(lookup.queryParameters['Limit'], '200');
+      // No Filters=IsPlayed: a series' newest engagement can sit on an episode
+      // with a LastPlayedDate but Played==false (see _attachSeriesLastPlayed).
+      expect(lookup.queryParameters.containsKey('Filters'), isFalse);
+    });
+
+    test('fetchContinueWatching does not let resume items starve Next Up under the limit', () async {
+      final scoped = JellyfinClient.forTesting(
+        connection: _conn(),
+        httpClient: MockClient((req) async {
+          if (req.url.path == '/UserItems/Resume') {
+            return http.Response(
+              jsonEncode({
+                'Items': [
+                  {
+                    'Id': 'resume-old-1',
+                    'Type': 'Movie',
+                    'Name': 'Old Movie 1',
+                    'UserData': {'LastPlayedDate': '2021-01-01T00:00:00.0000000Z'},
+                  },
+                  {
+                    'Id': 'resume-old-2',
+                    'Type': 'Movie',
+                    'Name': 'Old Movie 2',
+                    'UserData': {'LastPlayedDate': '2022-01-01T00:00:00.0000000Z'},
+                  },
+                ],
+              }),
+              200,
+              headers: {'content-type': 'application/json'},
+            );
+          }
+          if (req.url.path == '/Shows/NextUp') {
+            return http.Response(
+              jsonEncode({
+                'Items': [
+                  {'Id': 'next-recent', 'Type': 'Episode', 'Name': 'Next Recent', 'SeriesId': 'show-recent'},
+                ],
+              }),
+              200,
+              headers: {'content-type': 'application/json'},
+            );
+          }
+          if (req.url.path == '/Items') {
+            return http.Response(
+              jsonEncode({
+                'Items': [
+                  {
+                    'Id': 'ep-played',
+                    'Type': 'Episode',
+                    'SeriesId': 'show-recent',
+                    'UserData': {'LastPlayedDate': '2026-06-01T00:00:00.0000000Z'},
+                  },
+                ],
+              }),
+              200,
+              headers: {'content-type': 'application/json'},
+            );
+          }
+          return http.Response('not found', 404);
+        }),
+      );
+      addTearDown(scoped.close);
+
+      // count equals the number of resume items: the old resume-first merge would
+      // have filled the limit and dropped Next Up entirely.
+      final items = await scoped.fetchContinueWatching(count: 2);
+
+      expect(items.map((item) => item.id), ['next-recent', 'resume-old-2']);
+    });
+
     test('fetchContinueWatching keeps resume items when Next Up fails', () async {
       final scoped = JellyfinClient.forTesting(
         connection: _conn(),
@@ -2025,6 +2163,30 @@ void main() {
     }
 
     Uri capturedNextUpRequest() => captured.singleWhere((uri) => uri.path == '/Shows/NextUp');
+
+    test('global preview defaults to shared limit and marks filled previews as more', () async {
+      captured = [];
+      final mock = MockClient((req) async {
+        captured.add(req.url);
+        return http.Response(
+          jsonEncode({
+            'Items': [
+              for (var i = 0; i < defaultHubPreviewLimit; i++) {'Id': 'movie-$i', 'Type': 'Movie', 'Name': 'Movie $i'},
+            ],
+          }),
+          200,
+          headers: {'content-type': 'application/json'},
+        );
+      });
+      final client = JellyfinClient.forTesting(connection: _conn(), httpClient: mock);
+      addTearDown(client.close);
+
+      final hubs = await client.fetchGlobalHubs(includePlaybackHubs: false);
+
+      expect(captured.single.queryParameters['Limit'], defaultHubPreviewLimit.toString());
+      expect(hubs.single.items, hasLength(defaultHubPreviewLimit));
+      expect(hubs.single.more, isTrue);
+    });
 
     test('global Next Up excludes resumable episodes without date cutoff', () async {
       final client = buildClient();

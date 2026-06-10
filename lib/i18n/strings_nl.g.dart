@@ -162,6 +162,7 @@ class _TranslationsCommonNl extends TranslationsCommonEn {
 	@override String get ok => 'OK';
 	@override String get off => 'Uit';
 	@override String seasonNumber({required Object number}) => 'Seizoen ${number}';
+	@override String episodeNumberTitle({required Object number, required Object title}) => 'Aflevering ${number} - ${title}';
 	@override String chapterNumber({required Object number}) => 'Hoofdstuk ${number}';
 	@override String get reconnect => 'Opnieuw verbinden';
 	@override String get exit => 'Afsluiten';
@@ -244,6 +245,9 @@ class _TranslationsSettingsNl extends TranslationsSettingsEn {
 	@override String get gridView => 'Raster';
 	@override String get listView => 'Lijst';
 	@override String get showHeroSection => 'Toon hoofdsectie';
+	@override String get continueWatchingAction => 'Actie voor Doorgaan met kijken';
+	@override String get continueWatchingPlay => 'Afspelen';
+	@override String get continueWatchingDetails => 'Details openen';
 	@override String get useGlobalHubs => 'Startlayout gebruiken';
 	@override String get useGlobalHubsDescription => 'Toon gecombineerde home-hubs. Anders bibliotheekaanbevelingen gebruiken.';
 	@override String get showServerNameOnHubs => 'Servernaam tonen bij hubs';
@@ -491,8 +495,8 @@ class _TranslationsMediaMenuNl extends TranslationsMediaMenuEn {
 	@override String get markAsWatched => 'Markeer als gekeken';
 	@override String get markAsUnwatched => 'Markeer als ongekeken';
 	@override String get removeFromContinueWatching => 'Verwijder uit Doorgaan met kijken';
+	@override String get viewDetails => 'Details bekijken';
 	@override String get goToSeries => 'Ga naar serie';
-	@override String get goToSeason => 'Ga naar seizoen';
 	@override String get shufflePlay => 'Willekeurig afspelen';
 	@override String get shuffleNotAvailableOffline => 'Shuffle is offline niet beschikbaar';
 	@override String get fileInfo => 'Bestand info';
@@ -672,7 +676,6 @@ class _TranslationsMessagesNl extends TranslationsMessagesEn {
 	@override String get fileInfoNotAvailable => 'Bestand informatie niet beschikbaar';
 	@override String errorLoadingFileInfo({required Object error}) => 'Fout bij laden bestand info: ${error}';
 	@override String get errorLoadingSeries => 'Fout bij laden serie';
-	@override String get errorLoadingSeason => 'Fout bij laden seizoen';
 	@override String get musicNotSupported => 'Muziek afspelen wordt nog niet ondersteund';
 	@override String get noDescriptionAvailable => 'Geen beschrijving beschikbaar';
 	@override String get noProfilesAvailable => 'Geen profielen beschikbaar';
@@ -1740,6 +1743,7 @@ class _TranslationsLibrariesSortLabelsNl extends TranslationsLibrariesSortLabels
 	@override String get rating => 'Beoordeling';
 	@override String get communityRating => 'Communitybeoordeling';
 	@override String get criticRating => 'Criticusbeoordeling';
+	@override String get userRating => 'Gebruikersbeoordeling';
 	@override String get lastPlayed => 'Laatst afgespeeld';
 	@override String get datePlayed => 'Afspeeldatum';
 	@override String get playCount => 'Aantal afspelingen';
@@ -1969,6 +1973,7 @@ extension on TranslationsNl {
 			'common.ok' => 'OK',
 			'common.off' => 'Uit',
 			'common.seasonNumber' => ({required Object number}) => 'Seizoen ${number}',
+			'common.episodeNumberTitle' => ({required Object number, required Object title}) => 'Aflevering ${number} - ${title}',
 			'common.chapterNumber' => ({required Object number}) => 'Hoofdstuk ${number}',
 			'common.reconnect' => 'Opnieuw verbinden',
 			'common.exit' => 'Afsluiten',
@@ -2024,6 +2029,9 @@ extension on TranslationsNl {
 			'settings.gridView' => 'Raster',
 			'settings.listView' => 'Lijst',
 			'settings.showHeroSection' => 'Toon hoofdsectie',
+			'settings.continueWatchingAction' => 'Actie voor Doorgaan met kijken',
+			'settings.continueWatchingPlay' => 'Afspelen',
+			'settings.continueWatchingDetails' => 'Details openen',
 			'settings.useGlobalHubs' => 'Startlayout gebruiken',
 			'settings.useGlobalHubsDescription' => 'Toon gecombineerde home-hubs. Anders bibliotheekaanbevelingen gebruiken.',
 			'settings.showServerNameOnHubs' => 'Servernaam tonen bij hubs',
@@ -2259,8 +2267,8 @@ extension on TranslationsNl {
 			'mediaMenu.markAsWatched' => 'Markeer als gekeken',
 			'mediaMenu.markAsUnwatched' => 'Markeer als ongekeken',
 			'mediaMenu.removeFromContinueWatching' => 'Verwijder uit Doorgaan met kijken',
+			'mediaMenu.viewDetails' => 'Details bekijken',
 			'mediaMenu.goToSeries' => 'Ga naar serie',
-			'mediaMenu.goToSeason' => 'Ga naar seizoen',
 			'mediaMenu.shufflePlay' => 'Willekeurig afspelen',
 			'mediaMenu.shuffleNotAvailableOffline' => 'Shuffle is offline niet beschikbaar',
 			'mediaMenu.fileInfo' => 'Bestand info',
@@ -2392,7 +2400,6 @@ extension on TranslationsNl {
 			'messages.fileInfoNotAvailable' => 'Bestand informatie niet beschikbaar',
 			'messages.errorLoadingFileInfo' => ({required Object error}) => 'Fout bij laden bestand info: ${error}',
 			'messages.errorLoadingSeries' => 'Fout bij laden serie',
-			'messages.errorLoadingSeason' => 'Fout bij laden seizoen',
 			'messages.musicNotSupported' => 'Muziek afspelen wordt nog niet ondersteund',
 			'messages.noDescriptionAvailable' => 'Geen beschrijving beschikbaar',
 			'messages.noProfilesAvailable' => 'Geen profielen beschikbaar',
@@ -2428,11 +2435,11 @@ extension on TranslationsNl {
 			'subtitlingStyling.border' => 'Rand',
 			'subtitlingStyling.background' => 'Achtergrond',
 			'subtitlingStyling.fontSize' => 'Lettergrootte',
+			_ => null,
+		} ?? switch (path) {
 			'subtitlingStyling.textColor' => 'Tekstkleur',
 			'subtitlingStyling.borderSize' => 'Rand grootte',
 			'subtitlingStyling.borderColor' => 'Randkleur',
-			_ => null,
-		} ?? switch (path) {
 			'subtitlingStyling.backgroundOpacity' => 'Achtergrond transparantie',
 			'subtitlingStyling.backgroundColor' => 'Achtergrondkleur',
 			'subtitlingStyling.position' => 'Positie',
@@ -2615,6 +2622,7 @@ extension on TranslationsNl {
 			'libraries.sortLabels.rating' => 'Beoordeling',
 			'libraries.sortLabels.communityRating' => 'Communitybeoordeling',
 			'libraries.sortLabels.criticRating' => 'Criticusbeoordeling',
+			'libraries.sortLabels.userRating' => 'Gebruikersbeoordeling',
 			'libraries.sortLabels.lastPlayed' => 'Laatst afgespeeld',
 			'libraries.sortLabels.datePlayed' => 'Afspeeldatum',
 			'libraries.sortLabels.playCount' => 'Aantal afspelingen',
@@ -2941,12 +2949,12 @@ extension on TranslationsNl {
 			'companionRemote.remote.menu' => 'Menu',
 			'companionRemote.remote.tabNavigation' => 'Tabnavigatie',
 			'companionRemote.remote.tabDiscover' => 'Ontdekken',
+			_ => null,
+		} ?? switch (path) {
 			'companionRemote.remote.tabLibraries' => 'Bibliotheken',
 			'companionRemote.remote.tabSearch' => 'Zoeken',
 			'companionRemote.remote.tabDownloads' => 'Downloads',
 			'companionRemote.remote.tabSettings' => 'Instellingen',
-			_ => null,
-		} ?? switch (path) {
 			'companionRemote.remote.previous' => 'Vorige',
 			'companionRemote.remote.playPause' => 'Afspelen/Pauzeren',
 			'companionRemote.remote.next' => 'Volgende',

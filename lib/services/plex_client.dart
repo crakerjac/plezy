@@ -1834,17 +1834,44 @@ class PlexClient
       final response = await _getWithFailover('/library/sections/$sectionId/sorts');
       final sorts = _extractDirectoryList(response, MediaSort.fromJson);
 
-      if (sorts.isNotEmpty) {
-        return sorts;
-      }
-
       // Fallback: return common sort options if API doesn't provide them
-      return _getFallbackSorts(libraryType);
+      final base = sorts.isNotEmpty ? sorts : _getFallbackSorts(libraryType);
+      return _withExtraSorts(base, libraryType);
     } catch (e) {
       appLogger.e('Failed to get library sorts: $e');
       // Return fallback sort options on error
-      return _getFallbackSorts(libraryType);
+      return _withExtraSorts(_getFallbackSorts(libraryType), libraryType);
     }
+  }
+
+  /// Append sort options that Plex honors via the `sort=` parameter but does not
+  /// advertise in `/library/sections/{id}/sorts`.
+  ///
+  /// Plays (`viewCount`) and the signed-in user's rating (`userRating`) both
+  /// sort correctly on movie/show libraries, so we surface them client-side
+  /// (mirroring how the Jellyfin sort list is built). De-duped by key so we
+  /// never double up if a future Plex version starts advertising them.
+  List<MediaSort> _withExtraSorts(List<MediaSort> base, String? libraryType) {
+    final type = libraryType?.toLowerCase();
+    if (type != 'movie' && type != 'show') return base;
+
+    final keys = base.map((s) => s.key).toSet();
+    final extras = [
+      MediaSort(
+        key: 'viewCount',
+        descKey: 'viewCount:desc',
+        title: t.libraries.sortLabels.playCount,
+        defaultDirection: 'desc',
+      ),
+      MediaSort(
+        key: 'userRating',
+        descKey: 'userRating:desc',
+        title: t.libraries.sortLabels.userRating,
+        defaultDirection: 'desc',
+      ),
+    ].where((s) => !keys.contains(s.key));
+
+    return [...base, ...extras];
   }
 
   /// Build fallback sort options based on library type.
@@ -1888,7 +1915,11 @@ class PlexClient
 
   /// Get library hubs (recommendations for a specific library section)
   /// Returns a list of recommendation hubs like "Trending Movies", "Top in Genre", etc.
-  Future<List<PlexHubDto>> _getLibraryHubs(String sectionId, {int limit = 10, String? libraryName}) async {
+  Future<List<PlexHubDto>> _getLibraryHubs(
+    String sectionId, {
+    int limit = defaultHubPreviewLimit,
+    String? libraryName,
+  }) async {
     try {
       final response = await retryTransientMediaServerCall(
         operation: 'Plex library hubs',
@@ -1922,7 +1953,7 @@ class PlexClient
   /// Get global hubs (home page recommendations)
   /// Returns actual home page hubs like "Recently Added Movies", "Recently Added TV", etc.
   /// This matches the official Plex client's home page layout.
-  Future<List<PlexHubDto>> _getGlobalHubs({int limit = 10}) async {
+  Future<List<PlexHubDto>> _getGlobalHubs({int limit = defaultHubPreviewLimit}) async {
     try {
       final hubKey = _providerPromotedHubKey ?? _providerHomeHubKey ?? '/hubs';
       final response = await retryTransientMediaServerCall(
@@ -3714,7 +3745,7 @@ class PlexClient
   }
 
   @override
-  Future<List<MediaHub>> fetchGlobalHubs({int limit = 10, bool includePlaybackHubs = true}) async {
+  Future<List<MediaHub>> fetchGlobalHubs({int limit = defaultHubPreviewLimit, bool includePlaybackHubs = true}) async {
     final hubs = await _getGlobalHubs(limit: limit);
     return hubs.map((h) => PlexMappers.mediaHub(h)).toList();
   }
@@ -3723,7 +3754,7 @@ class PlexClient
   Future<List<MediaHub>> fetchLibraryHubs(
     String libraryId, {
     required String libraryName,
-    int limit = 10,
+    int limit = defaultHubPreviewLimit,
     bool includePlaybackHubs = true,
     MediaKind? libraryKind,
   }) async {
@@ -4026,6 +4057,12 @@ class PlexClient
 
   @override
   double get watchedThreshold => watchedThresholdPercent / 100.0;
+
+  /// Plex's `/:/timeline?state=stopped` doesn't reliably mark watched without
+  /// an active play session, so the in-player auto-scrobble still issues the
+  /// explicit `markWatched` (`/:/scrobble`). See [marksWatchedOnPlaybackStopped].
+  @override
+  bool get marksWatchedOnPlaybackStopped => false;
 
   @override
   Map<String, String> get streamHeaders => Map.unmodifiable(config.headers);

@@ -14,6 +14,7 @@ import '../focus/key_event_utils.dart';
 import '../utils/global_key_utils.dart';
 import 'package:cached_network_image_ce/cached_network_image.dart';
 
+import '../services/apple_tv_remote_touch_service.dart';
 import '../services/image_cache_service.dart';
 import '../media/media_item.dart';
 import '../media/media_item_types.dart';
@@ -26,6 +27,7 @@ import '../providers/multi_server_provider.dart';
 import '../providers/hidden_libraries_provider.dart';
 import '../providers/libraries_provider.dart';
 import '../providers/playback_state_provider.dart';
+import '../providers/watch_state_store.dart';
 import '../widgets/hub_section.dart';
 import '../widgets/app_menu.dart';
 import '../widgets/clickable_cursor.dart';
@@ -57,6 +59,7 @@ import '../utils/app_logger.dart';
 import '../utils/dialogs.dart';
 import '../utils/formatters.dart';
 import '../utils/media_hub_ordering.dart';
+import '../utils/media_navigation_helper.dart';
 import '../utils/provider_extensions.dart';
 import '../utils/video_player_navigation.dart';
 import '../utils/layout_constants.dart';
@@ -147,6 +150,8 @@ class _DiscoverScreenState extends State<DiscoverScreen>
   LibrariesProvider? _librariesProvider;
   Set<String> _lastSeenHiddenKeys = {};
   List<String> _lastSeenLibraryOrderKeys = const [];
+  Future<void>? _systemShelfSyncFuture;
+  List<MediaItem>? _pendingSystemShelfItems;
 
   // WatchStateAware: watch on-deck items and their parent shows/seasons
   @override
@@ -212,6 +217,7 @@ class _DiscoverScreenState extends State<DiscoverScreen>
   // Hero and app bar focus
   late FocusNode _heroFocusNode;
   final _actionBarKey = GlobalKey<FocusableActionBarState>();
+  final _serverActivitiesButtonKey = GlobalKey<ServerActivitiesButtonState>();
   final _userMenuKey = GlobalKey<AppMenuButtonState<String>>();
 
   /// Backend-neutral hero client lookup. Returns the actual
@@ -533,7 +539,7 @@ class _DiscoverScreenState extends State<DiscoverScreen>
       },
       onSelect: () {
         if (_onDeck.isNotEmpty && _currentHeroIndex < _onDeck.length) {
-          navigateToVideoPlayer(context, metadata: _onDeck[_currentHeroIndex]);
+          navigateToMediaItem(context, _onDeck[_currentHeroIndex], playDirectly: true);
         }
       },
     )(node, event);
@@ -546,6 +552,7 @@ class _DiscoverScreenState extends State<DiscoverScreen>
     WidgetsBinding.instance.removeObserver(this);
     _autoScrollTimer?.cancel();
     _indicatorTimer?.cancel();
+    _pendingSystemShelfItems = null;
     _indicatorProgress.dispose();
     _heroController.dispose();
     _scrollController.dispose();
@@ -900,14 +907,36 @@ class _DiscoverScreenState extends State<DiscoverScreen>
 
   /// Sync Continue Watching items to the platform launcher shelf.
   Future<void> _syncSystemShelf(List<MediaItem> onDeck) async {
+    _pendingSystemShelfItems = List<MediaItem>.unmodifiable(onDeck);
+    if (_systemShelfSyncFuture != null) {
+      await _systemShelfSyncFuture;
+      return;
+    }
+
+    final syncFuture = _drainSystemShelfSyncQueue();
+    _systemShelfSyncFuture = syncFuture;
+    await syncFuture;
+  }
+
+  Future<void> _drainSystemShelfSyncQueue() async {
     try {
-      await SystemShelfService().syncFromContinueWatching(
-        onDeck,
-        (serverId) => context.getMediaClientWithFallback(serverId),
-        hideSpoilers: context.settingsRead(SettingsService.hideSpoilers),
-      );
-    } catch (e) {
-      appLogger.w('Failed to sync system shelf', error: e);
+      while (_pendingSystemShelfItems != null) {
+        final onDeck = _pendingSystemShelfItems!;
+        _pendingSystemShelfItems = null;
+        if (!mounted) return;
+
+        try {
+          await SystemShelfService().syncFromContinueWatching(
+            onDeck,
+            (serverId) => context.getMediaClientWithFallback(serverId),
+            hideSpoilers: context.settingsRead(SettingsService.hideSpoilers),
+          );
+        } catch (e) {
+          appLogger.w('Failed to sync system shelf', error: e);
+        }
+      }
+    } finally {
+      _systemShelfSyncFuture = null;
     }
   }
 
@@ -1334,7 +1363,10 @@ class _DiscoverScreenState extends State<DiscoverScreen>
                       // a permanently empty popover.
                       if (PlatformDetector.isDesktop(context) &&
                           context.select<MultiServerProvider, bool>((p) => p.hasOnlinePlexServers))
-                        const FocusableAction(child: ServerActivitiesButton()),
+                        FocusableAction(
+                          onPressed: () => _serverActivitiesButtonKey.currentState?.togglePanel(),
+                          child: ServerActivitiesButton(key: _serverActivitiesButtonKey),
+                        ),
                       // User menu — profiles + sign out
                       _buildUserMenuAction(context),
                     ],
@@ -1611,6 +1643,9 @@ class _DiscoverScreenState extends State<DiscoverScreen>
                 onNavigateToSidebar: _navigateToSidebar,
                 tallPosterScale: TvBrowseRailLayout.compactTallPosterScale,
                 backgroundBleedLeft: sidebarBleed,
+                selectSuppressionGestureSignal: PlatformDetector.isAppleTV()
+                    ? AppleTvRemoteTouchService.instance.touchActiveListenable
+                    : null,
               ),
             ),
           SideNavigationBleedBuilder(
@@ -1785,8 +1820,8 @@ class _DiscoverScreenState extends State<DiscoverScreen>
       child: ClickableCursor(
         child: GestureDetector(
           onTap: () {
-            appLogger.d('Navigating to VideoPlayerScreen for: ${heroItem.title}');
-            navigateToVideoPlayer(context, metadata: heroItem);
+            appLogger.d('Activating hero item: ${heroItem.title}');
+            navigateToMediaItem(context, heroItem, playDirectly: true);
           },
           child: Stack(
             fit: StackFit.expand,
@@ -2049,84 +2084,91 @@ class _DiscoverScreenState extends State<DiscoverScreen>
     );
   }
 
-  Widget _buildSmartPlayButton(MediaItem heroItem) {
-    final hasProgress = heroItem.hasActiveProgress;
-    final isTv = PlatformDetector.isTV();
+  Widget _buildSmartPlayButton(MediaItem rawHeroItem) {
+    return Builder(
+      builder: (context) {
+        // The on-deck snapshot refetches shortly after a watch event; the store
+        // patch bridges the gap so "minutes left" never lags.
+        final heroItem = context.withFreshWatchState(rawHeroItem);
+        final hasProgress = heroItem.hasActiveProgress;
+        final isTv = PlatformDetector.isTV();
 
-    final minutesLeft = hasProgress ? ((heroItem.durationMs! - heroItem.viewOffsetMs!) / 60_000).round() : 0;
+        final minutesLeft = hasProgress ? ((heroItem.durationMs! - heroItem.viewOffsetMs!) / 60_000).round() : 0;
 
-    final progress = hasProgress ? heroItem.viewOffsetMs! / heroItem.durationMs! : 0.0;
+        final progress = hasProgress ? heroItem.viewOffsetMs! / heroItem.durationMs! : 0.0;
 
-    return ListenableBuilder(
-      listenable: _heroFocusNode,
-      builder: (context, _) {
-        final showFocus = isTv && _heroFocusNode.hasFocus && InputModeTracker.isKeyboardMode(context);
-        final colorScheme = Theme.of(context).colorScheme;
-        final backgroundColor = showFocus ? colorScheme.primary : Colors.white;
-        final foregroundColor = showFocus ? colorScheme.onPrimary : Colors.black;
-        return InkWell(
-          onTap: () {
-            appLogger.d('Playing: ${heroItem.title}');
-            navigateToVideoPlayer(context, metadata: heroItem);
-          },
-          borderRadius: BorderRadius.all(Radius.circular(isTv ? 32 : 24)),
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 150),
-            curve: Curves.easeOutCubic,
-            padding: .symmetric(horizontal: isTv ? 34 : 24, vertical: isTv ? 16 : 12),
-            decoration: BoxDecoration(
-              color: backgroundColor,
+        return ListenableBuilder(
+          listenable: _heroFocusNode,
+          builder: (context, _) {
+            final showFocus = isTv && _heroFocusNode.hasFocus && InputModeTracker.isKeyboardMode(context);
+            final colorScheme = Theme.of(context).colorScheme;
+            final backgroundColor = showFocus ? colorScheme.primary : Colors.white;
+            final foregroundColor = showFocus ? colorScheme.onPrimary : Colors.black;
+            return InkWell(
+              onTap: () {
+                appLogger.d('Playing: ${heroItem.title}');
+                navigateToVideoPlayer(context, metadata: heroItem);
+              },
               borderRadius: BorderRadius.all(Radius.circular(isTv ? 32 : 24)),
-              boxShadow: showFocus
-                  ? [BoxShadow(color: colorScheme.primary.withValues(alpha: 0.35), blurRadius: 28, spreadRadius: 4)]
-                  : null,
-            ),
-            child: Row(
-              mainAxisSize: .min,
-              children: [
-                AppIcon(Symbols.play_arrow_rounded, fill: 1, size: isTv ? 28 : 20, color: foregroundColor),
-                SizedBox(width: isTv ? 12 : 8),
-                if (hasProgress) ...[
-                  // Progress bar
-                  Container(
-                    width: isTv ? 56 : 40,
-                    height: isTv ? 8 : 6,
-                    decoration: BoxDecoration(
-                      color: foregroundColor.withValues(alpha: 0.25),
-                      borderRadius: BorderRadius.all(Radius.circular(isTv ? 4 : 3)),
-                    ),
-                    child: FractionallySizedBox(
-                      alignment: .centerLeft,
-                      widthFactor: progress,
-                      child: Container(
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 150),
+                curve: Curves.easeOutCubic,
+                padding: .symmetric(horizontal: isTv ? 34 : 24, vertical: isTv ? 16 : 12),
+                decoration: BoxDecoration(
+                  color: backgroundColor,
+                  borderRadius: BorderRadius.all(Radius.circular(isTv ? 32 : 24)),
+                  boxShadow: showFocus
+                      ? [BoxShadow(color: colorScheme.primary.withValues(alpha: 0.35), blurRadius: 28, spreadRadius: 4)]
+                      : null,
+                ),
+                child: Row(
+                  mainAxisSize: .min,
+                  children: [
+                    AppIcon(Symbols.play_arrow_rounded, fill: 1, size: isTv ? 28 : 20, color: foregroundColor),
+                    SizedBox(width: isTv ? 12 : 8),
+                    if (hasProgress) ...[
+                      // Progress bar
+                      Container(
+                        width: isTv ? 56 : 40,
+                        height: isTv ? 8 : 6,
                         decoration: BoxDecoration(
-                          color: foregroundColor,
-                          borderRadius: BorderRadius.all(Radius.circular(isTv ? 3 : 2)),
+                          color: foregroundColor.withValues(alpha: 0.25),
+                          borderRadius: BorderRadius.all(Radius.circular(isTv ? 4 : 3)),
+                        ),
+                        child: FractionallySizedBox(
+                          alignment: .centerLeft,
+                          widthFactor: progress,
+                          child: Container(
+                            decoration: BoxDecoration(
+                              color: foregroundColor,
+                              borderRadius: BorderRadius.all(Radius.circular(isTv ? 3 : 2)),
+                            ),
+                          ),
                         ),
                       ),
-                    ),
-                  ),
-                  SizedBox(width: isTv ? 12 : 8),
-                  Text(
-                    t.discover.minutesLeft(minutes: minutesLeft),
-                    style: TextStyle(
-                      color: foregroundColor,
-                      fontSize: isTv ? 18 : 14,
-                      fontWeight: isTv ? FontWeight.w700 : FontWeight.w600,
-                    ),
-                  ),
-                ] else
-                  Text(
-                    t.common.play,
-                    style: TextStyle(
-                      color: foregroundColor,
-                      fontSize: isTv ? 18 : 14,
-                      fontWeight: isTv ? FontWeight.w700 : FontWeight.w600,
-                    ),
-                  ),
-              ],
-            ),
-          ),
+                      SizedBox(width: isTv ? 12 : 8),
+                      Text(
+                        t.discover.minutesLeft(minutes: minutesLeft),
+                        style: TextStyle(
+                          color: foregroundColor,
+                          fontSize: isTv ? 18 : 14,
+                          fontWeight: isTv ? FontWeight.w700 : FontWeight.w600,
+                        ),
+                      ),
+                    ] else
+                      Text(
+                        t.common.play,
+                        style: TextStyle(
+                          color: foregroundColor,
+                          fontSize: isTv ? 18 : 14,
+                          fontWeight: isTv ? FontWeight.w700 : FontWeight.w600,
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            );
+          },
         );
       },
     );
