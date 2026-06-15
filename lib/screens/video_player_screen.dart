@@ -22,9 +22,9 @@ import '../media/media_server_user_profile.dart';
 import '../media/media_item.dart';
 import '../media/media_item_types.dart';
 import '../media/media_server_client.dart';
-import '../services/jellyfin_client.dart';
+import '../media/live_tv_support.dart';
+import '../models/livetv_channel.dart';
 import '../services/live_seek_accumulator.dart';
-import '../services/live_session_tracker.dart';
 import '../services/plex_client.dart';
 import '../utils/session_identifier.dart';
 import '../database/app_database.dart';
@@ -74,6 +74,7 @@ import '../utils/orientation_helper.dart';
 import '../utils/platform_detector.dart';
 import '../utils/provider_extensions.dart';
 import '../utils/snackbar_helper.dart';
+import '../utils/stream_buffer_sizing.dart';
 import '../utils/video_player_navigation.dart';
 import 'video_player/completion_latch.dart';
 import 'video_player/frame_rate_matcher.dart';
@@ -270,7 +271,12 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
   bool _showPlayNextDialog = false;
   bool _isPhone = false;
   late int _effectiveSelectedMediaIndex;
-  String? _selectedMediaSourceId;
+
+  /// Media source id to request on the next resolve: the caller's initial
+  /// selection, then re-synced to the session's post-fallback effective id
+  /// by [_commitPlaybackSession]. Post-resolve consumers must read
+  /// `_playbackSession.mediaSourceId`, never this field.
+  String? _requestedMediaSourceId;
   bool get _offlineLibraryMode => widget.isOffline;
 
   // Transcode / quality state
@@ -327,7 +333,7 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
 
   /// Live TV session state (tune identity, heartbeats, capture buffer,
   /// retry ladder) — inert for VOD screens. See [LiveTvSessionState].
-  late final LiveTvSessionState _live = LiveTvSessionState(widget.live, itemId: widget.metadata.id);
+  late final LiveTvSessionState _live = LiveTvSessionState(widget.live);
 
   /// Coalesces rapid relative live-TV skips into a single transcode re-open so
   /// mashing skip-forward can't compound into an overshoot to live (#1253).
@@ -405,6 +411,7 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
   Player? _lastVideoLayoutPlayer;
   bool _videoLayoutUpdateScheduled = false;
   double? _pinchStartZoomScale;
+  int _pinchZoomActivationUpdateCount = 0;
   bool _isPinchZooming = false;
   bool _pinchZoomChanged = false;
   final EpisodeNavigationService _episodeNavigation = EpisodeNavigationService();
@@ -454,7 +461,7 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
   void _commitPlaybackSession(PlaybackSession session) {
     _playbackSession = session;
     _effectiveSelectedMediaIndex = session.mediaIndex;
-    _selectedMediaSourceId = session.mediaSourceId;
+    _requestedMediaSourceId = session.mediaSourceId;
     _selectedQualityPreset = session.qualityPreset;
     _selectedAudioStreamId = session.audioStreamId;
   }
@@ -490,7 +497,7 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
     _activeId = widget.metadata.id;
     _activeMediaIndex = widget.selectedMediaIndex;
     _effectiveSelectedMediaIndex = widget.selectedMediaIndex;
-    _selectedMediaSourceId = widget.selectedMediaSourceId;
+    _requestedMediaSourceId = widget.selectedMediaSourceId;
 
     // Reused across in-place quality/version/audio switches so the
     // server-side transcode session is preserved.
@@ -683,7 +690,7 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
         _playbackDataFuture = playbackResolver.resolve(
           metadata: _currentMetadata,
           selectedMediaIndex: _effectiveSelectedMediaIndex,
-          selectedMediaSourceId: _selectedMediaSourceId,
+          selectedMediaSourceId: _requestedMediaSourceId,
           offlineLibraryMode: false,
           qualityPreset: _selectedQualityPreset,
           selectedAudioStreamId: _selectedAudioStreamId,
@@ -757,7 +764,7 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
         _audioFocusFuture = currentPlayer.requestAudioFocus();
         _audioFocusFuture!.ignore();
       }
-      await currentPlayer.setProperty('msg-level', debugLoggingEnabled ? 'all=debug' : 'all=error');
+      await currentPlayer.setProperty('msg-level', debugLoggingEnabled ? 'all=debug,ffmpeg/video=warn' : 'all=error');
       await currentPlayer.setLogLevel(debugLoggingEnabled ? 'v' : 'warn');
       await currentPlayer.setProperty('hwdec', _getHwdecValue(enableHardwareDecoding));
 
@@ -791,10 +798,20 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
 
       if (Platform.isIOS) {
         await currentPlayer.setProperty('audio-exclusive', 'yes');
+
+        // Rasterize subtitles at the video's resolution instead of the
+        // display's; the OSD layer upscales them with the video.
+        await currentPlayer.setProperty(
+          'avfoundation-osd-video-res',
+          settingsService.read(SettingsService.subtitleRenderResolution) == SubtitleRenderResolution.video
+              ? 'yes'
+              : 'no',
+        );
       }
 
-      // Audio passthrough (desktop only - sends bitstream to receiver)
-      if (PlatformDetector.isDesktopOS()) {
+      // Audio passthrough (desktop bitstreams to the receiver; Apple TV
+      // hands compressed AC3/EAC3 to the system for Dolby/Atmos output)
+      if (PlatformDetector.isDesktopOS() || PlatformDetector.isAppleTV()) {
         if (settingsService.read(SettingsService.audioPassthrough)) {
           await currentPlayer.setAudioPassthrough(true);
         }
@@ -819,7 +836,7 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
       }
 
       if (settingsService.read(SettingsService.audioNormalization)) {
-        await currentPlayer.setProperty('af', 'loudnorm=I=-14:TP=-3:LRA=4');
+        await currentPlayer.setAudioNormalization(true);
       }
 
       if (PlatformDetector.isDesktopOS()) {
@@ -1041,6 +1058,32 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
   /// latch, MediaSession pause-suppression window) — see [FrameRateMatcher].
   final FrameRateMatcher _frameRate = FrameRateMatcher();
 
+  Future<Duration?> _pauseAndHidePlayerForRouteExit() async {
+    final currentPlayer = player;
+    if (currentPlayer == null || !_isPlayerInitialized) return null;
+
+    final exitPosition = currentPlayer.state.position;
+    if (currentPlayer.state.isActive) {
+      try {
+        await currentPlayer.pause();
+      } catch (e, st) {
+        appLogger.w('Failed to pause player during route exit', error: e, stackTrace: st);
+      }
+    }
+
+    if (!mounted || currentPlayer != player) return exitPosition;
+
+    if (Platform.isAndroid && PlatformDetector.isTV()) {
+      try {
+        await currentPlayer.setVisible(false);
+      } catch (e, st) {
+        appLogger.w('Failed to hide Android TV player surface during route exit', error: e, stackTrace: st);
+      }
+    }
+
+    return exitPosition;
+  }
+
   /// Handle back button press
   /// For non-host participants in Watch Together, shows leave session confirmation
   Future<void> _handleBackButton() async {
@@ -1063,7 +1106,10 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
             final navigator = Navigator.of(context);
             if (navigator.canPop()) {
               _isExiting.value = true;
-              await _sendStoppedProgressOnce();
+              final exitPosition = await _pauseAndHidePlayerForRouteExit();
+              if (!mounted) return;
+              await _sendStoppedProgressOnce(positionOverride: exitPosition);
+              if (!mounted) return;
               await _restoreSystemUiAndOrientation();
               if (!mounted) return;
               navigator.pop(true);
@@ -1078,7 +1124,10 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
       final navigator = Navigator.of(context);
       if (navigator.canPop()) {
         _isExiting.value = true;
-        await _sendStoppedProgressOnce();
+        final exitPosition = await _pauseAndHidePlayerForRouteExit();
+        if (!mounted) return;
+        await _sendStoppedProgressOnce(positionOverride: exitPosition);
+        if (!mounted) return;
         await _restoreSystemUiAndOrientation();
         if (!mounted) return;
         navigator.pop(true);

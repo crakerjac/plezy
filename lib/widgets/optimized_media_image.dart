@@ -9,6 +9,7 @@ import 'package:material_symbols_icons/symbols.dart';
 import 'package:plezy/widgets/app_icon.dart';
 
 import '../media/media_server_client.dart';
+import '../services/device_performance.dart';
 import '../services/image_cache_service.dart';
 import '../utils/app_logger.dart';
 import '../utils/media_image_helper.dart';
@@ -328,6 +329,11 @@ class OptimizedMediaImage extends StatelessWidget {
       },
       frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
         if (wasSynchronouslyLoaded) return child;
+        // Reduced tier: swap in directly — each in-flight fade is a tile-sized
+        // saveLayer, and grid scrolling runs many of them concurrently.
+        if (DevicePerformance.isReduced) {
+          return frame != null ? child : _buildPlaceholder(context, imageUrl);
+        }
         return AnimatedSwitcher(
           duration: const Duration(milliseconds: 300),
           child: frame != null ? child : _buildPlaceholder(context, imageUrl),

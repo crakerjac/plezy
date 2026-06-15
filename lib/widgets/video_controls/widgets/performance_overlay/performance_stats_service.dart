@@ -5,6 +5,7 @@ import 'package:flutter/scheduler.dart';
 
 import '../../../../mpv/mpv.dart';
 import '../../../../utils/app_logger.dart';
+import '../../../../utils/codec_utils.dart';
 import 'performance_stats.dart';
 
 /// Service that polls player properties and provides performance stats via a stream.
@@ -151,6 +152,7 @@ class PerformanceStatsService {
         audioBitrate: _parseInt(statsMap['audio-bitrate'] as String?),
         avsyncChange: _parseDouble(statsMap['total-avsync-change'] as String?),
         cacheUsed: _parseInt(statsMap['cache-used'] as String?),
+        cacheLimit: _parseInt(statsMap['demuxer-max-bytes'] as String?),
         cacheSpeed: _parseDouble(statsMap['cache-speed'] as String?),
         displayFps: _parseDouble(statsMap['display-fps'] as String?),
         frameDropCount: _parseInt(statsMap['frame-drop-count'] as String?),
@@ -188,7 +190,7 @@ class PerformanceStatsService {
         // Audio metrics
         audioCodec: _formatCodecName(statsMap['audioCodec'] as String?),
         audioSamplerate: statsMap['audioSampleRate'] as int?,
-        audioChannels: _formatChannels(statsMap['audioChannels'] as int?),
+        audioChannels: CodecUtils.formatAudioChannels(statsMap['audioChannels'] as int?),
         audioBitrate: statsMap['audioBitrate'] as int?,
         audioDecoderName: statsMap['audioDecoderName'] as String?,
         // Tunneling
@@ -217,18 +219,6 @@ class PerformanceStatsService {
     }
   }
 
-  /// Format channel count to string (e.g., "2" -> "Stereo", "6" -> "5.1")
-  String? _formatChannels(int? channels) {
-    if (channels == null) return null;
-    return switch (channels) {
-      1 => 'Mono',
-      2 => 'Stereo',
-      6 => '5.1',
-      8 => '7.1',
-      _ => '$channels ch',
-    };
-  }
-
   /// Fetch stats from MPV via property queries.
   Future<void> _fetchMpvStats() async {
     // Fetch core properties in parallel
@@ -245,10 +235,12 @@ class PerformanceStatsService {
       player.getProperty('audio-params/hr-channels'), // 9
       player.getProperty('audio-bitrate'), // 10
       player.getProperty('total-avsync-change'), // 11
-      player.getProperty('cache-speed'), // 12
-      player.getProperty('frame-drop-count'), // 13
-      player.getProperty('decoder-frame-drop-count'), // 14
-      player.getProperty('demuxer-cache-duration'), // 15
+      player.getProperty('cache-used'), // 12
+      player.getProperty('demuxer-max-bytes'), // 13
+      player.getProperty('cache-speed'), // 14
+      player.getProperty('frame-drop-count'), // 15
+      player.getProperty('decoder-frame-drop-count'), // 16
+      player.getProperty('demuxer-cache-duration'), // 17
     ]);
 
     final hasVideo = results[1] != null;
@@ -298,10 +290,12 @@ class PerformanceStatsService {
       audioChannels: results[9],
       audioBitrate: _parseInt(results[10]),
       avsyncChange: _parseDouble(results[11]),
-      cacheSpeed: _parseDouble(results[12]),
-      frameDropCount: _parseInt(results[13]),
-      decoderFrameDropCount: _parseInt(results[14]),
-      cacheDuration: _parseDouble(results[15]),
+      cacheUsed: _parseInt(results[12]),
+      cacheLimit: _parseInt(results[13]),
+      cacheSpeed: _parseDouble(results[14]),
+      frameDropCount: _parseInt(results[15]),
+      decoderFrameDropCount: _parseInt(results[16]),
+      cacheDuration: _parseDouble(results[17]),
       // Video-dependent properties
       displayFps: _parseDouble(videoResults?.first),
       pixelformat: videoResults?[1],

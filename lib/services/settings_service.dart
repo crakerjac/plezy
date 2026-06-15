@@ -11,6 +11,7 @@ import '../i18n/strings.g.dart';
 import '../models/mpv_config_models.dart';
 import '../models/external_player_models.dart';
 import 'base_shared_preferences_service.dart';
+import 'device_performance.dart';
 export 'base_shared_preferences_service.dart'
     show Pref, BoolPref, IntPref, DoublePref, StringPref, NullableStringPref, StringListPref, EnumPref, JsonPref;
 import '../models/transcode_quality_preset.dart';
@@ -38,6 +39,11 @@ enum EpisodePosterMode { seriesPoster, seasonPoster, episodeThumbnail }
 enum ContinueWatchingAction { play, details }
 
 enum SubAssOverride { no, yes, scale, force, strip }
+
+/// Resolution ASS/image subtitles are rasterized at on the avfoundation VO
+/// (iOS/tvOS): the display's, or the video's (much cheaper on 4K displays;
+/// subs can't carry more detail than the video they're typeset against).
+enum SubtitleRenderResolution { screen, video }
 
 enum DvConversionModePreference { auto, disabled, dv81, hevcStrip }
 
@@ -144,6 +150,34 @@ class _AutoPipPref extends Pref<bool> {
     if (!Platform.isAndroid && !Platform.isIOS && !Platform.isMacOS) return false;
     if (PlatformDetector.isTV()) return false;
     return svc.prefs.getBool(key) ?? !Platform.isMacOS;
+  }
+
+  @override
+  Future<void> writeTo(BaseSharedPreferencesService svc, bool value) => svc.writeBool(key, value);
+}
+
+class _UseExternalPlayerPref extends Pref<bool> {
+  const _UseExternalPlayerPref() : super('use_external_player');
+
+  @override
+  bool readFrom(BaseSharedPreferencesService svc) {
+    if (!PlatformDetector.supportsExternalPlayers()) return false;
+    return svc.prefs.getBool(key) ?? false;
+  }
+
+  @override
+  Future<void> writeTo(BaseSharedPreferencesService svc, bool value) => svc.writeBool(key, value);
+}
+
+/// Experimental Dolby passthrough. Keep opt-in everywhere, including Apple TV,
+/// until the AVFoundation EAC3 path is verified across real receiver setups.
+class _AudioPassthroughPref extends Pref<bool> {
+  const _AudioPassthroughPref() : super('audio_passthrough');
+
+  @override
+  bool readFrom(BaseSharedPreferencesService svc) {
+    // TODO: Default Apple TV to on once EAC3 passthrough is hardware-verified.
+    return svc.prefs.getBool(key) ?? false;
   }
 
   @override
@@ -289,6 +323,7 @@ class SettingsService extends BaseSharedPreferencesService {
   static const rewindOnResume = IntPref('rewind_on_resume');
   static const showHeroSection = BoolPref('show_hero_section', defaultValue: true);
   static const tvFullCardLayout = BoolPref('tv_full_card_layout', defaultValue: false);
+  static const focusGlow = BoolPref('focus_glow', defaultValue: true);
   static const useGlobalHubs = BoolPref('use_global_hubs', defaultValue: true);
   static const showServerNameOnHubs = BoolPref('show_server_name_on_hubs');
   static const groupLibrariesByServer = BoolPref('group_libraries_by_server', defaultValue: true);
@@ -308,6 +343,11 @@ class SettingsService extends BaseSharedPreferencesService {
     'sub_ass_override',
     values: SubAssOverride.values,
     defaultValue: SubAssOverride.no,
+  );
+  static const subtitleRenderResolution = EnumPref<SubtitleRenderResolution>(
+    'subtitle_render_resolution',
+    values: SubtitleRenderResolution.values,
+    defaultValue: SubtitleRenderResolution.screen,
   );
   static const subtitleBold = BoolPref('subtitle_bold');
   static const subtitleItalic = BoolPref('subtitle_italic');
@@ -360,10 +400,15 @@ class SettingsService extends BaseSharedPreferencesService {
   static const showNavBarLabels = BoolPref('show_nav_bar_labels', defaultValue: true);
   static const globalShaderPreset = StringPref('global_shader_preset', defaultValue: 'none');
   static const requireProfileSelectionOnOpen = BoolPref('require_profile_selection_on_open');
-  static const useExternalPlayer = BoolPref('use_external_player');
+  static const useExternalPlayer = _UseExternalPlayerPref();
   static const forceTvMode = BoolPref('force_tv_mode');
+  static const visualEffects = EnumPref<VisualEffectsSetting>(
+    'visual_effects',
+    values: VisualEffectsSetting.values,
+    defaultValue: VisualEffectsSetting.auto,
+  );
   static const ambientLighting = BoolPref('ambient_lighting');
-  static const audioPassthrough = BoolPref('audio_passthrough');
+  static const audioPassthrough = _AudioPassthroughPref();
   static const audioNormalization = BoolPref('audio_normalization');
   static const liveTvDefaultFavorites = BoolPref('live_tv_default_favorites');
   static const matchRefreshRate = BoolPref('match_refresh_rate');
@@ -388,18 +433,19 @@ class SettingsService extends BaseSharedPreferencesService {
   static final defaultBoxFitMode = IntPref('default_box_fit_mode', transform: (v) => v.clamp(0, 2));
   static final displaySwitchDelay = IntPref('display_switch_delay', transform: (v) => v.clamp(0, 10));
 
-  static final themeMode = EnumPref<ThemeMode>(
+  static ThemeMode _tvAwareThemeModeDefault() => TvDetectionService.isTVSync() ? ThemeMode.oled : ThemeMode.system;
+  static const themeMode = EnumPref<ThemeMode>(
     'theme_mode',
     values: ThemeMode.values,
-    defaultValue: TvDetectionService.isTVSync() ? ThemeMode.oled : ThemeMode.system,
+    defaultValueProvider: _tvAwareThemeModeDefault,
   );
-  static final videoPlayerNavigationEnabled = BoolPref(
+  static const videoPlayerNavigationEnabled = BoolPref(
     'video_player_navigation_enabled',
-    defaultValue: TvDetectionService.isTVSync(),
+    defaultValueProvider: TvDetectionService.isTVSync,
   );
-  static final enableCompanionRemoteServer = BoolPref(
+  static const enableCompanionRemoteServer = BoolPref(
     'enable_companion_remote_server',
-    defaultValue: PlatformDetector.isDesktopOS(),
+    defaultValueProvider: PlatformDetector.isDesktopOS,
   );
   static const startInFullscreen = BoolPref('start_in_fullscreen');
   static const exitFullscreenOnPlayerClose = BoolPref('exit_fullscreen_on_player_close');
@@ -754,6 +800,7 @@ class SettingsService extends BaseSharedPreferencesService {
     requireProfileSelectionOnOpen,
     useExternalPlayer,
     forceTvMode,
+    visualEffects,
     ambientLighting,
     audioPassthrough,
     audioNormalization,

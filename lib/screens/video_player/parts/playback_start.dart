@@ -14,88 +14,57 @@ extension _VideoPlayerPlaybackStartMethods on VideoPlayerScreenState {
         await _setLiveStreamOptions(currentPlayer);
         if (!attempt.isCurrent) return;
 
-        String streamUrl;
-        if (_live.streamUrl != null) {
-          streamUrl = _live.streamUrl!;
-          _live.streamStartEpoch = DateTime.now().millisecondsSinceEpoch / 1000.0;
-          _live.atLiveEdge = true;
-        } else {
-          // Tune channel inside the player (shows loading spinner while tuning)
-          final channels = widget.live?.channels;
-          final channelIndex = _live.channelIndex;
-          if (channels == null || channelIndex < 0 || channelIndex >= channels.length) {
-            throw Exception('No channel to tune');
-          }
-          final channel = channels[channelIndex];
-          appLogger.d('Tune: dvrKey=$_live.dvrKey channelKey=${channel.key}');
-          final client = _live.client;
-          if (client is! PlexClient) {
-            throw StateError(
-              'In-player live tuning is Plex-only; got ${client?.runtimeType ?? 'null'}. '
-              'Jellyfin live TV must pass a pre-resolved liveStreamUrl via LiveTvSupport.resolveStreamUrl.',
-            );
-          }
-          final dvrKey = _live.dvrKey;
-          if (dvrKey == null) throw Exception('No DVR to tune');
-          final tuneResult = await client.tuneChannel(dvrKey, channel.key);
-          if (tuneResult == null) throw Exception('Failed to tune channel');
+        // Start the session inside the player for both backends (loading
+        // spinner covers Plex's tune / Jellyfin's stream negotiation).
+        final channel = widget.live!.channel;
+        final session = await _startLiveSession(channel);
+        if (session == null) throw Exception('Failed to start live channel');
+        if (!mounted || !attempt.isCurrent) {
+          _abandonLiveSession(session);
+          return;
+        }
+        _live.adoptSession(session);
 
-          _live.sessionIdentifier = tuneResult.sessionIdentifier;
-          _live.sessionPath = tuneResult.sessionPath;
-          _live.programId = tuneResult.metadata.ratingKey;
-          _live.durationMs = tuneResult.metadata.duration;
-          _live.captureBuffer = tuneResult.captureBuffer;
-          _live.programBeginsAt = tuneResult.beginsAt;
-          _live.transcodeSessionId = generateSessionIdentifier();
-
-          // Show "Watch from Start" dialog when an existing capture session has >60s of history.
-          // On a fresh tune (no active recording), the buffer is empty so this won't trigger.
-          int? offsetSeconds;
-          if (_live.captureBuffer != null && _live.programBeginsAt != null) {
-            final nowEpoch = DateTime.now().millisecondsSinceEpoch ~/ 1000;
-            final offsetProgramStart = _live.programBeginsAt! - _live.captureBuffer!.startedAt.round();
-            // If a session recording started after current program start, offset of program start at will be negative.
-            // If a session recording started before current program start, offset of program start will be positive.
-            // If guide data is not available, program start will be equal to current time.
-            final useProgramStart = offsetProgramStart > 0 && nowEpoch - _live.programBeginsAt! > 60;
-            final effectiveStart = useProgramStart ? _live.programBeginsAt! : _live.captureBuffer!.seekableStartEpoch;
-            final elapsed = nowEpoch - effectiveStart;
-            appLogger.d(
-              'Time-shift: buffer=${_live.captureBuffer!.seekableDurationSeconds}s, '
-              'beginsAt=$_live.programBeginsAt, elapsed=${elapsed}s (need >60 for dialog)',
-            );
-            if (elapsed > 60) {
-              final watchFromStart = await _showWatchFromStartDialog(effectiveStart, nowEpoch);
-              if (!mounted) return;
-              if (watchFromStart == true) {
-                offsetSeconds = useProgramStart ? offsetProgramStart : _live.captureBuffer!.seekStartSeconds.round();
-              }
-            }
-          }
-
-          // Build the stream URL (with optional offset for time-shift)
-          final streamPath = await client.buildLiveStreamPath(
-            sessionPath: tuneResult.sessionPath,
-            sessionIdentifier: tuneResult.sessionIdentifier,
-            transcodeSessionId: _live.transcodeSessionId!,
-            offsetSeconds: offsetSeconds,
+        // Show "Watch from Start" dialog when an existing capture session has >60s of history.
+        // On a fresh tune (no active recording), the buffer is empty so this won't trigger.
+        int? offsetSeconds;
+        final captureBuffer = session.captureBuffer;
+        final programBeginsAt = session.program.beginsAt;
+        if (captureBuffer != null && programBeginsAt != null) {
+          final nowEpoch = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+          final offsetProgramStart = programBeginsAt - captureBuffer.startedAt.round();
+          // If a session recording started after current program start, offset of program start at will be negative.
+          // If a session recording started before current program start, offset of program start will be positive.
+          // If guide data is not available, program start will be equal to current time.
+          final useProgramStart = offsetProgramStart > 0 && nowEpoch - programBeginsAt > 60;
+          final effectiveStart = useProgramStart ? programBeginsAt : captureBuffer.seekableStartEpoch;
+          final elapsed = nowEpoch - effectiveStart;
+          appLogger.d(
+            'Time-shift: buffer=${captureBuffer.seekableDurationSeconds}s, '
+            'beginsAt=$programBeginsAt, elapsed=${elapsed}s (need >60 for dialog)',
           );
-          if (streamPath == null || !mounted) throw Exception('Failed to build stream path');
-
-          streamUrl = client.buildLiveStreamUrl(streamPath);
-          _live.streamUrl = streamUrl;
-
-          // Track stream start epoch for position calculations
-          if (offsetSeconds != null) {
-            _live.streamStartEpoch = _live.captureBuffer!.startedAt + offsetSeconds;
-            _live.atLiveEdge = false;
-          } else {
-            _live.streamStartEpoch = DateTime.now().millisecondsSinceEpoch / 1000.0;
-            _live.atLiveEdge = true;
+          if (elapsed > 60) {
+            final watchFromStart = await _showWatchFromStartDialog(effectiveStart, nowEpoch);
+            if (!mounted) return;
+            if (watchFromStart == true) {
+              offsetSeconds = useProgramStart ? offsetProgramStart : captureBuffer.seekStartSeconds.round();
+            }
           }
         }
 
-        _live.playbackStartTime = DateTime.now();
+        // Build the stream URL (with optional offset for time-shift)
+        final streamUrl = await session.streamUrlAt(offsetSeconds: offsetSeconds);
+        if (streamUrl == null || !mounted) throw Exception('Failed to build stream path');
+
+        // Track stream start epoch for position calculations
+        if (offsetSeconds != null) {
+          _live.streamStartEpoch = captureBuffer!.startedAt + offsetSeconds;
+          _live.atLiveEdge = false;
+          _live.playbackStartTime = DateTime.now();
+        } else {
+          _live.markStreamRestartedAtLiveEdge();
+        }
+
         await currentPlayer.setProperty('force-seekable', 'no');
         await currentPlayer.open(Media(streamUrl, headers: const {'Accept-Language': 'en'}), play: true, isLive: true);
         if (!attempt.isCurrent) return;
@@ -138,7 +107,7 @@ extension _VideoPlayerPlaybackStartMethods on VideoPlayerScreenState {
         playbackContext = await playbackResolver.resolve(
           metadata: _currentMetadata,
           selectedMediaIndex: _effectiveSelectedMediaIndex,
-          selectedMediaSourceId: _selectedMediaSourceId,
+          selectedMediaSourceId: _requestedMediaSourceId,
           offlineLibraryMode: true,
           qualityPreset: _selectedQualityPreset,
           selectedAudioStreamId: _selectedAudioStreamId,
@@ -174,7 +143,7 @@ extension _VideoPlayerPlaybackStartMethods on VideoPlayerScreenState {
         PlaybackSession.fromContext(
           playbackContext,
           requestedQualityPreset: _selectedQualityPreset,
-          requestedMediaSourceId: _selectedMediaSourceId,
+          requestedMediaSourceId: _requestedMediaSourceId,
         ),
       );
 
@@ -184,8 +153,6 @@ extension _VideoPlayerPlaybackStartMethods on VideoPlayerScreenState {
       final settingsService = await SettingsService.getInstance();
       if (!attempt.isCurrent) return;
       final displayCriteria = result.mediaInfo?.displayCriteria;
-      final attachesSubsAtOpen = currentPlayer.attachesExternalSubtitlesAtOpen;
-      final hasExternalSubs = result.externalSubtitles.isNotEmpty;
       var audioFocusReady = false;
 
       Future<void> ensureAudioFocus() async {
@@ -210,6 +177,13 @@ extension _VideoPlayerPlaybackStartMethods on VideoPlayerScreenState {
       if (frameRatePlan == null) return;
       final shouldHoldPlaybackStart = frameRatePlan.holdPlaybackStart;
 
+      // When a Watch Together session is active the sync layer owns the
+      // start: open paused everywhere and let the host coordinate one
+      // simultaneous group start.
+      final wtOwnsStart = _watchTogetherOwnsPlaybackStart();
+      Completer<void>? wtStartupHold;
+      late _ExternalSubtitleOpenPlan externalSubtitlePlan;
+
       // Open video through Player
       if (result.videoUrl != null) {
         // Reset first frame flag and frame rate retry counter for new video
@@ -233,17 +207,6 @@ extension _VideoPlayerPlaybackStartMethods on VideoPlayerScreenState {
         );
         if (!mounted || player != currentPlayer) return;
 
-        // Enable FFmpeg auto-reconnect for VOD streams (covers network drops
-        // up to 10 min). Forwarded to the Kotlin layer on Android so MPV
-        // inherits it on the ExoPlayer→MPV fallback path (see
-        // _onBackendSwitched), so keep it unconditional.
-        if (!_isOfflinePlayback && !widget.isLive) {
-          await currentPlayer.setProperty(
-            'stream-lavf-o',
-            'reconnect=1,reconnect_on_network_error=1,reconnect_streamed=1,reconnect_delay_max=600',
-          );
-        }
-
         await _primeDisplayCriteria(
           player: currentPlayer,
           settingsService: settingsService,
@@ -251,8 +214,13 @@ extension _VideoPlayerPlaybackStartMethods on VideoPlayerScreenState {
           isTranscoding: result.isTranscoding,
         );
 
-        final shouldAutoPlay = !shouldHoldPlaybackStart && (attachesSubsAtOpen || !hasExternalSubs);
         frameRatePlan.armStartupRefreshGate(currentPlayer);
+        externalSubtitlePlan = _prepareExternalSubtitleOpenPlan(
+          player: currentPlayer,
+          externalSubtitles: result.externalSubtitles,
+        );
+        final shouldAutoPlay =
+            !shouldHoldPlaybackStart && !wtOwnsStart && externalSubtitlePlan.canStartBeforeTrackSetup;
 
         // ExoPlayer: attach external subs at open time so it discovers
         // them in a single prepare() — no media reload needed for selection.
@@ -268,19 +236,32 @@ extension _VideoPlayerPlaybackStartMethods on VideoPlayerScreenState {
           settingsService: settingsService,
           videoUrl: result.videoUrl!,
           isTranscoding: result.isTranscoding,
+          isLocalMedia: _isOfflinePlayback,
+          selectedVersion: result.selectedVersion,
           timing: openTiming,
           headers: streamHeaders,
           play: shouldAutoPlay,
-          externalSubtitlesAtOpen: attachesSubsAtOpen && hasExternalSubs ? result.externalSubtitles : null,
+          externalSubtitlesAtOpen: externalSubtitlePlan.subtitlesAtOpen,
           shouldContinue: () => attempt.isCurrent,
         );
         if (!didOpen || !attempt.isCurrent) return;
 
-        // Attach player to Watch Together session for sync (if in session)
+        // Attach player to Watch Together session for sync (if in session).
+        // With a frame-rate startup gate pending, sync readiness waits for
+        // its release so the group start can't fire mid display switch.
         if (mounted && !_isOfflinePlayback) {
-          _attachToWatchTogetherSession();
+          if (wtOwnsStart && shouldHoldPlaybackStart) {
+            wtStartupHold = Completer<void>();
+          }
+          _attachToWatchTogetherSession(startupHold: wtStartupHold?.future);
           _notifyWatchTogetherMediaChange();
         }
+      } else {
+        externalSubtitlePlan = _prepareExternalSubtitleOpenPlan(
+          player: currentPlayer,
+          externalSubtitles: result.externalSubtitles,
+          waitForFileLoaded: false,
+        );
       }
 
       // Versions/mediaInfo come from the committed session; rebuild so the
@@ -340,25 +321,33 @@ extension _VideoPlayerPlaybackStartMethods on VideoPlayerScreenState {
         _trackManager!.cacheExternalSubtitles(result.externalSubtitles);
 
         await _applyTracksAfterOpen(
-          forPlayer: currentPlayer,
           trackManager: _trackManager!,
-          externalSubtitles: result.externalSubtitles,
+          externalSubtitlePlan: externalSubtitlePlan,
           // When a startup gate below owns the resume, skip this one to
-          // avoid a double-play.
-          shouldResumeAfterSubtitleLoad: () => !shouldHoldPlaybackStart && mounted && player == currentPlayer,
+          // avoid a double-play. Watch Together stays paused for the group
+          // start, so selection is armed through the resume-skipped branch.
+          shouldResumeAfterSubtitleLoad: () =>
+              !shouldHoldPlaybackStart && !wtOwnsStart && mounted && player == currentPlayer,
+          applySelectionWhenResumeSkipped: wtOwnsStart && !shouldHoldPlaybackStart,
         );
 
         await _releaseFrameRateStartupGate(
           currentPlayer: currentPlayer,
           settingsService: settingsService,
           plan: frameRatePlan,
-          resumeAfterStartupGate: (reason) => _resumeAfterFrameRateStartupGate(
+          resumeAfterStartupGate: (reason) => _resumeAfterStartupGateOrYieldToWatchTogether(
             currentPlayer: currentPlayer,
-            attachesSubsAtOpen: attachesSubsAtOpen,
-            hasExternalSubs: hasExternalSubs,
+            externalSubtitlePlan: externalSubtitlePlan,
             reason: reason,
+            wtOwnsStart: wtOwnsStart,
+            wtStartupHold: wtStartupHold,
           ),
         );
+        // Backstop: if the gate never ran its resume path (unmounted race),
+        // don't leave Watch Together readiness held forever.
+        if (wtStartupHold != null && !wtStartupHold.isCompleted) {
+          wtStartupHold.complete();
+        }
       }
     } on PlaybackException catch (e, st) {
       appLogger.w('Playback initialization failed', error: e, stackTrace: st);

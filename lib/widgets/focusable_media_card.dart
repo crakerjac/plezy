@@ -23,6 +23,7 @@ class FocusableMediaCard extends StatefulWidget {
   final bool forceGridMode;
   final bool forceListMode;
   final bool isInContinueWatching;
+  final bool usesContinueWatchingAction;
   final String? collectionId;
 
   /// True for downloaded content without server access
@@ -80,6 +81,7 @@ class FocusableMediaCard extends StatefulWidget {
     this.forceGridMode = false,
     this.forceListMode = false,
     this.isInContinueWatching = false,
+    bool? usesContinueWatchingAction,
     this.collectionId,
     this.isOffline = false,
     this.mixedHubContext = false,
@@ -93,7 +95,7 @@ class FocusableMediaCard extends StatefulWidget {
     this.onNavigateRight,
     this.onBack,
     this.onFocusChange,
-  });
+  }) : usesContinueWatchingAction = usesContinueWatchingAction ?? isInContinueWatching;
 
   @override
   State<FocusableMediaCard> createState() => _FocusableMediaCardState();
@@ -117,9 +119,10 @@ class _FocusableMediaCardState extends State<FocusableMediaCard> {
       enableLongPress: true,
       disableScale: widget.disableScale,
       focusScale: widget.fullBleedImage ? FocusTheme.fullCardFocusScale : FocusTheme.focusScale,
-      focusBorderStrokeAlign: widget.fullBleedImage ? BorderSide.strokeAlignOutside : BorderSide.strokeAlignInside,
       useFocusGlow: widget.fullBleedImage,
-      useForegroundFocusDecoration: widget.fullBleedImage,
+      // MediaCard draws the focus border itself, on the rect its layout
+      // highlights (poster for standard grid cards, whole card otherwise).
+      delegateFocusBorder: true,
       useComfortableZone: !PlatformDetector.isTV(), // Always center on TV
       scrollAlignment: 0.5,
       child: MediaCard(
@@ -133,6 +136,7 @@ class _FocusableMediaCardState extends State<FocusableMediaCard> {
         forceGridMode: widget.forceGridMode,
         forceListMode: widget.forceListMode,
         isInContinueWatching: widget.isInContinueWatching,
+        usesContinueWatchingAction: widget.usesContinueWatchingAction,
         collectionId: widget.collectionId,
         isOffline: widget.isOffline,
         mixedHubContext: widget.mixedHubContext,

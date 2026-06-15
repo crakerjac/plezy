@@ -31,6 +31,12 @@ abstract class PlayerBase with PlayerStreamControllersMixin implements Player {
   @override
   PlayerState get state => _state;
 
+  @override
+  Duration get currentPosition => Duration(milliseconds: _positionMs);
+
+  @override
+  bool get audioPassthroughActive => false;
+
   late final PlayerStreams _streams;
 
   @override
@@ -382,6 +388,7 @@ abstract class PlayerBase with PlayerStreamControllersMixin implements Player {
       case 'file-loaded':
         _state = _state.copyWith(completed: false);
         completedController.add(false);
+        fileLoadedController.add(null);
         break;
 
       case 'playback-restart':
@@ -662,6 +669,15 @@ abstract class PlayerBase with PlayerStreamControllersMixin implements Player {
   // ignore: no-empty-block - base no-op, overridden by platform subclasses
   Future<void> setAudioPassthrough(bool enabled) async {}
 
+  /// mpv loudnorm targeting streaming-style loudness; mirrored by the
+  /// Android ExoPlayer effect parameters in AudioNormalizationEffect.kt.
+  static const _loudnormFilter = 'loudnorm=I=-14:TP=-3:LRA=4';
+
+  @override
+  Future<void> setAudioNormalization(bool enabled) async {
+    await setProperty('af', enabled ? _loudnormFilter : '');
+  }
+
   @override
   // ignore: no-empty-block - base no-op, overridden by platform subclasses
   Future<void> setLogLevel(String level) async {}
@@ -742,11 +758,23 @@ abstract class PlayerBase with PlayerStreamControllersMixin implements Player {
     if (_disposed) return;
     _disposed = true;
 
-    await _eventSubscription?.cancel();
+    try {
+      await _eventSubscription?.cancel();
+    } on PlatformException catch (e, st) {
+      appLogger.d('Player event stream already detached during dispose', error: e, stackTrace: st);
+    } on MissingPluginException catch (e, st) {
+      appLogger.d('Player event stream plugin missing during dispose', error: e, stackTrace: st);
+    }
     await _logSubscription?.cancel();
-    await methodChannel.invokeMethod('dispose', {
-      'preserveDisplayMode': preserveDisplayMode,
-    }); // Direct call — already guarded by _disposed check above
+    try {
+      await methodChannel.invokeMethod('dispose', {
+        'preserveDisplayMode': preserveDisplayMode,
+      }); // Direct call — already guarded by _disposed check above
+    } on PlatformException catch (e, st) {
+      appLogger.w('Player native dispose failed during teardown', error: e, stackTrace: st);
+    } on MissingPluginException catch (e, st) {
+      appLogger.w('Player native dispose plugin missing during teardown', error: e, stackTrace: st);
+    }
     await closeStreamControllers();
   }
 }
