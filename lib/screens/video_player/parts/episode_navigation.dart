@@ -136,12 +136,12 @@ extension _VideoPlayerEpisodeNavigationMethods on VideoPlayerScreenState {
     final currentSubtitleStreamId = _selectedSourceSubtitleStreamIdForControls(_sourceSubtitleTracksForControls());
     final effectiveSubtitleStreamId = newSubtitleStreamId ?? currentSubtitleStreamId;
     final effectiveMediaSourceId = newMediaIndex != null
-        ? PlaybackSession.mediaSourceIdForIndex(_availableVersions, effectiveMediaIndex) ?? _selectedMediaSourceId
-        : _selectedMediaSourceId;
+        ? PlaybackSession.mediaSourceIdForIndex(_availableVersions, effectiveMediaIndex) ?? _requestedMediaSourceId
+        : _requestedMediaSourceId;
 
     final isVersionChange =
         effectiveMediaIndex != _effectiveSelectedMediaIndex ||
-        (_selectedMediaSourceId != null && effectiveMediaSourceId != _selectedMediaSourceId);
+        (_requestedMediaSourceId != null && effectiveMediaSourceId != _requestedMediaSourceId);
     final isPresetChange = effectivePreset != _selectedQualityPreset;
     final isAudioChange = effectiveAudioStreamId != _selectedAudioStreamId;
     final isSubtitleChange = newSubtitleStreamId != null && effectiveSubtitleStreamId != currentSubtitleStreamId;
@@ -150,10 +150,11 @@ extension _VideoPlayerEpisodeNavigationMethods on VideoPlayerScreenState {
     // Read the client before any await — context across an async gap. A
     // missing client leaves this null and the guard below reports it.
     final serverId = _currentMetadata.serverId;
-    PlexClient? subtitleClient;
-    if (isSubtitleChange && serverId != null) {
+    final isPlexBacked = _currentMetadata.backend == MediaBackend.plex;
+    PlexClient? streamSelectClient;
+    if ((isSubtitleChange || (isAudioChange && isPlexBacked)) && serverId != null) {
       try {
-        subtitleClient = context.getPlexClientForServer(ServerId(serverId));
+        streamSelectClient = context.getPlexClientForServer(ServerId(serverId));
       } catch (_) {}
     }
 
@@ -162,18 +163,19 @@ extension _VideoPlayerEpisodeNavigationMethods on VideoPlayerScreenState {
         await saveMediaVersionIndexFor(_currentMetadata, effectiveMediaIndex);
       }
 
-      if (isSubtitleChange) {
+      if (isSubtitleChange || (isAudioChange && isPlexBacked)) {
         final partId = _currentMediaInfo?.partId;
-        if (subtitleClient == null || partId == null || effectiveSubtitleStreamId == null) {
-          throw StateError('No Plex part available for subtitle stream selection');
+        if (streamSelectClient == null || partId == null) {
+          throw StateError('No Plex part available for stream selection');
         }
-        final saved = await subtitleClient.selectStreams(
+        final saved = await streamSelectClient.selectStreams(
           partId,
-          subtitleStreamID: effectiveSubtitleStreamId,
+          audioStreamID: isAudioChange ? effectiveAudioStreamId : null,
+          subtitleStreamID: isSubtitleChange ? effectiveSubtitleStreamId : null,
           allParts: true,
         );
         if (!saved) {
-          throw StateError('Failed to select subtitle stream');
+          throw StateError('Failed to select streams');
         }
       }
 
@@ -253,13 +255,15 @@ extension _VideoPlayerEpisodeNavigationMethods on VideoPlayerScreenState {
     final playbackState = context.read<PlaybackStateProvider>();
     final database = context.read<AppDatabase>();
     final serverManager = context.read<MultiServerProvider>().serverManager;
-    // Sync readiness (playerReady/deferredPlay/firstPlay handshake) is
-    // per-item: cycle the Watch Together attachment across item changes, the
-    // same reset the old screen-swap flow got from dispose + re-attach.
-    // Same-item source switches keep the attachment (and readiness) intact.
+    // Cycle the Watch Together attachment across every reload: the reload's
+    // internal pause/open churn must not leak into the sync layer as user
+    // intents. Readiness re-handshakes on re-attach (item changes start a
+    // new media epoch; same-item source switches group-wait while we
+    // reload).
     final watchTogether = _activeWatchTogetherSession();
-    final watchTogetherWasAttached = watchTogether?.syncManager?.hasPlayer ?? false;
-    final cycleWatchTogetherAttachment = watchTogetherWasAttached && isItemChange;
+    final watchTogetherWasAttached = watchTogether?.hasAttachedPlayer ?? false;
+    final cycleWatchTogetherAttachment = watchTogetherWasAttached;
+    final wtOwnsStart = _watchTogetherOwnsPlaybackStart();
 
     if (!isCurrentReload()) return true;
 
@@ -337,8 +341,6 @@ extension _VideoPlayerEpisodeNavigationMethods on VideoPlayerScreenState {
       );
       if (!isCurrentReload()) return true;
 
-      final hasExternalSubs = result.externalSubtitles.isNotEmpty;
-      final attachesSubsAtOpen = currentPlayer.attachesExternalSubtitlesAtOpen;
       final displayCriteria = result.mediaInfo?.displayCriteria;
       final settingsService = await SettingsService.getInstance();
       if (!isCurrentReload()) return true;
@@ -380,15 +382,23 @@ extension _VideoPlayerEpisodeNavigationMethods on VideoPlayerScreenState {
       if (!isCurrentReload()) return true;
 
       frameRatePlan.armStartupRefreshGate(currentPlayer);
+      final externalSubtitlePlan = _prepareExternalSubtitleOpenPlan(
+        player: currentPlayer,
+        externalSubtitles: result.externalSubtitles,
+      );
       final didOpen = await _openMediaOnPlayer(
         player: currentPlayer,
         settingsService: settingsService,
         videoUrl: result.videoUrl!,
         isTranscoding: result.isTranscoding,
+        // Not _isOfflinePlayback: the replacement session commits later, in
+        // onOpened, so the getter still describes the previous item here.
+        isLocalMedia: _offlineLibraryMode || result.usesLocalMedia,
+        selectedVersion: result.selectedVersion,
         timing: openTiming,
         headers: result.usesLocalMedia ? null : streamHeaders,
-        play: !frameRatePlan.holdPlaybackStart && (attachesSubsAtOpen || !hasExternalSubs),
-        externalSubtitlesAtOpen: attachesSubsAtOpen && hasExternalSubs ? result.externalSubtitles : null,
+        play: !frameRatePlan.holdPlaybackStart && !wtOwnsStart && externalSubtitlePlan.canStartBeforeTrackSetup,
+        externalSubtitlesAtOpen: externalSubtitlePlan.subtitlesAtOpen,
         shouldContinue: isCurrentReload,
         onOpened: () {
           // The player now owns the new file — publish the session at the
@@ -430,12 +440,14 @@ extension _VideoPlayerEpisodeNavigationMethods on VideoPlayerScreenState {
       trackManager.cacheExternalSubtitles(result.externalSubtitles);
 
       await _applyTracksAfterOpen(
-        forPlayer: currentPlayer,
         trackManager: trackManager,
-        externalSubtitles: result.externalSubtitles,
+        externalSubtitlePlan: externalSubtitlePlan,
         // Same guard as the start path: don't resume a player a newer flow
-        // owns, and let a pending startup gate own the resume instead.
-        shouldResumeAfterSubtitleLoad: () => !frameRatePlan.holdPlaybackStart && mounted && player == currentPlayer,
+        // owns, and let a pending startup gate (or Watch Together's group
+        // start) own the resume instead.
+        shouldResumeAfterSubtitleLoad: () =>
+            !frameRatePlan.holdPlaybackStart && !wtOwnsStart && mounted && player == currentPlayer,
+        applySelectionWhenResumeSkipped: wtOwnsStart && !frameRatePlan.holdPlaybackStart,
       );
       if (!isCurrentReload()) return true;
 
@@ -443,11 +455,11 @@ extension _VideoPlayerEpisodeNavigationMethods on VideoPlayerScreenState {
         currentPlayer: currentPlayer,
         settingsService: settingsService,
         plan: frameRatePlan,
-        resumeAfterStartupGate: (reason) => _resumeAfterFrameRateStartupGate(
+        resumeAfterStartupGate: (reason) => _resumeAfterStartupGateOrYieldToWatchTogether(
           currentPlayer: currentPlayer,
-          attachesSubsAtOpen: attachesSubsAtOpen,
-          hasExternalSubs: hasExternalSubs,
+          externalSubtitlePlan: externalSubtitlePlan,
           reason: reason,
+          wtOwnsStart: wtOwnsStart,
         ),
       );
       if (!isCurrentReload()) return true;
@@ -529,14 +541,25 @@ extension _VideoPlayerEpisodeNavigationMethods on VideoPlayerScreenState {
       // Restore Watch Together sync on every exit: after a successful item
       // change (readiness re-handshakes for the new item), after a failed
       // reload (the still-playing old item must stay synced), and when the
-      // manager auto-detached itself on a mid-reload remote-action failure.
+      // controller auto-detached itself on a mid-reload player failure.
+      // _currentMetadata is correct on both the success and rollback paths
+      // by the time we get here.
+      final reattachServerId = _currentMetadata.serverId;
       if (watchTogetherWasAttached &&
           watchTogether != null &&
           watchTogether.isInSession &&
           mounted &&
           player == currentPlayer &&
-          !(watchTogether.syncManager?.hasPlayer ?? true)) {
-        watchTogether.attachPlayer(currentPlayer);
+          reattachServerId != null &&
+          !watchTogether.hasAttachedPlayer) {
+        watchTogether.attachPlayer(
+          currentPlayer,
+          ratingKey: _currentMetadata.id,
+          serverId: reattachServerId,
+          mediaTitle: _currentMetadata.displayTitle,
+          hasFirstFrame: _hasFirstFrame.value,
+          remoteSeek: _seekPlayback,
+        );
       }
     }
   }

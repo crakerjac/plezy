@@ -4,16 +4,19 @@ import android.app.Activity
 import android.app.ActivityManager
 import android.app.AppOpsManager
 import android.app.PictureInPictureParams
+import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.graphics.SurfaceTexture
+import android.media.AudioManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.Process
 import android.provider.Settings
 import android.util.Log
 import android.util.Rational
@@ -22,6 +25,7 @@ import android.view.KeyEvent
 import android.view.TextureView
 import android.view.ViewGroup
 import android.view.WindowInsets
+import android.view.WindowManager
 import android.view.inputmethod.InputMethodManager
 import android.widget.FrameLayout
 import androidx.core.content.FileProvider
@@ -38,6 +42,7 @@ import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.embedding.engine.FlutterShellArgs
 import io.flutter.plugin.common.MethodChannel
 import java.io.File
+import kotlin.math.roundToInt
 
 class MainActivity : FlutterActivity() {
 
@@ -76,12 +81,14 @@ class MainActivity : FlutterActivity() {
   private val EXTERNAL_PLAYER_CHANNEL = "com.plezy/external_player"
   private val THEME_CHANNEL = "com.plezy/theme"
   private val DEVICE_CHANNEL = "com.plezy/device"
+  private val DEVICE_ADJUSTMENT_CHANNEL = "com.plezy/device_adjustment"
   private val TEXT_INPUT_CHANNEL = "com.plezy/text_input"
   private val APP_EXIT_CHANNEL = "com.plezy/app_exit"
   private val APP_FOREGROUND_CHANNEL = "com.plezy/app_foreground"
   private var watchNextPlugin: WatchNextPlugin? = null
   private var nativeTextInputFocused = false
   private var pendingExternalPlayerResult: MethodChannel.Result? = null
+  private var originalWindowBrightness: Float? = null
 
   private inline fun logTextInputDiag(message: () -> String) {
     if (TEXT_INPUT_DIAGNOSTICS_ENABLED) {
@@ -187,6 +194,19 @@ class MainActivity : FlutterActivity() {
       "hasFakeTouch" to hasFakeTouch,
       "manufacturer" to Build.MANUFACTURER,
       "model" to Build.MODEL
+    )
+  }
+
+  /** Hardware capability signals used by Dart to pick the visual-effects tier. */
+  private fun getPerformanceSignals(): Map<String, Any> {
+    val activityManager = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+    val memoryInfo = ActivityManager.MemoryInfo()
+    activityManager.getMemoryInfo(memoryInfo)
+    return mapOf(
+      // Actual process bitness: low-end TV boxes often run 32-bit userspace.
+      "is64Bit" to Process.is64Bit(),
+      "isLowRamDevice" to activityManager.isLowRamDevice,
+      "totalMemBytes" to memoryInfo.totalMem
     )
   }
 
@@ -440,8 +460,13 @@ class MainActivity : FlutterActivity() {
       when (call.method) {
         "getTvDetection" -> result.success(getAndroidTvDetection())
         "getDeviceName" -> result.success(getDeviceName())
+        "getPerformanceSignals" -> result.success(getPerformanceSignals())
         else -> result.notImplemented()
       }
+    }
+
+    MethodChannel(flutterEngine.dartExecutor.binaryMessenger, DEVICE_ADJUSTMENT_CHANNEL).setMethodCallHandler { call, result ->
+      handleDeviceAdjustmentCall(call.method, call.arguments, result)
     }
 
     MethodChannel(flutterEngine.dartExecutor.binaryMessenger, TEXT_INPUT_CHANNEL).setMethodCallHandler { call, result ->
@@ -482,7 +507,9 @@ class MainActivity : FlutterActivity() {
       when (call.method) {
         "openVideo" -> {
           val filePath = call.argument<String>("filePath")
-          val packageName = call.argument<String>("package")
+          val packageNames = call.argument<List<Any?>>("packages")
+            ?.mapNotNull { (it as? String)?.trim()?.takeIf { value -> value.isNotEmpty() } }
+            ?: emptyList()
           val title = call.argument<String>("title")?.trim()?.takeIf { it.isNotEmpty() }
           val startPositionMs = call.argument<Number>("startPositionMs")?.toLong() ?: 0L
 
@@ -516,14 +543,12 @@ class MainActivity : FlutterActivity() {
               grantRead = true
             }
 
-            val intent = Intent(Intent.ACTION_VIEW).apply {
+            fun buildIntent(packageName: String?): Intent = Intent(Intent.ACTION_VIEW).apply {
               setDataAndType(uri, "video/*")
               if (grantRead) {
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
               }
-              if (packageName != null) {
-                setPackage(packageName)
-              }
+              packageName?.let { setPackage(it) }
               val startPosition = startPositionMs.coerceAtLeast(0).coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
               if (startPosition > 0) {
                 putExtra(API_MX_RESULT_POSITION, startPosition)
@@ -538,11 +563,25 @@ class MainActivity : FlutterActivity() {
               }
               fileName?.let { putExtra(API_MX_FILENAME, it) }
             }
-            pendingExternalPlayerResult = result
-            startActivityForResult(intent, EXTERNAL_PLAYER_REQUEST_CODE)
-          } catch (e: android.content.ActivityNotFoundException) {
+
+            val targetPackages = if (packageNames.isEmpty()) listOf<String?>(null) else packageNames
+            for (packageName in targetPackages) {
+              try {
+                pendingExternalPlayerResult = result
+                startActivityForResult(buildIntent(packageName), EXTERNAL_PLAYER_REQUEST_CODE)
+                return@setMethodCallHandler
+              } catch (e: ActivityNotFoundException) {
+                pendingExternalPlayerResult = null
+              }
+            }
+
             pendingExternalPlayerResult = null
-            result.error("APP_NOT_FOUND", "No app found for package: $packageName", null)
+            val message = if (packageNames.isEmpty()) {
+              "No app found for video"
+            } else {
+              "No app found for packages: ${packageNames.joinToString(", ")}"
+            }
+            result.error("APP_NOT_FOUND", message, null)
           } catch (e: Exception) {
             pendingExternalPlayerResult = null
             result.error("LAUNCH_FAILED", e.message ?: e.javaClass.simpleName, null)
@@ -670,6 +709,92 @@ class MainActivity : FlutterActivity() {
       Log.w(TAG, "Failed to start foreground activity", launchError)
       false
     }
+  }
+
+  private fun handleDeviceAdjustmentCall(method: String, arguments: Any?, result: MethodChannel.Result) {
+    try {
+      when (method) {
+        "getBrightness" -> result.success(getScreenBrightnessFraction())
+        "setBrightness" -> {
+          setScreenBrightnessFraction(argumentAsDouble(arguments))
+          result.success(null)
+        }
+        "restoreBrightness" -> {
+          restoreScreenBrightness()
+          result.success(null)
+        }
+        "getMediaVolume" -> result.success(getMediaVolumeFraction())
+        "setMediaVolume" -> {
+          setMediaVolumeFraction(argumentAsDouble(arguments))
+          result.success(null)
+        }
+        else -> result.notImplemented()
+      }
+    } catch (e: IllegalArgumentException) {
+      result.error("INVALID_ARGUMENT", e.message ?: e.javaClass.simpleName, null)
+    } catch (e: Exception) {
+      result.error("DEVICE_ADJUSTMENT_FAILED", e.message ?: e.javaClass.simpleName, null)
+    }
+  }
+
+  private fun argumentAsDouble(arguments: Any?): Double {
+    val value = (arguments as? Number)?.toDouble()
+      ?: throw IllegalArgumentException("Expected a numeric value")
+    if (value.isNaN() || value.isInfinite()) {
+      throw IllegalArgumentException("Expected a finite numeric value")
+    }
+    return value.coerceIn(0.0, 1.0)
+  }
+
+  private fun getScreenBrightnessFraction(): Double {
+    val windowBrightness = window.attributes.screenBrightness
+    if (windowBrightness >= 0f) return windowBrightness.coerceIn(0f, 1f).toDouble()
+
+    return try {
+      Settings.System.getInt(contentResolver, Settings.System.SCREEN_BRIGHTNESS).coerceIn(0, 255) / 255.0
+    } catch (e: Settings.SettingNotFoundException) {
+      0.5
+    }
+  }
+
+  private fun setScreenBrightnessFraction(value: Double) {
+    if (originalWindowBrightness == null) originalWindowBrightness = window.attributes.screenBrightness
+    val attributes = window.attributes
+    attributes.screenBrightness = value.coerceIn(0.0, 1.0).toFloat()
+    window.attributes = attributes
+  }
+
+  private fun restoreScreenBrightness() {
+    val attributes = window.attributes
+    attributes.screenBrightness = originalWindowBrightness ?: WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
+    window.attributes = attributes
+    originalWindowBrightness = null
+  }
+
+  private fun getMediaVolumeFraction(): Double {
+    val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+    val maxVolume = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+    val minVolume = streamMinVolume(audioManager)
+    if (maxVolume <= minVolume) return 0.0
+
+    val volume = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC).coerceIn(minVolume, maxVolume)
+    return (volume - minVolume).toDouble() / (maxVolume - minVolume).toDouble()
+  }
+
+  private fun setMediaVolumeFraction(value: Double) {
+    val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+    val maxVolume = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+    val minVolume = streamMinVolume(audioManager)
+    val target = (minVolume + value.coerceIn(0.0, 1.0) * (maxVolume - minVolume))
+      .roundToInt()
+      .coerceIn(minVolume, maxVolume)
+    audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, target, 0)
+  }
+
+  private fun streamMinVolume(audioManager: AudioManager): Int = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+    audioManager.getStreamMinVolume(AudioManager.STREAM_MUSIC)
+  } else {
+    0
   }
 
   override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean, newConfig: Configuration) {
