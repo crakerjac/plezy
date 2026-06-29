@@ -118,6 +118,9 @@
     "continueWatchingAction": "視聴中の操作",
     "continueWatchingPlay": "再生",
     "continueWatchingDetails": "詳細を開く",
+    "episodeAction": "エピソードの操作",
+    "episodePlay": "再生",
+    "episodeDetails": "詳細を開く",
     "useGlobalHubs": "ホームレイアウトを使用",
     "useGlobalHubsDescription": "統合ホームハブを表示します。オフの場合はライブラリのおすすめを使用します。",
     "showServerNameOnHubs": "ハブにサーバー名を表示",
@@ -771,7 +774,8 @@
       "studio": "スタジオ",
       "random": "ランダム",
       "dateShared": "共有日",
-      "latestEpisodeAirDate": "最新エピソード放送日"
+      "latestEpisodeAirDate": "最新エピソード放送日",
+      "lastEpisodeDateAdded": "最新エピソード追加日"
     }
   },
   "about": {
@@ -1027,6 +1031,7 @@
     "unwatchedOnly": "未視聴のみ",
     "nextNUnwatched": "次の${count}件の未視聴",
     "customAmount": "数を指定...",
+    "includeSpecials": "スペシャルを含める",
     "howManyEpisodes": "何エピソード？",
     "itemsQueued": "${count}件をダウンロードキューに追加",
     "keepSynced": "同期を維持",

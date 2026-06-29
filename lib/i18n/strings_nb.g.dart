@@ -247,6 +247,9 @@ class _TranslationsSettingsNb extends TranslationsSettingsEn {
 	@override String get continueWatchingAction => 'Handling for Fortsett å se';
 	@override String get continueWatchingPlay => 'Spill av';
 	@override String get continueWatchingDetails => 'Åpne detaljer';
+	@override String get episodeAction => 'Handling for episoder';
+	@override String get episodePlay => 'Spill av';
+	@override String get episodeDetails => 'Åpne detaljer';
 	@override String get useGlobalHubs => 'Bruk startoppsett';
 	@override String get useGlobalHubsDescription => 'Vis samlet startinnhold. Ellers brukes bibliotekanbefalinger.';
 	@override String get showServerNameOnHubs => 'Vis servernavn på huber';
@@ -1285,6 +1288,7 @@ class _TranslationsDownloadsNb extends TranslationsDownloadsEn {
 	@override String get unwatchedOnly => 'Kun usette';
 	@override String nextNUnwatched({required Object count}) => 'Neste ${count} usette';
 	@override String get customAmount => 'Egendefinert antall...';
+	@override String get includeSpecials => 'Inkluder spesialepisoder';
 	@override String get howManyEpisodes => 'Hvor mange episoder?';
 	@override String itemsQueued({required Object count}) => '${count} elementer i nedlastingskø';
 	@override String get keepSynced => 'Hold synkronisert';
@@ -1755,6 +1759,7 @@ class _TranslationsLibrariesSortLabelsNb extends TranslationsLibrariesSortLabels
 	@override String get random => 'Tilfeldig';
 	@override String get dateShared => 'Delingsdato';
 	@override String get latestEpisodeAirDate => 'Siste episodes sendedato';
+	@override String get lastEpisodeDateAdded => 'Dato for sist lagt til episode';
 }
 
 // Path: companionRemote.session
@@ -2029,6 +2034,9 @@ extension on TranslationsNb {
 			'settings.continueWatchingAction' => 'Handling for Fortsett å se',
 			'settings.continueWatchingPlay' => 'Spill av',
 			'settings.continueWatchingDetails' => 'Åpne detaljer',
+			'settings.episodeAction' => 'Handling for episoder',
+			'settings.episodePlay' => 'Spill av',
+			'settings.episodeDetails' => 'Åpne detaljer',
 			'settings.useGlobalHubs' => 'Bruk startoppsett',
 			'settings.useGlobalHubsDescription' => 'Vis samlet startinnhold. Ellers brukes bibliotekanbefalinger.',
 			'settings.showServerNameOnHubs' => 'Vis servernavn på huber',
@@ -2430,11 +2438,11 @@ extension on TranslationsNb {
 			'messages.logsUploaded' => 'Logger lastet opp',
 			'messages.logsUploadFailed' => 'Kunne ikke laste opp logger',
 			'messages.logId' => 'Logg-ID',
+			_ => null,
+		} ?? switch (path) {
 			'subtitlingStyling.text' => 'Tekst',
 			'subtitlingStyling.border' => 'Kantlinje',
 			'subtitlingStyling.background' => 'Bakgrunn',
-			_ => null,
-		} ?? switch (path) {
 			'subtitlingStyling.fontSize' => 'Skriftstørrelse',
 			'subtitlingStyling.textColor' => 'Tekstfarge',
 			'subtitlingStyling.borderSize' => 'Kantstørrelse',
@@ -2638,6 +2646,7 @@ extension on TranslationsNb {
 			'libraries.sortLabels.random' => 'Tilfeldig',
 			'libraries.sortLabels.dateShared' => 'Delingsdato',
 			'libraries.sortLabels.latestEpisodeAirDate' => 'Siste episodes sendedato',
+			'libraries.sortLabels.lastEpisodeDateAdded' => 'Dato for sist lagt til episode',
 			'about.title' => 'Om',
 			'about.openSourceLicenses' => 'Åpen kildekode-lisenser',
 			'about.versionLabel' => ({required Object version}) => 'Versjon ${version}',
@@ -2870,6 +2879,7 @@ extension on TranslationsNb {
 			'downloads.unwatchedOnly' => 'Kun usette',
 			'downloads.nextNUnwatched' => ({required Object count}) => 'Neste ${count} usette',
 			'downloads.customAmount' => 'Egendefinert antall...',
+			'downloads.includeSpecials' => 'Inkluder spesialepisoder',
 			'downloads.howManyEpisodes' => 'Hvor mange episoder?',
 			'downloads.itemsQueued' => ({required Object count}) => '${count} elementer i nedlastingskø',
 			'downloads.keepSynced' => 'Hold synkronisert',
@@ -2942,13 +2952,13 @@ extension on TranslationsNb {
 			'companionRemote.pairing.authFailed' => 'Autentisering mislyktes. Begge enheter må bruke samme Plex-konto.',
 			'companionRemote.pairing.failedToConnect' => ({required Object error}) => 'Kunne ikke koble til: ${error}',
 			'companionRemote.remote.disconnectConfirm' => 'Vil du koble fra fjernøkten?',
+			_ => null,
+		} ?? switch (path) {
 			'companionRemote.remote.reconnecting' => 'Kobler til på nytt...',
 			'companionRemote.remote.attemptOf' => ({required Object current}) => 'Forsøk ${current} av 5',
 			'companionRemote.remote.retryNow' => 'Prøv nå',
 			'companionRemote.remote.tabRemote' => 'Fjernkontroll',
 			'companionRemote.remote.tabPlay' => 'Spill av',
-			_ => null,
-		} ?? switch (path) {
 			'companionRemote.remote.tabMore' => 'Mer',
 			'companionRemote.remote.menu' => 'Meny',
 			'companionRemote.remote.tabNavigation' => 'Fanenavigering',

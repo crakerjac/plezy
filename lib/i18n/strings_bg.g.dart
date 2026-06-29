@@ -247,6 +247,9 @@ class _TranslationsSettingsBg extends TranslationsSettingsEn {
 	@override String get continueWatchingAction => 'Действие за продължаване на гледането';
 	@override String get continueWatchingPlay => 'Пусни';
 	@override String get continueWatchingDetails => 'Отвори подробности';
+	@override String get episodeAction => 'Действие за епизод';
+	@override String get episodePlay => 'Пусни';
+	@override String get episodeDetails => 'Отвори подробности';
 	@override String get useGlobalHubs => 'Използвай начално оформление';
 	@override String get useGlobalHubsDescription => 'Показвай обединени начални хъбове. В противен случай използвай препоръките на библиотеката.';
 	@override String get showServerNameOnHubs => 'Показвай името на сървъра в хъбовете';
@@ -1285,6 +1288,7 @@ class _TranslationsDownloadsBg extends TranslationsDownloadsEn {
 	@override String get unwatchedOnly => 'Само негледани';
 	@override String nextNUnwatched({required Object count}) => 'Следващите ${count} негледани';
 	@override String get customAmount => 'Персонален брой...';
+	@override String get includeSpecials => 'Включи специалните';
 	@override String get howManyEpisodes => 'Колко епизода?';
 	@override String itemsQueued({required Object count}) => '${count} елемента са добавени в опашката за изтегляне';
 	@override String get keepSynced => 'Поддържай синхронизирано';
@@ -1755,6 +1759,7 @@ class _TranslationsLibrariesSortLabelsBg extends TranslationsLibrariesSortLabels
 	@override String get random => 'Случайно';
 	@override String get dateShared => 'Дата на споделяне';
 	@override String get latestEpisodeAirDate => 'Дата на излъчване на последния епизод';
+	@override String get lastEpisodeDateAdded => 'Дата на добавяне на последния епизод';
 }
 
 // Path: companionRemote.session
@@ -2029,6 +2034,9 @@ extension on TranslationsBg {
 			'settings.continueWatchingAction' => 'Действие за продължаване на гледането',
 			'settings.continueWatchingPlay' => 'Пусни',
 			'settings.continueWatchingDetails' => 'Отвори подробности',
+			'settings.episodeAction' => 'Действие за епизод',
+			'settings.episodePlay' => 'Пусни',
+			'settings.episodeDetails' => 'Отвори подробности',
 			'settings.useGlobalHubs' => 'Използвай начално оформление',
 			'settings.useGlobalHubsDescription' => 'Показвай обединени начални хъбове. В противен случай използвай препоръките на библиотеката.',
 			'settings.showServerNameOnHubs' => 'Показвай името на сървъра в хъбовете',
@@ -2430,11 +2438,11 @@ extension on TranslationsBg {
 			'messages.logsUploaded' => 'Логовете са качени',
 			'messages.logsUploadFailed' => 'Неуспешно качване на логовете',
 			'messages.logId' => 'ID на лога',
+			_ => null,
+		} ?? switch (path) {
 			'subtitlingStyling.text' => 'Текст',
 			'subtitlingStyling.border' => 'Рамка',
 			'subtitlingStyling.background' => 'Фон',
-			_ => null,
-		} ?? switch (path) {
 			'subtitlingStyling.fontSize' => 'Размер на шрифта',
 			'subtitlingStyling.textColor' => 'Цвят на текста',
 			'subtitlingStyling.borderSize' => 'Размер на рамката',
@@ -2638,6 +2646,7 @@ extension on TranslationsBg {
 			'libraries.sortLabels.random' => 'Случайно',
 			'libraries.sortLabels.dateShared' => 'Дата на споделяне',
 			'libraries.sortLabels.latestEpisodeAirDate' => 'Дата на излъчване на последния епизод',
+			'libraries.sortLabels.lastEpisodeDateAdded' => 'Дата на добавяне на последния епизод',
 			'about.title' => 'Относно',
 			'about.openSourceLicenses' => 'Лицензи с отворен код',
 			'about.versionLabel' => ({required Object version}) => 'Версия ${version}',
@@ -2870,6 +2879,7 @@ extension on TranslationsBg {
 			'downloads.unwatchedOnly' => 'Само негледани',
 			'downloads.nextNUnwatched' => ({required Object count}) => 'Следващите ${count} негледани',
 			'downloads.customAmount' => 'Персонален брой...',
+			'downloads.includeSpecials' => 'Включи специалните',
 			'downloads.howManyEpisodes' => 'Колко епизода?',
 			'downloads.itemsQueued' => ({required Object count}) => '${count} елемента са добавени в опашката за изтегляне',
 			'downloads.keepSynced' => 'Поддържай синхронизирано',
@@ -2942,13 +2952,13 @@ extension on TranslationsBg {
 			'companionRemote.pairing.authFailed' => 'Удостоверяването е неуспешно. Двете устройства трябва да използват същия Plex акаунт.',
 			'companionRemote.pairing.failedToConnect' => ({required Object error}) => 'Неуспешно свързване: ${error}',
 			'companionRemote.remote.disconnectConfirm' => 'Искате ли да прекъснете връзката с дистанционната сесия?',
+			_ => null,
+		} ?? switch (path) {
 			'companionRemote.remote.reconnecting' => 'Повторно свързване...',
 			'companionRemote.remote.attemptOf' => ({required Object current}) => 'Опит ${current} от 5',
 			'companionRemote.remote.retryNow' => 'Опитай сега',
 			'companionRemote.remote.tabRemote' => 'Дистанционно',
 			'companionRemote.remote.tabPlay' => 'Пускане',
-			_ => null,
-		} ?? switch (path) {
 			'companionRemote.remote.tabMore' => 'Още',
 			'companionRemote.remote.menu' => 'Меню',
 			'companionRemote.remote.tabNavigation' => 'Навигация с Tab',

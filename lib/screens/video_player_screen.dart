@@ -22,6 +22,7 @@ import '../media/media_server_user_profile.dart';
 import '../media/media_item.dart';
 import '../media/media_item_types.dart';
 import '../media/media_server_client.dart';
+import '../media/episode_collection.dart';
 import '../media/live_tv_support.dart';
 import '../models/livetv_channel.dart';
 import '../services/live_seek_accumulator.dart';
@@ -65,7 +66,6 @@ import '../services/shader_service.dart';
 import '../providers/shader_provider.dart';
 import '../providers/user_profile_provider.dart';
 import '../utils/app_logger.dart';
-import '../utils/codec_utils.dart';
 import '../utils/dialogs.dart';
 import '../utils/log_redaction_manager.dart';
 import '../utils/live_tv_player_navigation.dart';
@@ -168,37 +168,24 @@ _PlaybackOpenTiming _playbackOpenTiming({
   );
 }
 
-/// Builds a [TrackPreferencePersister] that fans the language-preference +
-/// stream-selection writes out to a [PlexClient] resolved lazily on each
-/// call. Returns a no-op-on-null persister so the [TrackManager] doesn't
-/// have to import [PlexClient] itself; the resolver returning null (e.g.
-/// when the active server is Jellyfin) makes the call short-circuit.
+/// Builds a [TrackPreferencePersister] that writes the per-episode stream
+/// selection out to a [PlexClient] resolved lazily on each call. Returns a
+/// no-op-on-null persister so the [TrackManager] doesn't have to import
+/// [PlexClient] itself; the resolver returning null (e.g. when the active
+/// server is Jellyfin) makes the call short-circuit.
+///
+/// Only the current episode's part is touched — we deliberately do NOT write
+/// the show-wide audio/subtitle language default (#1393): an in-player track
+/// change should not silently rewrite the whole series' Plex prefs. The
+/// explicit path for that lives in the metadata-edit UI.
 TrackPreferencePersister _plexTrackPersister(PlexClient? Function() resolve) {
-  return ({
-    required String id,
-    required int partId,
-    required String trackType,
-    String? languageCode,
-    int? streamID,
-  }) async {
+  return ({required int partId, required String trackType, int? streamID}) async {
+    if (streamID == null) return;
     final client = resolve();
     if (client == null) return;
-    final futures = <Future>[];
-    if (languageCode != null && (trackType == 'subtitle' || languageCode.isNotEmpty)) {
-      futures.add(
-        trackType == 'audio'
-            ? client.setMetadataPreferences(id, audioLanguage: languageCode)
-            : client.setMetadataPreferences(id, subtitleLanguage: languageCode),
-      );
-    }
-    if (streamID != null) {
-      futures.add(
-        trackType == 'audio'
-            ? client.selectStreams(partId, audioStreamID: streamID, allParts: true)
-            : client.selectStreams(partId, subtitleStreamID: streamID, allParts: true),
-      );
-    }
-    await Future.wait(futures);
+    await (trackType == 'audio'
+        ? client.selectStreams(partId, audioStreamID: streamID, allParts: true)
+        : client.selectStreams(partId, subtitleStreamID: streamID, allParts: true));
   };
 }
 
@@ -267,6 +254,7 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
   // entry guards make reload / transcode-restart / channel-switch mutually
   // exclusive instead of relying on three independent booleans.
   _PlaybackTransition _playbackTransition = _PlaybackTransition.idle;
+  bool _playbackIntentShouldPlay = true;
 
   bool _showPlayNextDialog = false;
   bool _isPhone = false;
@@ -349,10 +337,9 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
   Timer? _autoPlayTimer;
   int _autoPlayCountdown = 5;
 
-  // End-of-video Play Next latch. Fires within 1s of the end; re-arms only
-  // once playback is more than 2s from the end — the gap is hysteresis so a
-  // position parked at the boundary can't oscillate (see CompletionLatch).
-  final CompletionLatch _completionLatch = CompletionLatch(triggerWindowMs: 1000, rearmWindowMs: 2000);
+  // End-of-video Play Next latch. Completion comes from the player EOF signal;
+  // position ticks only re-arm once playback is more than 2s from the end.
+  final CompletionLatch _completionLatch = CompletionLatch(rearmWindowMs: 2000);
 
   late final FocusNode _playNextCancelFocusNode;
   late final FocusNode _playNextConfirmFocusNode;
@@ -482,6 +469,21 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
 
   bool _isCurrentPlaybackGeneration(int generation, Player currentPlayer) {
     return mounted && player == currentPlayer && _playbackGeneration == generation;
+  }
+
+  Future<void> _playWithPlaybackIntent(Player currentPlayer) {
+    _playbackIntentShouldPlay = true;
+    return currentPlayer.play();
+  }
+
+  Future<void> _pauseWithPlaybackIntent(Player currentPlayer) {
+    _playbackIntentShouldPlay = false;
+    return currentPlayer.pause();
+  }
+
+  Future<void> _playOrPauseWithPlaybackIntent(Player currentPlayer) {
+    _playbackIntentShouldPlay = !currentPlayer.state.playing;
+    return currentPlayer.playOrPause();
   }
 
   final ValueNotifier<bool> _isBuffering = ValueNotifier<bool>(false);
@@ -809,12 +811,9 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
         );
       }
 
-      // Audio passthrough (desktop bitstreams to the receiver; Apple TV
-      // hands compressed AC3/EAC3 to the system for Dolby/Atmos output)
-      if (PlatformDetector.isDesktopOS() || PlatformDetector.isAppleTV()) {
-        if (settingsService.read(SettingsService.audioPassthrough)) {
-          await currentPlayer.setAudioPassthrough(true);
-        }
+      // Audio passthrough (desktop and Android TV; disabled on tvOS)
+      if (PlatformDetector.supportsAudioPassthrough()) {
+        await currentPlayer.setAudioPassthrough(settingsService.read(SettingsService.audioPassthrough));
       }
 
       // HDR is controlled via custom hdr-enabled property on iOS/macOS/Windows
@@ -861,13 +860,21 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
 
       if (!mounted || player != currentPlayer) return;
 
+      initPhase = 'wiring player streams';
+      await _wirePlayerStreams(
+        currentPlayer: currentPlayer,
+        settingsService: settingsService,
+        useExoPlayer: useExoPlayer,
+      );
+      if (!mounted || player != currentPlayer) return;
+
       if (mounted) {
         setState(() {
           _isPlayerInitialized = true;
         });
 
         // Restart sleep timer if we're starting a new playback session
-        SleepTimerService().restartIfNeeded(() => currentPlayer.pause());
+        SleepTimerService().restartIfNeeded(() => unawaited(_pauseWithPlaybackIntent(currentPlayer)));
 
         // Enable wakelock to prevent screen from turning off during playback
         unawaited(_setWakelock(true));
@@ -900,134 +907,8 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
       }
 
       if (!mounted || player != currentPlayer) return;
-      initPhase = 'wiring player streams';
-      await Future.wait<void>([
-        if (_playingSubscription != null) _playingSubscription!.cancel(),
-        if (_completedSubscription != null) _completedSubscription!.cancel(),
-        if (_errorSubscription != null) _errorSubscription!.cancel(),
-        if (_logSubscription != null) _logSubscription!.cancel(),
-        if (_backendSwitchedSubscription != null) _backendSwitchedSubscription!.cancel(),
-        if (_bufferingSubscription != null) _bufferingSubscription!.cancel(),
-        if (_serverStatusSubscription != null) _serverStatusSubscription!.cancel(),
-        if (_playbackRestartSubscription != null) _playbackRestartSubscription!.cancel(),
-        if (_positionSubscription != null) _positionSubscription!.cancel(),
-      ]);
-      if (!mounted || player != currentPlayer) return;
-
-      _playingSubscription = currentPlayer.streams.playing.listen(_onPlayingStateChanged);
-
-      _completedSubscription = currentPlayer.streams.completed.listen((done) {
-        // completed=false means a file (re)loaded after a reconnect-seek or fresh
-        // open — re-arm the end-of-video latch so the real EOF can still show Play
-        // Next. But only when playback is clear of the end region: a stray
-        // completed=false while parked at EOF must NOT re-arm, or the position
-        // listener would immediately re-fire the Play Next prompt.
-        if (!done) {
-          final durMs = currentPlayer.state.duration.inMilliseconds;
-          final posMs = currentPlayer.state.position.inMilliseconds;
-          if (durMs <= 0 || posMs < durMs - _completionLatch.rearmWindowMs) {
-            _rearmCompletionLatch();
-          }
-        }
-        _onVideoCompleted(done);
-      });
-
-      _errorSubscription = currentPlayer.streams.error.listen(_onPlayerError);
-
-      // warn is included so we can catch ffmpeg's "HTTP error 500" line in
-      // _onPlayerLog — the error-level log that follows omits the status code.
-      _logSubscription = currentPlayer.streams.log
-          .where((log) => const {PlayerLogLevel.fatal, PlayerLogLevel.error, PlayerLogLevel.warn}.contains(log.level))
-          .listen(_onPlayerLog);
-
-      if (Platform.isAndroid && useExoPlayer) {
-        _backendSwitchedSubscription = currentPlayer.streams.backendSwitched.listen((_) => _onBackendSwitched());
-      }
-
-      _bufferingSubscription = currentPlayer.streams.buffering.listen((isBuffering) {
-        _isBuffering.value = isBuffering;
-      });
-
-      // When server comes back online while buffering, force mpv to reconnect
-      // immediately instead of waiting for ffmpeg's exponential backoff
-      if (!_isOfflinePlayback && !widget.isLive) {
-        final serverId = _currentMetadata.serverId;
-        if (serverId != null) {
-          if (!mounted) return;
-          final serverManager = context.read<MultiServerProvider>().serverManager;
-          bool wasOffline = false;
-          _serverStatusSubscription = serverManager.statusStream.listen((statusMap) {
-            final isOnline = statusMap[serverId] == true;
-            if (!isOnline) {
-              wasOffline = true;
-            } else if (wasOffline && _isBuffering.value) {
-              wasOffline = false;
-              _forceStreamReconnect();
-            }
-          });
-        }
-      }
-
-      _playbackRestartSubscription = currentPlayer.streams.playbackRestart.listen((_) async {
-        if (!mounted || player != currentPlayer) return;
-        _lastLogError = null;
-        _sawServer500 = false;
-        _live.fallbackLevel = 0;
-        if (!_hasFirstFrame.value) {
-          _hasFirstFrame.value = true;
-          unawaited(Sentry.addBreadcrumb(Breadcrumb(message: 'First frame ready', category: 'player')));
-
-          if (Platform.isAndroid && settingsService.read(SettingsService.matchContentFrameRate)) {
-            await _applyFrameRateMatching();
-          }
-
-          if (Platform.isWindows && _displayModeService != null) {
-            await _applyWindowsDisplayMatching();
-          }
-        }
-        _trackManager?.onPlaybackRestart();
-      });
-
-      int? lastObservedPositionMs;
-      _positionSubscription = currentPlayer.streams.position.listen((position) {
-        final activePlayer = player;
-        if (activePlayer == null || activePlayer != currentPlayer) return;
-
-        // Fallback for cases where playbackRestart doesn't fire (observed on
-        // some offline Android playback flows). Prevents a permanent loading
-        // spinner. Checking `position > 0` was broken for resume playback —
-        // the native layer sets position to the resume offset before the first
-        // frame renders, so the fallback tripped immediately. Requiring a
-        // position *change* ensures we only fire when playback is advancing.
-        if (!_hasFirstFrame.value) {
-          if (lastObservedPositionMs != null && position.inMilliseconds != lastObservedPositionMs) {
-            _hasFirstFrame.value = true;
-
-            // Apply frame rate matching here too, since this fallback may fire
-            // before playbackRestart (race condition with resume positions > 0)
-            if (Platform.isAndroid && settingsService.read(SettingsService.matchContentFrameRate)) {
-              _applyFrameRateMatching();
-            }
-          }
-          lastObservedPositionMs = position.inMilliseconds;
-        }
-
-        final duration = activePlayer.state.duration;
-        final signal = _completionLatch.classifyPosition(
-          positionMs: position.inMilliseconds,
-          durationMs: duration.inMilliseconds,
-          promptVisible: _showPlayNextDialog,
-          countdownActive: _autoPlayTimer?.isActive == true,
-        );
-        if (signal == CompletionLatchSignal.completed) {
-          _onVideoCompleted(true);
-        }
-        // CompletionLatchSignal.rearmed needs no action here: the latch
-        // re-armed itself once playback seeked back out of the end region.
-      });
-
-      // Services init must finish before first frame so Discord / Trakt /
-      // Tracker start-playback calls are dispatched pre-first-frame.
+      // Player streams are wired before open so broadcast first-frame events
+      // cannot be dropped. Service init follows immediately after open.
       // `_loadAdjacentEpisodes` depends on the play queue being in state
       // (EpisodeNavigationService bails when !isQueueActive), so chain it
       // after `_ensurePlayQueue`. Both stay fire-and-forget so HTTP latency
@@ -1065,7 +946,7 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
     final exitPosition = currentPlayer.state.position;
     if (currentPlayer.state.isActive) {
       try {
-        await currentPlayer.pause();
+        await _pauseWithPlaybackIntent(currentPlayer);
       } catch (e, st) {
         appLogger.w('Failed to pause player during route exit', error: e, stackTrace: st);
       }
@@ -1087,6 +968,10 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
   /// Handle back button press
   /// For non-host participants in Watch Together, shows leave session confirmation
   Future<void> _handleBackButton() async {
+    if (_showPlayNextDialog || _showStillWatchingPrompt) {
+      _dismissPlaybackPromptForBack();
+      return;
+    }
     if (_isHandlingBack) return;
     _isHandlingBack = true;
     try {
@@ -1347,7 +1232,7 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
         await _seekBackForRewind(currentPlayer);
         if (!mounted || player != currentPlayer) return;
       }
-      await currentPlayer.playOrPause();
+      await _playOrPauseWithPlaybackIntent(currentPlayer);
     } catch (e, st) {
       appLogger.w('Apple TV remote play/pause failed', error: e, stackTrace: st);
     }

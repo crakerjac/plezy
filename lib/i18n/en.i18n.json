@@ -118,6 +118,9 @@
     "continueWatchingAction": "Continue Watching Action",
     "continueWatchingPlay": "Play",
     "continueWatchingDetails": "Open Details",
+    "episodeAction": "Episode Action",
+    "episodePlay": "Play",
+    "episodeDetails": "Open Details",
     "useGlobalHubs": "Use Home Layout",
     "useGlobalHubsDescription": "Show unified home hubs. Otherwise use library recommendations.",
     "showServerNameOnHubs": "Show Server Name on Hubs",
@@ -777,7 +780,8 @@
       "studio": "Studio",
       "random": "Random",
       "dateShared": "Date Shared",
-      "latestEpisodeAirDate": "Latest Episode Air Date"
+      "latestEpisodeAirDate": "Latest Episode Air Date",
+      "lastEpisodeDateAdded": "Last Episode Date Added"
     }
   },
   "about": {
@@ -1036,6 +1040,7 @@
     "unwatchedOnly": "Unwatched only",
     "nextNUnwatched": "Next ${count} unwatched",
     "customAmount": "Custom amount...",
+    "includeSpecials": "Include Specials",
     "howManyEpisodes": "How many episodes?",
     "itemsQueued": "${count} items queued for download",
     "keepSynced": "Keep synced",

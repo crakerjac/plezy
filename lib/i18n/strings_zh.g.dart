@@ -247,6 +247,9 @@ class _TranslationsSettingsZh extends TranslationsSettingsEn {
 	@override String get continueWatchingAction => '继续观看操作';
 	@override String get continueWatchingPlay => '播放';
 	@override String get continueWatchingDetails => '打开详情';
+	@override String get episodeAction => '剧集操作';
+	@override String get episodePlay => '播放';
+	@override String get episodeDetails => '打开详情';
 	@override String get useGlobalHubs => '使用主页布局';
 	@override String get useGlobalHubsDescription => '显示统一主页中心。否则使用资料库推荐。';
 	@override String get showServerNameOnHubs => '在推荐栏显示服务器名称';
@@ -1285,6 +1288,7 @@ class _TranslationsDownloadsZh extends TranslationsDownloadsEn {
 	@override String get unwatchedOnly => '仅未观看';
 	@override String nextNUnwatched({required Object count}) => '接下来 ${count} 集未观看';
 	@override String get customAmount => '自定义数量...';
+	@override String get includeSpecials => '包含特别篇';
 	@override String get howManyEpisodes => '下载几集？';
 	@override String itemsQueued({required Object count}) => '${count} 个项目已加入下载队列';
 	@override String get keepSynced => '保持同步';
@@ -1755,6 +1759,7 @@ class _TranslationsLibrariesSortLabelsZh extends TranslationsLibrariesSortLabels
 	@override String get random => '随机';
 	@override String get dateShared => '共享日期';
 	@override String get latestEpisodeAirDate => '最新一集播出日期';
+	@override String get lastEpisodeDateAdded => '最新一集添加日期';
 }
 
 // Path: companionRemote.session
@@ -2029,6 +2034,9 @@ extension on TranslationsZh {
 			'settings.continueWatchingAction' => '继续观看操作',
 			'settings.continueWatchingPlay' => '播放',
 			'settings.continueWatchingDetails' => '打开详情',
+			'settings.episodeAction' => '剧集操作',
+			'settings.episodePlay' => '播放',
+			'settings.episodeDetails' => '打开详情',
 			'settings.useGlobalHubs' => '使用主页布局',
 			'settings.useGlobalHubsDescription' => '显示统一主页中心。否则使用资料库推荐。',
 			'settings.showServerNameOnHubs' => '在推荐栏显示服务器名称',
@@ -2430,11 +2438,11 @@ extension on TranslationsZh {
 			'messages.logsUploaded' => '日志已上传',
 			'messages.logsUploadFailed' => '上传日志失败',
 			'messages.logId' => '日志 ID',
+			_ => null,
+		} ?? switch (path) {
 			'subtitlingStyling.text' => '文本',
 			'subtitlingStyling.border' => '边框',
 			'subtitlingStyling.background' => '背景',
-			_ => null,
-		} ?? switch (path) {
 			'subtitlingStyling.fontSize' => '字号',
 			'subtitlingStyling.textColor' => '文本颜色',
 			'subtitlingStyling.borderSize' => '边框大小',
@@ -2638,6 +2646,7 @@ extension on TranslationsZh {
 			'libraries.sortLabels.random' => '随机',
 			'libraries.sortLabels.dateShared' => '共享日期',
 			'libraries.sortLabels.latestEpisodeAirDate' => '最新一集播出日期',
+			'libraries.sortLabels.lastEpisodeDateAdded' => '最新一集添加日期',
 			'about.title' => '关于',
 			'about.openSourceLicenses' => '开源许可证',
 			'about.versionLabel' => ({required Object version}) => '版本 ${version}',
@@ -2870,6 +2879,7 @@ extension on TranslationsZh {
 			'downloads.unwatchedOnly' => '仅未观看',
 			'downloads.nextNUnwatched' => ({required Object count}) => '接下来 ${count} 集未观看',
 			'downloads.customAmount' => '自定义数量...',
+			'downloads.includeSpecials' => '包含特别篇',
 			'downloads.howManyEpisodes' => '下载几集？',
 			'downloads.itemsQueued' => ({required Object count}) => '${count} 个项目已加入下载队列',
 			'downloads.keepSynced' => '保持同步',
@@ -2942,13 +2952,13 @@ extension on TranslationsZh {
 			'companionRemote.pairing.authFailed' => '认证失败。两台设备需要使用同一 Plex 账号。',
 			'companionRemote.pairing.failedToConnect' => ({required Object error}) => '连接失败：${error}',
 			'companionRemote.remote.disconnectConfirm' => '是否要断开远程会话的连接？',
+			_ => null,
+		} ?? switch (path) {
 			'companionRemote.remote.reconnecting' => '重新连接中...',
 			'companionRemote.remote.attemptOf' => ({required Object current}) => '第 ${current} 次尝试，共 5 次',
 			'companionRemote.remote.retryNow' => '立即重试',
 			'companionRemote.remote.tabRemote' => '遥控',
 			'companionRemote.remote.tabPlay' => '播放',
-			_ => null,
-		} ?? switch (path) {
 			'companionRemote.remote.tabMore' => '更多',
 			'companionRemote.remote.menu' => '菜单',
 			'companionRemote.remote.tabNavigation' => '标签导航',

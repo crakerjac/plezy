@@ -118,6 +118,9 @@
     "continueWatchingAction": "Действие за продължаване на гледането",
     "continueWatchingPlay": "Пусни",
     "continueWatchingDetails": "Отвори подробности",
+    "episodeAction": "Действие за епизод",
+    "episodePlay": "Пусни",
+    "episodeDetails": "Отвори подробности",
     "useGlobalHubs": "Използвай начално оформление",
     "useGlobalHubsDescription": "Показвай обединени начални хъбове. В противен случай използвай препоръките на библиотеката.",
     "showServerNameOnHubs": "Показвай името на сървъра в хъбовете",
@@ -771,7 +774,8 @@
       "studio": "Студио",
       "random": "Случайно",
       "dateShared": "Дата на споделяне",
-      "latestEpisodeAirDate": "Дата на излъчване на последния епизод"
+      "latestEpisodeAirDate": "Дата на излъчване на последния епизод",
+      "lastEpisodeDateAdded": "Дата на добавяне на последния епизод"
     }
   },
   "about": {
@@ -1027,6 +1031,7 @@
     "unwatchedOnly": "Само негледани",
     "nextNUnwatched": "Следващите ${count} негледани",
     "customAmount": "Персонален брой...",
+    "includeSpecials": "Включи специалните",
     "howManyEpisodes": "Колко епизода?",
     "itemsQueued": "${count} елемента са добавени в опашката за изтегляне",
     "keepSynced": "Поддържай синхронизирано",

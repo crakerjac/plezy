@@ -87,7 +87,29 @@ void main() {
     });
   });
 
+  group('SettingsService episode action', () {
+    test('defaults to play and resets to play', () async {
+      final settings = await SettingsService.getInstance();
+
+      expect(settings.read(SettingsService.episodeAction), EpisodeAction.play);
+
+      await settings.write(SettingsService.episodeAction, EpisodeAction.details);
+      expect(settings.read(SettingsService.episodeAction), EpisodeAction.details);
+
+      await settings.resetAllSettings();
+      expect(settings.read(SettingsService.episodeAction), EpisodeAction.play);
+    });
+  });
+
   group('SettingsService platform gates', () {
+    test('audio passthrough stays available on desktop but not Apple TV', () {
+      expect(PlatformDetector.supportsAudioPassthrough(), isTrue);
+
+      TvDetectionService.debugSetAppleTVOverride(true);
+
+      expect(PlatformDetector.supportsAudioPassthrough(), isFalse);
+    });
+
     test('forces external player off on Apple TV even when stored enabled', () async {
       final settings = await SettingsService.getInstance();
       await settings.write(SettingsService.useExternalPlayer, true);

@@ -103,6 +103,16 @@ class ExoPlayerCore(private val activity: Activity) : Player.Listener {
     /** Per-frame "video is at X" logcat stream (tag AssFrameCb) for diagnosing
      *  ASS subtitle lag against the libass pipeline's render/swap lines. */
     private const val ASS_FRAME_LOGS = false
+    private const val ASS_SYNC_LOG_INTERVAL_FRAMES = 120L
+
+    /** Auto-calibrate the subtitle/video layer offset per device (API 34+) by measuring the
+     *  video vs overlay plane present timing. See [AssLatencyCalibrator]. Falls back to the
+     *  seeded value (persisted calibration or the Dart perf-tier proxy) when off/unsupported. */
+    private const val ASS_LATENCY_AUTOCAL = true
+
+    /** SharedPreferences store for the per-device subtitle/video latency calibration. */
+    private const val ASS_CAL_PREFS = "plezy_ass_calibration"
+    private const val ASS_CAL_KEY_FRAMES = "video_latency_frames"
     private const val TS_TIMESTAMP_SEARCH_PACKETS = 1800
     private val DV_CODEC_PROFILE_REGEX = Regex("""(?:^|,)\s*dvh[1e]\.(\d{2})""")
 
@@ -158,6 +168,10 @@ class ExoPlayerCore(private val activity: Activity) : Player.Listener {
   private var videoZoomScale: Float = 1.0f
   private var assHandler: AssHandler? = null
   private var assSubtitleView: AssSubtitleSurfaceView? = null
+
+  // Touched from the codec metadata listener, the GL-thread overlay hook, and the main-thread
+  // media-item-transition/dispose paths — keep visibility across threads.
+  @Volatile private var latencyCalibrator: AssLatencyCalibrator? = null
   private var assForceMargins = false
   private var lastAssMargins: IntArray? = null
   private var overlayLayoutListener: ViewTreeObserver.OnGlobalLayoutListener? = null
@@ -165,9 +179,24 @@ class ExoPlayerCore(private val activity: Activity) : Player.Listener {
   private var exoPlayer: ExoPlayer? = null
   private var renderersFactory: PlezyRenderersFactory? = null
   private val subtitleDelayUs = AtomicLong(0L)
+
+  /**
+   * Frames the hardware codec→display path lags a GL subtitle overlay pinned to the
+   * same release time (the overlay otherwise shows a frame ahead of the picture).
+   * The subtitle is rendered this many frames earlier to match the later video — a
+   * content-time shift, so it never delays the overlay's present (delaying the
+   * present freezes the single-slot latest-wins pipeline). Device-specific: ~1 on
+   * low-end TV boxes (longer video pipeline), 0 on phones. Set from Dart at init
+   * from the device performance tier ([com.plezy/device] auto low-end signal).
+   */
+  @Volatile private var assVideoLatencyFrames = 0
   private var subtitlePositionPercent: Int = 100
   private var subtitleFontSize: Float = 55f
   private var lastSubtitleCues: List<Cue> = emptyList()
+
+  // Tracks whether a text track was selected on the previous onTracksChanged so we
+  // can detect the transition to "no subtitle" and clear the painted overlays (#1387).
+  private var hadSelectedTextTrack: Boolean = false
   private var httpDataSourceFactory: HttpDataSource.Factory? = null
   private var dataSourceFactory: DefaultDataSource.Factory? = null
   private var trackSelector: DefaultTrackSelector? = null
@@ -188,11 +217,13 @@ class ExoPlayerCore(private val activity: Activity) : Player.Listener {
   // Loudness normalization (#1289): audiofx effects only process non-tunneled
   // PCM mixer streams, so while enabled we block direct/bitstream output and
   // disable tunneling.
+  private var audioPassthroughEnabled: Boolean = false
   private var audioNormalizationEnabled: Boolean = false
   private val audioNormalization = AudioNormalizationEffect(::emitLog)
   private var pendingAudioRendererBounce: Boolean = false
-  private val audioBounceTimeout = Runnable { completeAudioRendererBounce("audio-normalization bounce timeout") }
+  private val audioBounceTimeout = Runnable { completeAudioRendererBounce("audio renderer bounce timeout") }
   private var lastSeekable: Boolean? = null
+  private var forceSeekable: Boolean = false
 
   @Volatile private var disposing: Boolean = false
   private var pendingStartPositionMs: Long = 0L
@@ -231,6 +262,7 @@ class ExoPlayerCore(private val activity: Activity) : Player.Listener {
   private val fpsTimestamps = LongArray(FPS_SAMPLE_COUNT)
 
   @Volatile private var fpsTimestampCount = 0
+  private var assSyncFrameCount = 0L
 
   // Audio focus
   private var audioFocusManager: AudioFocusManager? = null
@@ -369,13 +401,18 @@ class ExoPlayerCore(private val activity: Activity) : Player.Listener {
     return decision.mode
   }
 
-  fun initialize(bufferSizeBytes: Int? = null, tunnelingEnabled: Boolean = true): Boolean {
+  fun initialize(
+    bufferSizeBytes: Int? = null,
+    tunnelingEnabled: Boolean = true,
+    audioPassthroughEnabled: Boolean = false
+  ): Boolean {
     if (isInitialized) {
       Log.d(TAG, "Already initialized")
       return true
     }
 
     tunnelingUserEnabled = tunnelingEnabled
+    this.audioPassthroughEnabled = audioPassthroughEnabled
     this.dvMode = getConfiguredDvMode()
     DoviBridge.logSupportSummary(activity)
     Log.i(
@@ -686,7 +723,61 @@ class ExoPlayerCore(private val activity: Activity) : Player.Listener {
       exoPlayer!!.addAnalyticsListener(decoderHangListener)
       exoPlayer!!.setVideoFrameMetadataListener { presentationTimeUs, releaseTimeNs, _, _ ->
         // ASS bypasses Media3's text renderer, so apply sub-delay before libass renders.
-        assSubtitleView?.requestRender(presentationTimeUs - subtitleDelayUs.get(), releaseTimeNs)
+        // Also render the subtitle one video-frame earlier than the picture: the
+        // hardware codec→display path lags a GL overlay pinned to the same release
+        // time, so without this the overlay shows a frame ahead of the video. Done
+        // as a content-time shift (not a present delay, which would freeze the
+        // single-slot latest-wins pipeline by superseding every frame).
+        val assView = assSubtitleView
+        val latencyFrames = assVideoLatencyFrames
+        val fps = detectedFrameRate.takeIf { it > 1f } ?: currentVideoFormat?.frameRate?.takeIf { it > 1f } ?: 0f
+        val videoLatencyUs = if (latencyFrames != 0 && fps > 1f) {
+          (latencyFrames * 1_000_000.0 / fps).toLong()
+        } else {
+          0L
+        }
+        assView?.requestRender(presentationTimeUs - subtitleDelayUs.get() - videoLatencyUs, releaseTimeNs)
+        if (ASS_LATENCY_AUTOCAL && assView != null && Build.VERSION.SDK_INT >= 34) {
+          val calibrator = latencyCalibrator ?: surfaceView?.let { sv ->
+            AssLatencyCalibrator(
+              videoSurface = sv,
+              overlaySurface = assView,
+              onCalibrated = { frames -> onAssLatencyCalibrated(frames) },
+              onDone = { assSubtitleView?.setPreSwapProbe(null) },
+              log = { msg -> emitLog("info", "ass-latency-cal", msg) }
+            ).also {
+              it.start()
+              // Bind the hook to THIS instance, not the volatile field, so a concurrent transition
+              // reset can't redirect it to a different/null calibrator mid-swap.
+              assView.setPreSwapProbe { rt -> it.probeOverlay(rt) }
+              latencyCalibrator = it
+            }
+          }
+          calibrator?.probeVideo(releaseTimeNs, fps)
+        }
+        assSyncFrameCount++
+        if (assView != null && assSyncFrameCount % ASS_SYNC_LOG_INTERVAL_FRAMES == 0L) {
+          emitLog(
+            "info",
+            "ass-sync",
+            "frames=$assSyncFrameCount swaps=${assView.swapCount} late=${assView.lateSwapCount} " +
+              "phaseLeadMs=${assView.phaseLeadMs} swapLeadMs=${assView.swapLeadMs} frameOffMs=${videoLatencyUs / 1000} sleepMs=${assView.lastScheduledSleepMs} " +
+              "headroomMs=${assView.lastSwapHeadroomMs} leadMs=${assView.lastSwapLeadMs} " +
+              "minLeadMs=${assView.minLeadChangedMs?.toString() ?: "n/a"} " +
+              "present=${assView.presentSource} " +
+              "presentErrMs=${assView.lastPresentErrorMs?.toString() ?: "n/a"} " +
+              "worstPresentMs=${assView.worstPresentErrorMs?.toString() ?: "n/a"} " +
+              "presentHist=${assView.presentErrorHistogram.joinToString(",")} " +
+              "presentMeasured=${assView.presentMeasuredCount} " +
+              "presentInvalid=${assView.presentInvalidCount} presentDropped=${assView.presentDroppedCount} " +
+              "render=${assView.changedRenderCount}/${assView.renderCount} " +
+              "libassMs=${assView.lastLibassMs}/${assView.maxLibassMs} libassHist=${assView.libassMsHistogram.joinToString(",")} " +
+              "spec=${assView.specHits}/${assView.specMisses}/${assView.specSkips} " +
+              "prefetch=${assView.prefetchCount} blankClears=${assView.blankClearCount} " +
+              "coalesced=${assView.coalescedRequestCount} stale=${assView.staleGenerationCount}/${assView.staleBeforeSwapCount} " +
+              "superseded=${assView.supersededBeforeSwapCount}"
+          )
+        }
         if (ASS_FRAME_LOGS) {
           // Reference stream for subtitle-lag diagnosis: the video frame ExoPlayer
           // is releasing right now and how far ahead of its vsync we are. Subtitle
@@ -791,9 +882,8 @@ class ExoPlayerCore(private val activity: Activity) : Player.Listener {
     lastPosition = startPositionMs
     lastDuration = 0L
     lastBufferedPosition = 0L
-    delegate?.onPropertyChange("time-pos", startPositionMs / 1000.0)
-    delegate?.onPropertyChange("duration", 0.0)
-    delegate?.onPropertyChange("demuxer-cache-time", 0.0)
+    // Dart already seeds the visible timeline before open. Emitting native
+    // zeroes here races server-offset Plex transcode restarts back to 0:00.
     delegate?.onPropertyChange("eof-reached", false)
   }
 
@@ -805,8 +895,17 @@ class ExoPlayerCore(private val activity: Activity) : Player.Listener {
 
   private fun emitCurrentSeekable(force: Boolean = false) {
     val player = exoPlayer
-    val seekable = player?.isCurrentMediaItemSeekable == true && !currentMediaIsLive
+    val hasMedia = player?.currentMediaItem != null
+    val seekable = hasMedia &&
+      !currentMediaIsLive &&
+      (forceSeekable || player?.isCurrentMediaItemSeekable == true)
     emitSeekable(seekable, force)
+  }
+
+  fun setForceSeekable(force: Boolean) {
+    if (forceSeekable == force) return
+    forceSeekable = force
+    emitCurrentSeekable(force = true)
   }
 
   // Player.Listener
@@ -999,6 +1098,20 @@ class ExoPlayerCore(private val activity: Activity) : Player.Listener {
         updateAudioDecoderPolicy("tracks changed", af)
       }
     }
+
+    // Disabling the text track produces no trailing empty CueGroup, and no new
+    // video frame re-renders the libass overlay while paused, so the last SRT/VTT
+    // line stays painted on the SubtitleView and the last ASS frame stays on the
+    // overlay. AssHandler (registered before this listener) has already nulled the
+    // libass track by now, so re-rendering the last position clears it. Gate on the
+    // transition to avoid redundant clears on every track change. (#1387)
+    val hasSelectedText = hasSelectedTextTrack(tracks)
+    if (!hasSelectedText && hadSelectedTextTrack) {
+      lastSubtitleCues = emptyList()
+      subtitleView?.setCues(emptyList())
+      assSubtitleView?.invalidateSubtitles()
+    }
+    hadSelectedTextTrack = hasSelectedText
 
     evaluateAudioCodecForTunneling()
     evaluateVideoCodecForTunneling()
@@ -1298,6 +1411,12 @@ class ExoPlayerCore(private val activity: Activity) : Player.Listener {
     delegate?.onEvent("file-loaded", null)
     delegate?.onPropertyChange("eof-reached", false)
     emitCurrentSeekable(force = true)
+    // Re-calibrate the subtitle/video layer offset each play: tear down the converged calibrator
+    // so the metadata listener lazily spins up a fresh one. The seeded (persisted) value stays
+    // applied meanwhile, so subtitles are right from the first frame.
+    latencyCalibrator?.stop()
+    latencyCalibrator = null
+    assSubtitleView?.setPreSwapProbe(null)
   }
 
   override fun onVideoSizeChanged(videoSize: VideoSize) {
@@ -1665,6 +1784,8 @@ class ExoPlayerCore(private val activity: Activity) : Player.Listener {
     selectionFlags = format.selectionFlags
   )
 
+  private fun hasSelectedTextTrack(tracks: Tracks): Boolean = tracks.groups.any { it.type == C.TRACK_TYPE_TEXT && it.isSelected }
+
   private fun restorePendingDvTrackSelection(tracks: Tracks): Boolean {
     val pending = pendingDvTrackRestore ?: return false
     if (trackSelector == null) return false
@@ -1673,7 +1794,7 @@ class ExoPlayerCore(private val activity: Activity) : Player.Listener {
 
     val audioMatch = pending.audio?.let { findTrackRestoreMatch(tracks, it) }
     val subtitleMatch = pending.subtitle?.let { findTrackRestoreMatch(tracks, it) }
-    val hasSelectedText = tracks.groups.any { it.type == C.TRACK_TYPE_TEXT && it.isSelected }
+    val hasSelectedText = hasSelectedTextTrack(tracks)
     var selectionWillChange = false
     var appliedRestore = false
     var audioOverride: TrackSelectionOverride? = null
@@ -1831,6 +1952,7 @@ class ExoPlayerCore(private val activity: Activity) : Player.Listener {
     val mimeType = format.sampleMimeType ?: return false
     // Loudness normalization needs decoded PCM for the audiofx chain to act on.
     if (audioNormalizationEnabled && isEncodedAudioMimeType(mimeType)) return true
+    if (shouldBlockDirectOutputForPassthrough(mimeType, audioPassthroughEnabled)) return true
     if (directAudioOutputBlockedAfterFailure.contains(mimeType)) {
       if (loggedDirectAudioRecoveryBlocks.add("$mimeType|$reason")) {
         emitLog(
@@ -2563,6 +2685,7 @@ class ExoPlayerCore(private val activity: Activity) : Player.Listener {
     // Reset FPS detection for new content
     detectedFrameRate = -1f
     fpsTimestampCount = 0
+    assSyncFrameCount = 0
 
     // Reset DV7 retry flag when opening a different file
     if (uri != currentMediaUri) {
@@ -2598,6 +2721,7 @@ class ExoPlayerCore(private val activity: Activity) : Player.Listener {
     externalSubtitles.clear()
     externalSubtitleUris.clear()
     lastSubtitleCues = emptyList()
+    hadSelectedTextTrack = false
     audioTrackGroupMap.clear()
     subtitleTrackGroupMap.clear()
     selectedAudioTrackId = null
@@ -2711,6 +2835,25 @@ class ExoPlayerCore(private val activity: Activity) : Player.Listener {
     }
   }
 
+  fun setAudioPassthrough(enabled: Boolean) {
+    if (audioPassthroughEnabled == enabled) return
+    audioPassthroughEnabled = enabled
+    emitLog("info", "audio", "Audio passthrough ${if (enabled) "enabled" else "disabled"}")
+
+    if (exoPlayer == null) return
+    val outputEncoding = lastAudioTrackConfig?.encoding
+    val selectedMime = selectedAudioFormat()?.sampleMimeType
+    val needsBounce = outputEncoding != null &&
+      selectedMime != null &&
+      isPassthroughAudioMimeType(selectedMime) &&
+      (if (enabled) isPcmEncoding(outputEncoding) else !isPcmEncoding(outputEncoding))
+    if (needsBounce) {
+      startAudioRendererBounce("audio-passthrough")
+    } else {
+      updateTunnelingState("audio-passthrough")
+    }
+  }
+
   private fun attachNormalizationEffect() {
     val sessionId = exoPlayer?.audioSessionId ?: C.AUDIO_SESSION_ID_UNSET
     if (sessionId == C.AUDIO_SESSION_ID_UNSET) {
@@ -2728,7 +2871,7 @@ class ExoPlayerCore(private val activity: Activity) : Player.Listener {
   private fun startAudioRendererBounce(reason: String) {
     if (pendingAudioRendererBounce) return
     pendingAudioRendererBounce = true
-    emitLog("info", "audio-normalization", "Bouncing audio renderer to re-evaluate output path (reason=$reason)")
+    emitLog("info", "audio", "Bouncing audio renderer to re-evaluate output path (reason=$reason)")
     applyTrackSelectorPolicy(reason = "$reason (audio renderer off)", audioDisabled = true)
     handler.postDelayed(audioBounceTimeout, AUDIO_BOUNCE_TIMEOUT_MS)
   }
@@ -2742,6 +2885,35 @@ class ExoPlayerCore(private val activity: Activity) : Player.Listener {
 
   fun setSubtitleDelay(seconds: Double) {
     subtitleDelayUs.set((seconds * 1_000_000).toLong())
+  }
+
+  fun setAssVideoLatencyFrames(frames: Int) {
+    assVideoLatencyFrames = frames.coerceIn(-2, 2)
+  }
+
+  /**
+   * Seed the subtitle/video layer offset at init: prefer this device's persisted measured
+   * calibration, falling back to [proxyDefault] (the Dart perf-tier guess) on first-ever play.
+   * The live [AssLatencyCalibrator] re-confirms and updates it each play.
+   */
+  fun seedAssVideoLatencyFrames(proxyDefault: Int) {
+    val stored = activity.getSharedPreferences(ASS_CAL_PREFS, Context.MODE_PRIVATE)
+      .getInt(ASS_CAL_KEY_FRAMES, Int.MIN_VALUE)
+    val seed = if (stored != Int.MIN_VALUE) stored else proxyDefault
+    setAssVideoLatencyFrames(seed)
+    Log.d(TAG, "ass latency seed=$seed (stored=${if (stored == Int.MIN_VALUE) "none" else stored}, proxy=$proxyDefault)")
+  }
+
+  /** Apply + persist a freshly measured calibration (called by [AssLatencyCalibrator]). */
+  private fun onAssLatencyCalibrated(frames: Int) {
+    val clamped = frames.coerceIn(-2, 2)
+    val previous = assVideoLatencyFrames
+    setAssVideoLatencyFrames(clamped)
+    activity.getSharedPreferences(ASS_CAL_PREFS, Context.MODE_PRIVATE)
+      .edit().putInt(ASS_CAL_KEY_FRAMES, clamped).apply()
+    if (clamped != previous) {
+      emitLog("info", "ass-latency-cal", "applied offsetFrames=$clamped (was $previous), persisted")
+    }
   }
 
   fun setDebugDvConversionMode(mode: String): Boolean {
@@ -2785,6 +2957,7 @@ class ExoPlayerCore(private val activity: Activity) : Player.Listener {
     audioDecoderInitName = null
     detectedFrameRate = -1f
     fpsTimestampCount = 0
+    assSyncFrameCount = 0
     firstFrameRendered = false
     currentVideoFormat = null
     loggedNativeDvSelectionKey = null
@@ -3121,6 +3294,8 @@ class ExoPlayerCore(private val activity: Activity) : Player.Listener {
     fps: Float,
     videoDurationMs: Long,
     extraDelayMs: Long,
+    videoWidth: Int,
+    videoHeight: Int,
     onComplete: (switched: Boolean) -> Unit
   ) {
     val mgr = frameRateManager
@@ -3128,7 +3303,7 @@ class ExoPlayerCore(private val activity: Activity) : Player.Listener {
       onComplete(false)
       return
     }
-    mgr.setVideoFrameRate(fps, videoDurationMs, extraDelayMs, onComplete)
+    mgr.setVideoFrameRate(fps, videoDurationMs, extraDelayMs, videoWidth, videoHeight, onComplete)
   }
 
   fun clearVideoFrameRate() {
@@ -3192,7 +3367,26 @@ class ExoPlayerCore(private val activity: Activity) : Player.Listener {
       "subSpecMisses" to assSubtitleView?.specMisses,
       "subSpecSkips" to assSubtitleView?.specSkips,
       "subPrefetches" to assSubtitleView?.prefetchCount,
+      "subBlankClears" to assSubtitleView?.blankClearCount,
+      "subCoalesced" to assSubtitleView?.coalescedRequestCount,
+      "subStaleGeneration" to assSubtitleView?.staleGenerationCount,
+      "subSupersededBeforeSwap" to assSubtitleView?.supersededBeforeSwapCount,
+      "subStaleBeforeSwap" to assSubtitleView?.staleBeforeSwapCount,
       "subMinLeadMs" to assSubtitleView?.minLeadChangedMs,
+      "subPhaseLeadMs" to assSubtitleView?.phaseLeadMs,
+      "subLastLeadMs" to assSubtitleView?.lastSwapLeadMs,
+      "subLastHeadroomMs" to assSubtitleView?.lastSwapHeadroomMs,
+      "subLastSleepMs" to assSubtitleView?.lastScheduledSleepMs,
+      // Actual on-screen present time vs the video frame's release target (ground
+      // truth for frame-perfection; null/false on emulator + pre-29 devices).
+      "subPresentTimingEnabled" to assSubtitleView?.presentTimingEnabled,
+      "subPresentSource" to assSubtitleView?.presentSource,
+      "subPresentErrMs" to assSubtitleView?.lastPresentErrorMs,
+      "subWorstPresentErrMs" to assSubtitleView?.worstPresentErrorMs,
+      "subPresentMeasured" to assSubtitleView?.presentMeasuredCount,
+      "subPresentInvalid" to assSubtitleView?.presentInvalidCount,
+      "subPresentDropped" to assSubtitleView?.presentDroppedCount,
+      "subPresentErrHist" to assSubtitleView?.presentErrorHistogram,
       // Color info
       "colorSpace" to videoFormat?.colorInfo?.colorSpace,
       "colorRange" to videoFormat?.colorInfo?.colorRange,
@@ -3374,6 +3568,9 @@ class ExoPlayerCore(private val activity: Activity) : Player.Listener {
 
     // Synchronous ownership invalidation — stale code can no longer
     // reach surface state through instance fields.
+    latencyCalibrator?.stop()
+    latencyCalibrator = null
+    assSubtitleView?.setPreSwapProbe(null)
     surfaceContainer = null
     videoAspectContainer = null
     surfaceView = null

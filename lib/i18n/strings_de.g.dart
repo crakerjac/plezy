@@ -247,6 +247,9 @@ class _TranslationsSettingsDe extends TranslationsSettingsEn {
 	@override String get continueWatchingAction => 'Aktion für Weiterschauen';
 	@override String get continueWatchingPlay => 'Abspielen';
 	@override String get continueWatchingDetails => 'Details öffnen';
+	@override String get episodeAction => 'Episodenaktion';
+	@override String get episodePlay => 'Abspielen';
+	@override String get episodeDetails => 'Details öffnen';
 	@override String get useGlobalHubs => 'Startlayout verwenden';
 	@override String get useGlobalHubsDescription => 'Einheitliche Start-Hubs anzeigen. Sonst Bibliotheksempfehlungen verwenden.';
 	@override String get showServerNameOnHubs => 'Servername bei Hubs anzeigen';
@@ -1285,6 +1288,7 @@ class _TranslationsDownloadsDe extends TranslationsDownloadsEn {
 	@override String get unwatchedOnly => 'Nur ungesehene';
 	@override String nextNUnwatched({required Object count}) => 'Nächste ${count} ungesehene';
 	@override String get customAmount => 'Eigene Anzahl...';
+	@override String get includeSpecials => 'Specials einschließen';
 	@override String get howManyEpisodes => 'Wie viele Episoden?';
 	@override String itemsQueued({required Object count}) => '${count} Elemente zum Download eingereiht';
 	@override String get keepSynced => 'Synchronisiert halten';
@@ -1755,6 +1759,7 @@ class _TranslationsLibrariesSortLabelsDe extends TranslationsLibrariesSortLabels
 	@override String get random => 'Zufällig';
 	@override String get dateShared => 'Datum geteilt';
 	@override String get latestEpisodeAirDate => 'Letztes Folgenausstrahlungsdatum';
+	@override String get lastEpisodeDateAdded => 'Datum der zuletzt hinzugefügten Folge';
 }
 
 // Path: companionRemote.session
@@ -2029,6 +2034,9 @@ extension on TranslationsDe {
 			'settings.continueWatchingAction' => 'Aktion für Weiterschauen',
 			'settings.continueWatchingPlay' => 'Abspielen',
 			'settings.continueWatchingDetails' => 'Details öffnen',
+			'settings.episodeAction' => 'Episodenaktion',
+			'settings.episodePlay' => 'Abspielen',
+			'settings.episodeDetails' => 'Details öffnen',
 			'settings.useGlobalHubs' => 'Startlayout verwenden',
 			'settings.useGlobalHubsDescription' => 'Einheitliche Start-Hubs anzeigen. Sonst Bibliotheksempfehlungen verwenden.',
 			'settings.showServerNameOnHubs' => 'Servername bei Hubs anzeigen',
@@ -2430,11 +2438,11 @@ extension on TranslationsDe {
 			'messages.logsUploaded' => 'Protokolle hochgeladen',
 			'messages.logsUploadFailed' => 'Protokolle konnten nicht hochgeladen werden',
 			'messages.logId' => 'Protokoll-ID',
+			_ => null,
+		} ?? switch (path) {
 			'subtitlingStyling.text' => 'Text',
 			'subtitlingStyling.border' => 'Rahmen',
 			'subtitlingStyling.background' => 'Hintergrund',
-			_ => null,
-		} ?? switch (path) {
 			'subtitlingStyling.fontSize' => 'Schriftgröße',
 			'subtitlingStyling.textColor' => 'Textfarbe',
 			'subtitlingStyling.borderSize' => 'Rahmengröße',
@@ -2638,6 +2646,7 @@ extension on TranslationsDe {
 			'libraries.sortLabels.random' => 'Zufällig',
 			'libraries.sortLabels.dateShared' => 'Datum geteilt',
 			'libraries.sortLabels.latestEpisodeAirDate' => 'Letztes Folgenausstrahlungsdatum',
+			'libraries.sortLabels.lastEpisodeDateAdded' => 'Datum der zuletzt hinzugefügten Folge',
 			'about.title' => 'Über',
 			'about.openSourceLicenses' => 'Open-Source-Lizenzen',
 			'about.versionLabel' => ({required Object version}) => 'Version ${version}',
@@ -2870,6 +2879,7 @@ extension on TranslationsDe {
 			'downloads.unwatchedOnly' => 'Nur ungesehene',
 			'downloads.nextNUnwatched' => ({required Object count}) => 'Nächste ${count} ungesehene',
 			'downloads.customAmount' => 'Eigene Anzahl...',
+			'downloads.includeSpecials' => 'Specials einschließen',
 			'downloads.howManyEpisodes' => 'Wie viele Episoden?',
 			'downloads.itemsQueued' => ({required Object count}) => '${count} Elemente zum Download eingereiht',
 			'downloads.keepSynced' => 'Synchronisiert halten',
@@ -2942,13 +2952,13 @@ extension on TranslationsDe {
 			'companionRemote.pairing.authFailed' => 'Authentifizierung fehlgeschlagen. Beide Geräte benötigen dasselbe Plex-Konto.',
 			'companionRemote.pairing.failedToConnect' => ({required Object error}) => 'Verbindung fehlgeschlagen: ${error}',
 			'companionRemote.remote.disconnectConfirm' => 'Möchtest du die Verbindung zur Fernsteuerungssitzung trennen?',
+			_ => null,
+		} ?? switch (path) {
 			'companionRemote.remote.reconnecting' => 'Verbindung wird wiederhergestellt...',
 			'companionRemote.remote.attemptOf' => ({required Object current}) => 'Versuch ${current} von 5',
 			'companionRemote.remote.retryNow' => 'Jetzt wiederholen',
 			'companionRemote.remote.tabRemote' => 'Fernbedienung',
 			'companionRemote.remote.tabPlay' => 'Wiedergabe',
-			_ => null,
-		} ?? switch (path) {
 			'companionRemote.remote.tabMore' => 'Mehr',
 			'companionRemote.remote.menu' => 'Menü',
 			'companionRemote.remote.tabNavigation' => 'Tab-Navigation',

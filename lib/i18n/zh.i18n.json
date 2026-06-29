@@ -118,6 +118,9 @@
     "continueWatchingAction": "继续观看操作",
     "continueWatchingPlay": "播放",
     "continueWatchingDetails": "打开详情",
+    "episodeAction": "剧集操作",
+    "episodePlay": "播放",
+    "episodeDetails": "打开详情",
     "useGlobalHubs": "使用主页布局",
     "useGlobalHubsDescription": "显示统一主页中心。否则使用资料库推荐。",
     "showServerNameOnHubs": "在推荐栏显示服务器名称",
@@ -771,7 +774,8 @@
       "studio": "工作室",
       "random": "随机",
       "dateShared": "共享日期",
-      "latestEpisodeAirDate": "最新一集播出日期"
+      "latestEpisodeAirDate": "最新一集播出日期",
+      "lastEpisodeDateAdded": "最新一集添加日期"
     }
   },
   "about": {
@@ -1027,6 +1031,7 @@
     "unwatchedOnly": "仅未观看",
     "nextNUnwatched": "接下来 ${count} 集未观看",
     "customAmount": "自定义数量...",
+    "includeSpecials": "包含特别篇",
     "howManyEpisodes": "下载几集？",
     "itemsQueued": "${count} 个项目已加入下载队列",
     "keepSynced": "保持同步",

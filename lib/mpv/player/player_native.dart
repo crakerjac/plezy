@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io' show Platform;
 
 import 'package:flutter/services.dart';
@@ -6,9 +7,7 @@ import '../../media/media_display_criteria.dart';
 import '../models.dart';
 import 'player_base.dart';
 
-/// Shared native implementation of [Player] for iOS, macOS, Android (MPV fallback), and Linux.
-/// Uses MPVKit via platform channels with Metal rendering (Apple), native window (Android),
-/// or FlTextureGL (Linux).
+/// MPV-backed player for platforms where AetherEngine is not the native route.
 class PlayerNative extends PlayerBase {
   int? _textureIdValue;
   String _dvConversionMode = 'auto';
@@ -32,6 +31,12 @@ class PlayerNative extends PlayerBase {
   @override
   String get playerType => 'mpv';
 
+  @override
+  bool get providesNativeStats => Platform.isAndroid;
+
+  @override
+  bool get attachesExternalSubtitlesAtOpen => true;
+
   /// Node properties are returned as structured maps on macOS/iOS/Linux,
   /// but as JSON strings on Android/Windows.
   static final String _nodeFormat = (Platform.isAndroid || Platform.isWindows) ? 'string' : 'node';
@@ -50,6 +55,27 @@ class PlayerNative extends PlayerBase {
       '1' || 'true' || 'yes' || 'on' => 'yes',
       _ => 'no',
     };
+  }
+
+  static String _fixedLengthQuote(String value) {
+    return '%${utf8.encode(value).length}%$value';
+  }
+
+  static String _escapePathListEntry(String value, String separator) {
+    return value.replaceAll(r'\', r'\\').replaceAll(separator, '\\$separator');
+  }
+
+  static String? _externalSubtitlesLoadfileOption(List<SubtitleTrack>? externalSubtitles) {
+    final separator = Platform.isWindows ? ';' : ':';
+    final escapedUris = externalSubtitles
+        ?.map((subtitle) => subtitle.uri)
+        .whereType<String>()
+        .where((uri) => uri.isNotEmpty)
+        .map((uri) => _escapePathListEntry(uri, separator))
+        .toList();
+    if (escapedUris == null || escapedUris.isEmpty) return null;
+
+    return 'sub-files=${_fixedLengthQuote(escapedUris.join(separator))}';
   }
 
   MediaDisplayCriteria? _effectiveDisplayCriteria(MediaDisplayCriteria? criteria) {
@@ -148,6 +174,7 @@ class PlayerNative extends PlayerBase {
     final startPosition = media.start ?? Duration.zero;
     configureTimeline(offset: timelineOffset, duration: timelineDuration);
     clearTracks();
+    setExternalSubtitleMetadata(externalSubtitles);
     resetPlaybackProgress(startPosition);
     setSeekable(false);
 
@@ -184,7 +211,12 @@ class PlayerNative extends PlayerBase {
       }
     }
 
-    await command(['loadfile', uri, 'replace']);
+    final loadfileArgs = ['loadfile', uri, 'replace'];
+    final loadfileOption = _externalSubtitlesLoadfileOption(externalSubtitles);
+    if (loadfileOption != null) {
+      loadfileArgs.addAll(['-1', loadfileOption]);
+    }
+    await command(loadfileArgs);
 
     // mpv's pause property survives loadfile; in-place reloads pause the old
     // file before resolving, so explicitly unpause for the replacement. Set
@@ -295,6 +327,14 @@ class PlayerNative extends PlayerBase {
   }
 
   @override
+  Future<Map<String, dynamic>> getStats() async {
+    if (disposed || !Platform.isAndroid) return super.getStats();
+    await _ensureInitialized();
+    final result = await invoke<Map>('getStats');
+    return Map<String, dynamic>.from(result ?? const {});
+  }
+
+  @override
   Future<void> command(List<String> args) async {
     if (disposed) return;
     await _ensureInitialized();
@@ -361,12 +401,20 @@ class PlayerNative extends PlayerBase {
   }
 
   @override
-  Future<bool> setVideoFrameRate(double fps, int durationMs, {int extraDelayMs = 0}) async {
+  Future<bool> setVideoFrameRate(
+    double fps,
+    int durationMs, {
+    int extraDelayMs = 0,
+    int videoWidth = 0,
+    int videoHeight = 0,
+  }) async {
     if (!Platform.isAndroid || disposed || !initialized) return false;
     final result = await invoke<bool>('setVideoFrameRate', {
       'fps': fps,
       'duration': durationMs,
       'extraDelayMs': extraDelayMs,
+      'videoWidth': videoWidth,
+      'videoHeight': videoHeight,
     });
     return result ?? false;
   }
