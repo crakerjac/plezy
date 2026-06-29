@@ -171,6 +171,8 @@ extension _VideoPlayerPlaybackStartMethods on VideoPlayerScreenState {
         currentPlayer: currentPlayer,
         settingsService: settingsService,
         preKnownFps: displayCriteria?.fps,
+        preKnownWidth: displayCriteria?.width ?? 0,
+        preKnownHeight: displayCriteria?.height ?? 0,
         hasVideoUrl: result.videoUrl != null,
         ensureAudioFocus: ensureAudioFocus,
       );
@@ -222,9 +224,9 @@ extension _VideoPlayerPlaybackStartMethods on VideoPlayerScreenState {
         final shouldAutoPlay =
             !shouldHoldPlaybackStart && !wtOwnsStart && externalSubtitlePlan.canStartBeforeTrackSetup;
 
-        // ExoPlayer: attach external subs at open time so it discovers
-        // them in a single prepare() — no media reload needed for selection.
-        // MPV (all platforms including Android): external subs added after open via sub-add.
+        // Backends that support at-open sidecars receive them with open()
+        // so tracks are discovered in a single prepare/loadfile cycle. Any
+        // backend that cannot do that still uses the post-open sub-add path.
         final openTiming = _playbackOpenTiming(
           backend: _currentMetadata.backend,
           isTranscoding: result.isTranscoding,
@@ -320,14 +322,20 @@ extension _VideoPlayerPlaybackStartMethods on VideoPlayerScreenState {
         // Store external subtitles for re-use after backend fallback
         _trackManager!.cacheExternalSubtitles(result.externalSubtitles);
 
+        final resumeForStartupFrame =
+            frameRatePlan.needsStartupRefresh && externalSubtitlePlan.requiresPostOpenAdd && !wtOwnsStart;
         await _applyTracksAfterOpen(
           trackManager: _trackManager!,
           externalSubtitlePlan: externalSubtitlePlan,
           // When a startup gate below owns the resume, skip this one to
-          // avoid a double-play. Watch Together stays paused for the group
-          // start, so selection is armed through the resume-skipped branch.
+          // avoid a double-play. Post-open external-subtitle paths are the
+          // exception: after they attach we must resume once so mpv can
+          // produce the startup frame that the decoder-refresh gate is waiting
+          // for.
+          // Watch Together stays paused for the group start, so selection is
+          // armed through the resume-skipped branch.
           shouldResumeAfterSubtitleLoad: () =>
-              !shouldHoldPlaybackStart && !wtOwnsStart && mounted && player == currentPlayer,
+              (!shouldHoldPlaybackStart || resumeForStartupFrame) && !wtOwnsStart && mounted && player == currentPlayer,
           applySelectionWhenResumeSkipped: wtOwnsStart && !shouldHoldPlaybackStart,
         );
 
@@ -342,6 +350,7 @@ extension _VideoPlayerPlaybackStartMethods on VideoPlayerScreenState {
             wtOwnsStart: wtOwnsStart,
             wtStartupHold: wtStartupHold,
           ),
+          playbackResumedForStartupFrame: resumeForStartupFrame,
         );
         // Backstop: if the gate never ran its resume path (unmounted race),
         // don't leave Watch Together readiness held forever.

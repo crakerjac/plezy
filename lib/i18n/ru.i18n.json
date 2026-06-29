@@ -118,6 +118,9 @@
     "continueWatchingAction": "Действие для «Продолжить просмотр»",
     "continueWatchingPlay": "Воспроизвести",
     "continueWatchingDetails": "Открыть сведения",
+    "episodeAction": "Действие для эпизодов",
+    "episodePlay": "Воспроизвести",
+    "episodeDetails": "Открыть сведения",
     "useGlobalHubs": "Использовать макет главной",
     "useGlobalHubsDescription": "Показывать единые разделы главной. Иначе использовать рекомендации библиотек.",
     "showServerNameOnHubs": "Показывать имя сервера в хабах",
@@ -771,7 +774,8 @@
       "studio": "Студия",
       "random": "Случайно",
       "dateShared": "Дата открытия доступа",
-      "latestEpisodeAirDate": "Дата выхода последнего эпизода"
+      "latestEpisodeAirDate": "Дата выхода последнего эпизода",
+      "lastEpisodeDateAdded": "Дата добавления последнего эпизода"
     }
   },
   "about": {
@@ -1027,6 +1031,7 @@
     "unwatchedOnly": "Только непросмотренные",
     "nextNUnwatched": "Следующие ${count} непросмотренных",
     "customAmount": "Указать количество...",
+    "includeSpecials": "Включить спецвыпуски",
     "howManyEpisodes": "Сколько эпизодов?",
     "itemsQueued": "${count} элементов добавлено в очередь загрузки",
     "keepSynced": "Синхронизировать",

@@ -56,6 +56,7 @@ abstract class PlayerBase with PlayerStreamControllersMixin implements Player {
   Duration? _timelineDuration;
   int _nextPropId = 0;
   final Map<int, String> _propIdToName = {};
+  Map<String, SubtitleTrack> _externalSubtitleMetadataByUri = const {};
 
   @protected
   bool initialized = false;
@@ -447,16 +448,18 @@ abstract class PlayerBase with PlayerStreamControllersMixin implements Player {
       } else if (type == 'sub') {
         if (selected) selectedSubtitleId = id;
         final codec = track['codec'] as String?;
+        final externalFilename = track['external-filename'] as String?;
+        final externalMetadata = externalFilename == null ? null : _externalSubtitleMetadataByUri[externalFilename];
         subtitleTracks.add(
           SubtitleTrack(
             id: id,
-            title: cleanSubtitleTitle(track['title'] as String?, codec: codec),
-            language: cleanTrackMetadataValue(track['lang'] as String?),
-            codec: codec,
-            isDefault: track['default'] as bool? ?? false,
-            isForced: track['forced'] as bool? ?? false,
+            title: externalMetadata?.title ?? cleanSubtitleTitle(track['title'] as String?, codec: codec),
+            language: externalMetadata?.language ?? cleanTrackMetadataValue(track['lang'] as String?),
+            codec: externalMetadata?.codec ?? codec,
+            isDefault: externalMetadata?.isDefault ?? (track['default'] as bool? ?? false),
+            isForced: externalMetadata?.isForced ?? (track['forced'] as bool? ?? false),
             isExternal: track['external'] as bool? ?? false,
-            uri: track['external-filename'] as String?,
+            uri: externalFilename,
           ),
         );
       }
@@ -512,6 +515,18 @@ abstract class PlayerBase with PlayerStreamControllersMixin implements Player {
     const empty = Tracks();
     _state = _state.copyWith(tracks: empty, track: const TrackSelection());
     tracksController.add(empty);
+  }
+
+  @protected
+  void setExternalSubtitleMetadata(List<SubtitleTrack>? externalSubtitles) {
+    final metadataByUri = <String, SubtitleTrack>{};
+    for (final subtitle in externalSubtitles ?? const <SubtitleTrack>[]) {
+      final uri = subtitle.uri;
+      if (uri != null && uri.isNotEmpty) {
+        metadataByUri[uri] = subtitle;
+      }
+    }
+    _externalSubtitleMetadataByUri = metadataByUri;
   }
 
   @protected
@@ -598,7 +613,13 @@ abstract class PlayerBase with PlayerStreamControllersMixin implements Player {
   Future<void> updateFrame() async {}
 
   @override
-  Future<bool> setVideoFrameRate(double fps, int durationMs, {int extraDelayMs = 0}) async => false;
+  Future<bool> setVideoFrameRate(
+    double fps,
+    int durationMs, {
+    int extraDelayMs = 0,
+    int videoWidth = 0,
+    int videoHeight = 0,
+  }) async => false;
 
   @override
   // ignore: no-empty-block - base no-op, overridden by platform subclasses

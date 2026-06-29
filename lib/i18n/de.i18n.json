@@ -118,6 +118,9 @@
     "continueWatchingAction": "Aktion für Weiterschauen",
     "continueWatchingPlay": "Abspielen",
     "continueWatchingDetails": "Details öffnen",
+    "episodeAction": "Episodenaktion",
+    "episodePlay": "Abspielen",
+    "episodeDetails": "Details öffnen",
     "useGlobalHubs": "Startlayout verwenden",
     "useGlobalHubsDescription": "Einheitliche Start-Hubs anzeigen. Sonst Bibliotheksempfehlungen verwenden.",
     "showServerNameOnHubs": "Servername bei Hubs anzeigen",
@@ -771,7 +774,8 @@
       "studio": "Studio",
       "random": "Zufällig",
       "dateShared": "Datum geteilt",
-      "latestEpisodeAirDate": "Letztes Folgenausstrahlungsdatum"
+      "latestEpisodeAirDate": "Letztes Folgenausstrahlungsdatum",
+      "lastEpisodeDateAdded": "Datum der zuletzt hinzugefügten Folge"
     }
   },
   "about": {
@@ -1027,6 +1031,7 @@
     "unwatchedOnly": "Nur ungesehene",
     "nextNUnwatched": "Nächste ${count} ungesehene",
     "customAmount": "Eigene Anzahl...",
+    "includeSpecials": "Specials einschließen",
     "howManyEpisodes": "Wie viele Episoden?",
     "itemsQueued": "${count} Elemente zum Download eingereiht",
     "keepSynced": "Synchronisiert halten",

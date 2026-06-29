@@ -247,6 +247,9 @@ class _TranslationsSettingsFr extends TranslationsSettingsEn {
 	@override String get continueWatchingAction => 'Action Continuer à regarder';
 	@override String get continueWatchingPlay => 'Lire';
 	@override String get continueWatchingDetails => 'Ouvrir les détails';
+	@override String get episodeAction => 'Action des épisodes';
+	@override String get episodePlay => 'Lire';
+	@override String get episodeDetails => 'Ouvrir les détails';
 	@override String get useGlobalHubs => 'Utiliser la mise en page d\'accueil';
 	@override String get useGlobalHubsDescription => 'Afficher des hubs d\'accueil unifiés. Sinon, utiliser les recommandations de bibliothèque.';
 	@override String get showServerNameOnHubs => 'Afficher le nom du serveur sur les hubs';
@@ -1285,6 +1288,7 @@ class _TranslationsDownloadsFr extends TranslationsDownloadsEn {
 	@override String get unwatchedOnly => 'Non vus uniquement';
 	@override String nextNUnwatched({required Object count}) => '${count} prochains non vus';
 	@override String get customAmount => 'Quantité personnalisée...';
+	@override String get includeSpecials => 'Inclure les spéciaux';
 	@override String get howManyEpisodes => 'Combien d\'épisodes ?';
 	@override String itemsQueued({required Object count}) => '${count} éléments mis en file d\'attente';
 	@override String get keepSynced => 'Garder synchronisé';
@@ -1755,6 +1759,7 @@ class _TranslationsLibrariesSortLabelsFr extends TranslationsLibrariesSortLabels
 	@override String get random => 'Aléatoire';
 	@override String get dateShared => 'Date de partage';
 	@override String get latestEpisodeAirDate => 'Dernière date de diffusion';
+	@override String get lastEpisodeDateAdded => 'Date d\'ajout du dernier épisode';
 }
 
 // Path: companionRemote.session
@@ -2029,6 +2034,9 @@ extension on TranslationsFr {
 			'settings.continueWatchingAction' => 'Action Continuer à regarder',
 			'settings.continueWatchingPlay' => 'Lire',
 			'settings.continueWatchingDetails' => 'Ouvrir les détails',
+			'settings.episodeAction' => 'Action des épisodes',
+			'settings.episodePlay' => 'Lire',
+			'settings.episodeDetails' => 'Ouvrir les détails',
 			'settings.useGlobalHubs' => 'Utiliser la mise en page d\'accueil',
 			'settings.useGlobalHubsDescription' => 'Afficher des hubs d\'accueil unifiés. Sinon, utiliser les recommandations de bibliothèque.',
 			'settings.showServerNameOnHubs' => 'Afficher le nom du serveur sur les hubs',
@@ -2430,11 +2438,11 @@ extension on TranslationsFr {
 			'messages.logsUploaded' => 'Logs envoyés',
 			'messages.logsUploadFailed' => 'Échec de l\'envoi des logs',
 			'messages.logId' => 'ID du log',
+			_ => null,
+		} ?? switch (path) {
 			'subtitlingStyling.text' => 'Texte',
 			'subtitlingStyling.border' => 'Bordure',
 			'subtitlingStyling.background' => 'Arrière-plan',
-			_ => null,
-		} ?? switch (path) {
 			'subtitlingStyling.fontSize' => 'Taille de la police',
 			'subtitlingStyling.textColor' => 'Couleur du texte',
 			'subtitlingStyling.borderSize' => 'Taille de la bordure',
@@ -2638,6 +2646,7 @@ extension on TranslationsFr {
 			'libraries.sortLabels.random' => 'Aléatoire',
 			'libraries.sortLabels.dateShared' => 'Date de partage',
 			'libraries.sortLabels.latestEpisodeAirDate' => 'Dernière date de diffusion',
+			'libraries.sortLabels.lastEpisodeDateAdded' => 'Date d\'ajout du dernier épisode',
 			'about.title' => 'À propos',
 			'about.openSourceLicenses' => 'Licences Open Source',
 			'about.versionLabel' => ({required Object version}) => 'Version ${version}',
@@ -2870,6 +2879,7 @@ extension on TranslationsFr {
 			'downloads.unwatchedOnly' => 'Non vus uniquement',
 			'downloads.nextNUnwatched' => ({required Object count}) => '${count} prochains non vus',
 			'downloads.customAmount' => 'Quantité personnalisée...',
+			'downloads.includeSpecials' => 'Inclure les spéciaux',
 			'downloads.howManyEpisodes' => 'Combien d\'épisodes ?',
 			'downloads.itemsQueued' => ({required Object count}) => '${count} éléments mis en file d\'attente',
 			'downloads.keepSynced' => 'Garder synchronisé',
@@ -2942,13 +2952,13 @@ extension on TranslationsFr {
 			'companionRemote.pairing.authFailed' => 'Échec de l\'authentification. Les deux appareils doivent utiliser le même compte Plex.',
 			'companionRemote.pairing.failedToConnect' => ({required Object error}) => 'Échec de la connexion : ${error}',
 			'companionRemote.remote.disconnectConfirm' => 'Voulez-vous vous déconnecter de la session distante ?',
+			_ => null,
+		} ?? switch (path) {
 			'companionRemote.remote.reconnecting' => 'Reconnexion...',
 			'companionRemote.remote.attemptOf' => ({required Object current}) => 'Tentative ${current} sur 5',
 			'companionRemote.remote.retryNow' => 'Réessayer maintenant',
 			'companionRemote.remote.tabRemote' => 'Télécommande',
 			'companionRemote.remote.tabPlay' => 'Lecture',
-			_ => null,
-		} ?? switch (path) {
 			'companionRemote.remote.tabMore' => 'Plus',
 			'companionRemote.remote.menu' => 'Menu',
 			'companionRemote.remote.tabNavigation' => 'Navigation par onglets',

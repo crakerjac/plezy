@@ -5,39 +5,48 @@ import 'package:http/http.dart' as http;
 
 import '../../models/trakt/trakt_scrobble_request.dart';
 import '../../models/trakt/trakt_user.dart';
-import '../../utils/abortable_http_request.dart';
 import '../../utils/app_logger.dart';
-import '../../utils/platform_http_client_stub.dart'
-    if (dart.library.io) '../../utils/platform_http_client_io.dart'
-    as platform;
-import '../trackers/future_coalescer.dart';
 import '../trackers/tracker_constants.dart';
+import '../trackers/tracker_exceptions.dart';
+import '../trackers/tracker_http_client.dart';
+import '../trackers/tracker_session.dart';
 import 'trakt_constants.dart';
-import 'trakt_session.dart';
 
 /// HTTP wrapper for the Trakt REST API.
 ///
-/// Holds a [TraktSession] (refreshed in place on 401). Concurrent 401s are
+/// Holds a [TrackerSession] (refreshed in place on 401). Concurrent 401s are
 /// coalesced so we only hit `/oauth/token` once per refresh.
 class TraktClient {
   static const Set<int> _scrobbleAllowedStatuses = {200, 201, 409};
+  static const Set<int> _permanentRefreshFailureStatuses = {400, 401, 403};
+  static final Map<String, Future<TrackerSession>> _refreshesByToken = {};
 
-  TraktSession _session;
-  final http.Client _http;
+  TrackerSession _session;
+  final TrackerHttpClient _http;
 
   /// Fired when refresh fails permanently (e.g. `invalid_grant`). The provider
   /// uses this to clear the stored session and notify the UI.
   final void Function() onSessionInvalidated;
 
-  final _refreshCoalescer = FutureCoalescer<TraktSession>();
+  /// Fired when refresh succeeds so the provider can persist the rotated
+  /// access/refresh token pair and share it with the other active Trakt clients.
+  final void Function(TrackerSession session)? onSessionUpdated;
 
-  TraktClient(TraktSession session, {required this.onSessionInvalidated, http.Client? httpClient})
-    : _session = session,
-      _http = httpClient ?? platform.createPlatformClient();
+  TraktClient(
+    TrackerSession session, {
+    required this.onSessionInvalidated,
+    this.onSessionUpdated,
+    http.Client? httpClient,
+  }) : _session = session,
+       _http = TrackerHttpClient(service: TrackerService.trakt, logLabel: 'Trakt', httpClient: httpClient);
 
-  TraktSession get session => _session;
+  TrackerSession get session => _session;
 
-  void dispose() => _http.close();
+  void updateSession(TrackerSession session) {
+    _session = session;
+  }
+
+  void dispose() => _http.dispose();
 
   Future<TraktUser> getUserSettings() async {
     final res = await _request('GET', '/users/settings');
@@ -71,52 +80,101 @@ class TraktClient {
 
   /// Refresh the access token. Coalesces concurrent calls so
   /// duplicate POSTs don't race when multiple in-flight requests hit 401.
-  Future<TraktSession> refresh() => _refreshCoalescer.run(_doRefresh);
+  Future<TrackerSession> refresh() async {
+    final String refreshToken;
+    try {
+      refreshToken = _session.requireRefreshToken(TrackerService.trakt);
+    } on TrackerAuthException catch (e) {
+      if (e.isPermanent) onSessionInvalidated();
+      rethrow;
+    }
+    final existing = _refreshesByToken[refreshToken];
+    if (existing != null) {
+      try {
+        final session = await existing;
+        if (_session.refreshToken == refreshToken) {
+          _session = session;
+          onSessionUpdated?.call(session);
+        }
+        return _session;
+      } on TrackerAuthException catch (e) {
+        if (e.isPermanent && _session.refreshToken == refreshToken) {
+          onSessionInvalidated();
+        }
+        rethrow;
+      }
+    }
 
-  Future<TraktSession> _doRefresh() async {
+    late final Future<TrackerSession> refresh;
+    refresh = _doRefresh(refreshToken).whenComplete(() {
+      if (identical(_refreshesByToken[refreshToken], refresh)) {
+        _refreshesByToken.remove(refreshToken);
+      }
+    });
+    _refreshesByToken[refreshToken] = refresh;
+    return refresh;
+  }
+
+  Future<TrackerSession> _doRefresh(String refreshToken) async {
     appLogger.d('Trakt: refreshing access token');
     final tokenUri = Uri.parse(TraktConstants.tokenUrl);
-    final res = await sendAbortableHttpRequest(
-      _http,
+    final res = await _http.sendJson(
       'POST',
       tokenUri,
       headers: TraktConstants.headers(),
-      body: json.encode({
-        'refresh_token': _session.refreshToken,
+      body: {
+        'refresh_token': refreshToken,
         'client_id': TraktConstants.clientId,
         'client_secret': TraktConstants.clientSecret,
         'grant_type': 'refresh_token',
-      }),
+      },
       timeout: TrackerConstants.refreshTimeout,
       operation: 'Trakt token refresh',
+      allowedMethods: const {'POST'},
     );
 
     if (res.statusCode == 200) {
       final body = json.decode(res.body) as Map<String, dynamic>;
-      _session = TraktSession.fromTokenResponse(body).copyWith(username: _session.username);
+      _session = TrackerSession.fromTokenResponse(TrackerService.trakt, body).copyWith(username: _session.username);
+      onSessionUpdated?.call(_session);
       return _session;
     }
 
-    appLogger.w('Trakt: refresh failed (${res.statusCode}), session invalidated');
-    onSessionInvalidated();
-    throw TraktAuthException('Refresh failed: HTTP ${res.statusCode}');
+    if (_session.refreshToken != refreshToken) {
+      appLogger.d('Trakt: refresh failed (${res.statusCode}) after session update; keeping latest session');
+      return _session;
+    }
+
+    final isPermanent = _permanentRefreshFailureStatuses.contains(res.statusCode);
+    if (isPermanent) {
+      appLogger.w('Trakt: refresh failed permanently (${res.statusCode}), session invalidated');
+      onSessionInvalidated();
+    } else {
+      appLogger.w('Trakt: refresh failed (${res.statusCode}), will retry later');
+    }
+    throw TrackerAuthException(
+      service: TrackerService.trakt,
+      message: 'Refresh failed: HTTP ${res.statusCode}',
+      statusCode: res.statusCode,
+      isPermanent: isPermanent,
+    );
   }
 
   /// Revoke the access token at Trakt. Best-effort; swallows network errors.
   Future<void> revoke() async {
     try {
-      await sendAbortableHttpRequest(
-        _http,
+      await _http.sendJson(
         'POST',
         Uri.parse(TraktConstants.revokeUrl),
         headers: TraktConstants.headers(),
-        body: json.encode({
+        body: {
           'token': _session.accessToken,
           'client_id': TraktConstants.clientId,
           'client_secret': TraktConstants.clientSecret,
-        }),
+        },
         timeout: TrackerConstants.revokeTimeout,
         operation: 'Trakt token revoke',
+        allowedMethods: const {'POST'},
       );
     } catch (e) {
       appLogger.d('Trakt: revoke failed (non-fatal)', error: e);
@@ -146,64 +204,28 @@ class TraktClient {
     }
 
     if (allowStatuses.contains(res.statusCode)) {
-      if (res.body.isEmpty) return null;
-      try {
-        return json.decode(res.body);
-      } catch (_) {
-        return null;
-      }
+      return TrackerHttpClient.decodeJson(res.body);
     }
 
     if (res.statusCode == 429) {
-      throw TraktRateLimitException(retryAfterSeconds: int.tryParse(res.headers['retry-after'] ?? ''));
+      throw TrackerRateLimitException(
+        service: TrackerService.trakt,
+        retryAfterSeconds: int.tryParse(res.headers['retry-after'] ?? ''),
+      );
     }
 
-    throw TraktApiException(statusCode: res.statusCode, body: res.body);
+    throw TrackerApiException(service: TrackerService.trakt, statusCode: res.statusCode, body: res.body);
   }
 
   Future<http.Response> _send(String method, String path, {Map<String, dynamic>? body}) async {
     final uri = Uri.parse('${TraktConstants.apiBase}$path');
     final headers = TraktConstants.headers(accessToken: _session.accessToken);
-    final encoded = body == null ? null : json.encode(body);
-
-    final sw = Stopwatch()..start();
-    final res = await switch (method) {
-      'GET' || 'POST' || 'PUT' || 'DELETE' => sendAbortableHttpRequest(
-        _http,
-        method,
-        uri,
-        headers: headers,
-        body: encoded,
-        timeout: TrackerConstants.requestTimeout,
-        operation: 'Trakt $method ${uri.path}',
-      ),
-      _ => throw ArgumentError('Unsupported HTTP method: $method'),
-    };
-    sw.stop();
-
-    appLogger.d('Trakt $method ${uri.path} → ${res.statusCode} (${sw.elapsedMilliseconds}ms)');
-    return res;
+    return _http.sendJson(
+      method,
+      uri,
+      headers: headers,
+      body: body,
+      allowedMethods: const {'GET', 'POST', 'PUT', 'DELETE'},
+    );
   }
-}
-
-class TraktApiException implements Exception {
-  final int statusCode;
-  final String body;
-  const TraktApiException({required this.statusCode, required this.body});
-  @override
-  String toString() => 'TraktApiException(HTTP $statusCode): $body';
-}
-
-class TraktRateLimitException implements Exception {
-  final int? retryAfterSeconds;
-  const TraktRateLimitException({this.retryAfterSeconds});
-  @override
-  String toString() => 'TraktRateLimitException(retry-after: $retryAfterSeconds s)';
-}
-
-class TraktAuthException implements Exception {
-  final String message;
-  const TraktAuthException(this.message);
-  @override
-  String toString() => 'TraktAuthException: $message';
 }

@@ -118,6 +118,9 @@
     "continueWatchingAction": "Handling for Fortsæt med at se",
     "continueWatchingPlay": "Afspil",
     "continueWatchingDetails": "Åbn detaljer",
+    "episodeAction": "Handling for afsnit",
+    "episodePlay": "Afspil",
+    "episodeDetails": "Åbn detaljer",
     "useGlobalHubs": "Brug startlayout",
     "useGlobalHubsDescription": "Vis samlet startsideindhold. Brug ellers biblioteksanbefalinger.",
     "showServerNameOnHubs": "Vis servernavn på hubbe",
@@ -771,7 +774,8 @@
       "studio": "Studie",
       "random": "Tilfældig",
       "dateShared": "Delt dato",
-      "latestEpisodeAirDate": "Seneste episodes premieredato"
+      "latestEpisodeAirDate": "Seneste episodes premieredato",
+      "lastEpisodeDateAdded": "Dato for senest tilføjede episode"
     }
   },
   "about": {
@@ -1027,6 +1031,7 @@
     "unwatchedOnly": "Kun usete",
     "nextNUnwatched": "Næste ${count} usete",
     "customAmount": "Angiv antal...",
+    "includeSpecials": "Inkludér specials",
     "howManyEpisodes": "Hvor mange episoder?",
     "itemsQueued": "${count} elementer sat i kø til download",
     "keepSynced": "Hold synkroniseret",

@@ -867,6 +867,7 @@ class DownloadProvider extends ChangeNotifier with DisposableChangeNotifierMixin
     DownloadVersionConfig? versionConfig,
     DownloadFilter filter = DownloadFilter.all,
     int? maxCount,
+    bool includeSpecials = true,
   }) async {
     if (!_downloadManager.downloadsSupported) return 0;
 
@@ -892,7 +893,14 @@ class DownloadProvider extends ChangeNotifier with DisposableChangeNotifierMixin
         final hadMetadata = _metadata.containsKey(globalKey);
         _metadata[globalKey] = metadata;
         try {
-          return await _queueShowDownload(metadata, client, versionConfig: config, filter: filter, maxCount: maxCount);
+          return await _queueShowDownload(
+            metadata,
+            client,
+            versionConfig: config,
+            filter: filter,
+            maxCount: maxCount,
+            includeSpecials: includeSpecials,
+          );
         } catch (_) {
           if (!hadMetadata) _metadata.remove(globalKey);
           rethrow;
@@ -907,6 +915,7 @@ class DownloadProvider extends ChangeNotifier with DisposableChangeNotifierMixin
             versionConfig: config,
             filter: filter,
             maxCount: maxCount,
+            includeSpecials: includeSpecials,
           );
         } catch (_) {
           if (!hadMetadata) _metadata.remove(globalKey);
@@ -943,7 +952,7 @@ class DownloadProvider extends ChangeNotifier with DisposableChangeNotifierMixin
     int count = 0;
 
     Future<void> queueItem(MediaItem item) async {
-      if (unwatchedOnly && item.isWatched && !item.hasActiveProgress) return;
+      if (unwatchedOnly && !item.isUnwatchedOrInProgress) return;
       final queued = await _queueSingleDownload(item, client, relatedContext: relatedContext);
       if (queued) count++;
     }
@@ -1150,6 +1159,7 @@ class DownloadProvider extends ChangeNotifier with DisposableChangeNotifierMixin
     DownloadVersionConfig? versionConfig,
     DownloadFilter filter = DownloadFilter.all,
     int? maxCount,
+    bool includeSpecials = true,
   }) async {
     await _storeLeafCount(show.globalKey, show);
     return _expandAndQueue(
@@ -1159,6 +1169,7 @@ class DownloadProvider extends ChangeNotifier with DisposableChangeNotifierMixin
       filter: filter,
       maxCount: maxCount,
       skipExisting: false,
+      includeSpecials: includeSpecials,
     );
   }
 
@@ -1169,6 +1180,7 @@ class DownloadProvider extends ChangeNotifier with DisposableChangeNotifierMixin
     DownloadVersionConfig? versionConfig,
     DownloadFilter filter = DownloadFilter.all,
     int? maxCount,
+    bool includeSpecials = true,
   }) async {
     await _storeLeafCount(season.globalKey, season);
     return _expandAndQueue(
@@ -1178,6 +1190,7 @@ class DownloadProvider extends ChangeNotifier with DisposableChangeNotifierMixin
       filter: filter,
       maxCount: maxCount,
       skipExisting: false,
+      includeSpecials: includeSpecials,
     );
   }
 
@@ -1215,8 +1228,13 @@ class DownloadProvider extends ChangeNotifier with DisposableChangeNotifierMixin
     required DownloadFilter filter,
     required int? maxCount,
     required bool skipExisting,
+    bool includeSpecials = true,
   }) async {
     final unwatchedOnly = filter == DownloadFilter.unwatched;
+    // Downloading the Specials season itself must still queue its episodes —
+    // only suppress Specials when sweeping a whole show or a regular season.
+    final effectiveIncludeSpecials =
+        includeSpecials || (container.kind == MediaKind.season && isSpecialSeasonNumber(container.index));
     final relatedContext = _RelatedMetadataDownloadContext();
     final episodes = <MediaItem>[];
     if (container.kind == MediaKind.show) {
@@ -1226,6 +1244,7 @@ class DownloadProvider extends ChangeNotifier with DisposableChangeNotifierMixin
         unwatchedOnly: unwatchedOnly,
         out: episodes,
         fallback: container,
+        includeSpecials: effectiveIncludeSpecials,
       );
     } else {
       await collectEpisodesForSeason(
@@ -1234,6 +1253,7 @@ class DownloadProvider extends ChangeNotifier with DisposableChangeNotifierMixin
         unwatchedOnly: unwatchedOnly,
         out: episodes,
         fallback: container,
+        includeSpecials: effectiveIncludeSpecials,
       );
     }
 
@@ -1612,6 +1632,7 @@ class DownloadProvider extends ChangeNotifier with DisposableChangeNotifierMixin
     required int episodeCount,
     int mediaIndex = 0,
     String downloadFilter = SyncRuleFilter.unwatched,
+    bool includeSpecials = true,
     MediaItem? targetMetadata,
   }) async {
     final profileId = _requireActiveProfileId();
@@ -1626,6 +1647,7 @@ class DownloadProvider extends ChangeNotifier with DisposableChangeNotifierMixin
       episodeCount: episodeCount,
       mediaIndex: mediaIndex,
       downloadFilter: downloadFilter,
+      includeSpecials: includeSpecials,
     );
 
     if (targetMetadata != null) {
@@ -1639,7 +1661,10 @@ class DownloadProvider extends ChangeNotifier with DisposableChangeNotifierMixin
       _syncRules[rule.globalKey] = rule;
       safeNotifyListeners();
     }
-    appLogger.i('Created sync rule: $scopedGlobalKey ($targetType, filter=$downloadFilter, keep $episodeCount)');
+    appLogger.i(
+      'Created sync rule: $scopedGlobalKey '
+      '($targetType, filter=$downloadFilter, keep $episodeCount, includeSpecials=$includeSpecials)',
+    );
   }
 
   /// Update the episode count for an existing show/season sync rule.

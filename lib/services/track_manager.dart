@@ -3,7 +3,6 @@ import 'dart:async';
 import '../mpv/mpv.dart';
 
 import '../media/media_item.dart';
-import '../media/media_item_types.dart';
 import '../media/media_server_user_profile.dart';
 import '../media/media_source_info.dart';
 import '../services/settings_service.dart';
@@ -12,18 +11,12 @@ import '../utils/app_logger.dart';
 import '../utils/language_codes.dart';
 import '../utils/track_label_builder.dart';
 
-/// Persists a track choice through Plex's immediate preference endpoints.
+/// Persists a track choice for the current part to the server.
 /// Backends that persist through another path (Jellyfin uses playback progress
-/// stream indexes) or lack server-side track preferences leave this null.
+/// stream indexes) or lack server-side stream selection leave this null.
 /// [trackType] is `'audio'` or `'subtitle'`.
 typedef TrackPreferencePersister =
-    Future<void> Function({
-      required String id,
-      required int partId,
-      required String trackType,
-      String? languageCode,
-      int? streamID,
-    });
+    Future<void> Function({required int partId, required String trackType, int? streamID});
 
 /// Manages track (audio + subtitle) lifecycle: external subtitle loading,
 /// automatic track selection, server preference sync, and cycling.
@@ -93,12 +86,11 @@ class TrackManager {
     _lastExternalSubtitles = externalSubtitles;
   }
 
-  /// Add external subtitle tracks to the player in parallel.
+  /// Add external subtitle tracks to the player in metadata order.
   ///
-  /// Each sub-add does its own HTTP fetch of the sidecar file, so sequential
-  /// adds dominate startup (~170ms × N). Firing them in parallel lets
-  /// libavformat's network IO overlap and stops Dart → method channel → native
-  /// round-trips from stacking.
+  /// MPV assigns subtitle track IDs in completion order, so parallel sub-adds
+  /// make the track list nondeterministic. Keep this ordered for the fallback
+  /// paths that cannot attach sidecars through loadfile.
   Future<void> addExternalSubtitles(List<SubtitleTrack> externalSubtitles, {Future<void>? waitUntilReady}) async {
     if (externalSubtitles.isEmpty) return;
 
@@ -115,21 +107,19 @@ class TrackManager {
 
       appLogger.d('Adding ${externalSubtitles.length} external subtitle(s) to player');
 
-      await Future.wait(
-        externalSubtitles.where((s) => s.uri != null).map((subtitleTrack) async {
-          try {
-            await player.addSubtitleTrack(
-              uri: subtitleTrack.uri!,
-              title: subtitleTrack.title,
-              language: subtitleTrack.language,
-              select: subtitleTrack.isDefault,
-            );
-            appLogger.d('Added external subtitle: ${subtitleTrack.title ?? subtitleTrack.uri}');
-          } catch (e) {
-            appLogger.w('Failed to add external subtitle: ${subtitleTrack.title ?? subtitleTrack.uri}', error: e);
-          }
-        }),
-      );
+      for (final subtitleTrack in externalSubtitles.where((s) => s.uri != null)) {
+        try {
+          await player.addSubtitleTrack(
+            uri: subtitleTrack.uri!,
+            title: subtitleTrack.title,
+            language: subtitleTrack.language,
+            select: subtitleTrack.isDefault,
+          );
+          appLogger.d('Added external subtitle: ${subtitleTrack.title ?? subtitleTrack.uri}');
+        } catch (e) {
+          appLogger.w('Failed to add external subtitle: ${subtitleTrack.title ?? subtitleTrack.uri}', error: e);
+        }
+      }
     } finally {
       _externalSubtitleAddsInFlight = false;
     }
@@ -203,8 +193,12 @@ class TrackManager {
     final info = mediaInfo;
     if (info == null || tracks.subtitle.isNotEmpty) return true;
 
-    final expectsSelectedSubtitle = info.subtitleTracks.any((track) => track.selected);
-    return !expectsSelectedSubtitle;
+    // Plex can legitimately report subtitles without selecting one. During an
+    // in-place item reload Android clears the old track list before the new
+    // demuxed subtitles arrive; applying selection at the first audio-only
+    // update would treat that temporary empty subtitle list as an explicit
+    // server "off" decision and leave the next episode without selectable subs.
+    return info.subtitleTracks.isEmpty;
   }
 
   /// Core track selection: delegates to [TrackSelectionService].
@@ -257,7 +251,7 @@ class TrackManager {
   Future<void> onBackendSwitched() async {
     appLogger.i('Player backend switched from ExoPlayer to MPV (native fallback)');
 
-    if (_lastExternalSubtitles.isNotEmpty) {
+    if (_lastExternalSubtitles.isNotEmpty && !player.attachesExternalSubtitlesAtOpen) {
       try {
         await addExternalSubtitles(_lastExternalSubtitles);
       } catch (e) {
@@ -341,7 +335,7 @@ class TrackManager {
       }
     }
 
-    await _saveTrackPreferences(partId: partId, trackType: 'audio', languageCode: track.language, streamID: streamID);
+    await _saveTrackPreferences(partId: partId, trackType: 'audio', streamID: streamID);
   }
 
   /// Handle subtitle track changes — save stream selection and language preference.
@@ -350,16 +344,12 @@ class TrackManager {
     final partId = await _guardTrackChange(info);
     if (partId == null) return;
 
-    String? languageCode;
     int? streamID;
 
     if (track.id == 'no') {
-      languageCode = 'none';
       streamID = 0;
       appLogger.i('User turned subtitles off, saving preference');
     } else if (info != null) {
-      languageCode = track.language;
-
       streamID = _matchTrackByAttributes(
         mpvLanguage: track.language,
         mpvTitle: track.title,
@@ -387,7 +377,7 @@ class TrackManager {
       }
     }
 
-    await _saveTrackPreferences(partId: partId, trackType: 'subtitle', languageCode: languageCode, streamID: streamID);
+    await _saveTrackPreferences(partId: partId, trackType: 'subtitle', streamID: streamID);
   }
 
   /// Handle secondary subtitle track changes — no server save needed.
@@ -397,11 +387,6 @@ class TrackManager {
   }
 
   // ── Private helpers ────────────────────────────────────────────────
-
-  /// Series/movie-level identifier used for language preferences.
-  String get _preferenceId {
-    return metadata.isEpisode ? (metadata.grandparentId ?? metadata.id) : metadata.id;
-  }
 
   /// Common guard checks for track change handlers.
   Future<int?> _guardTrackChange(MediaSourceInfo? info) async {
@@ -422,29 +407,18 @@ class TrackManager {
     return partId;
   }
 
-  /// Save language preference and stream selection to the server.
-  Future<void> _saveTrackPreferences({
-    required int partId,
-    required String trackType,
-    String? languageCode,
-    int? streamID,
-  }) async {
+  /// Save the stream selection for the current part to the server.
+  Future<void> _saveTrackPreferences({required int partId, required String trackType, int? streamID}) async {
     try {
       if (!isActive()) return;
       final persist = persistTrackPreference;
       if (persist == null) {
         return;
       }
-      await persist(
-        id: _preferenceId,
-        partId: partId,
-        trackType: trackType,
-        languageCode: languageCode,
-        streamID: streamID,
-      );
-      appLogger.d('Successfully saved $trackType preferences (language + stream)');
+      await persist(partId: partId, trackType: trackType, streamID: streamID);
+      appLogger.d('Successfully saved $trackType stream selection');
     } catch (e) {
-      appLogger.e('Failed to save $trackType preferences', error: e);
+      appLogger.e('Failed to save $trackType stream selection', error: e);
     }
   }
 

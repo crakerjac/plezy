@@ -247,6 +247,9 @@ class _TranslationsSettingsNl extends TranslationsSettingsEn {
 	@override String get continueWatchingAction => 'Actie voor Doorgaan met kijken';
 	@override String get continueWatchingPlay => 'Afspelen';
 	@override String get continueWatchingDetails => 'Details openen';
+	@override String get episodeAction => 'Afleveringsactie';
+	@override String get episodePlay => 'Afspelen';
+	@override String get episodeDetails => 'Details openen';
 	@override String get useGlobalHubs => 'Startlayout gebruiken';
 	@override String get useGlobalHubsDescription => 'Toon gecombineerde home-hubs. Anders bibliotheekaanbevelingen gebruiken.';
 	@override String get showServerNameOnHubs => 'Servernaam tonen bij hubs';
@@ -1285,6 +1288,7 @@ class _TranslationsDownloadsNl extends TranslationsDownloadsEn {
 	@override String get unwatchedOnly => 'Alleen onbekeken';
 	@override String nextNUnwatched({required Object count}) => 'Volgende ${count} onbekeken';
 	@override String get customAmount => 'Aangepast aantal...';
+	@override String get includeSpecials => 'Specials opnemen';
 	@override String get howManyEpisodes => 'Hoeveel afleveringen?';
 	@override String itemsQueued({required Object count}) => '${count} items in downloadwachtrij';
 	@override String get keepSynced => 'Gesynchroniseerd houden';
@@ -1755,6 +1759,7 @@ class _TranslationsLibrariesSortLabelsNl extends TranslationsLibrariesSortLabels
 	@override String get random => 'Willekeurig';
 	@override String get dateShared => 'Gedeeld op';
 	@override String get latestEpisodeAirDate => 'Laatste afleveringsuitzending';
+	@override String get lastEpisodeDateAdded => 'Datum laatst toegevoegde aflevering';
 }
 
 // Path: companionRemote.session
@@ -2029,6 +2034,9 @@ extension on TranslationsNl {
 			'settings.continueWatchingAction' => 'Actie voor Doorgaan met kijken',
 			'settings.continueWatchingPlay' => 'Afspelen',
 			'settings.continueWatchingDetails' => 'Details openen',
+			'settings.episodeAction' => 'Afleveringsactie',
+			'settings.episodePlay' => 'Afspelen',
+			'settings.episodeDetails' => 'Details openen',
 			'settings.useGlobalHubs' => 'Startlayout gebruiken',
 			'settings.useGlobalHubsDescription' => 'Toon gecombineerde home-hubs. Anders bibliotheekaanbevelingen gebruiken.',
 			'settings.showServerNameOnHubs' => 'Servernaam tonen bij hubs',
@@ -2430,11 +2438,11 @@ extension on TranslationsNl {
 			'messages.logsUploaded' => 'Logs geüpload',
 			'messages.logsUploadFailed' => 'Uploaden van logs mislukt',
 			'messages.logId' => 'Log-ID',
+			_ => null,
+		} ?? switch (path) {
 			'subtitlingStyling.text' => 'Tekst',
 			'subtitlingStyling.border' => 'Rand',
 			'subtitlingStyling.background' => 'Achtergrond',
-			_ => null,
-		} ?? switch (path) {
 			'subtitlingStyling.fontSize' => 'Lettergrootte',
 			'subtitlingStyling.textColor' => 'Tekstkleur',
 			'subtitlingStyling.borderSize' => 'Rand grootte',
@@ -2638,6 +2646,7 @@ extension on TranslationsNl {
 			'libraries.sortLabels.random' => 'Willekeurig',
 			'libraries.sortLabels.dateShared' => 'Gedeeld op',
 			'libraries.sortLabels.latestEpisodeAirDate' => 'Laatste afleveringsuitzending',
+			'libraries.sortLabels.lastEpisodeDateAdded' => 'Datum laatst toegevoegde aflevering',
 			'about.title' => 'Over',
 			'about.openSourceLicenses' => 'Open Source licenties',
 			'about.versionLabel' => ({required Object version}) => 'Versie ${version}',
@@ -2870,6 +2879,7 @@ extension on TranslationsNl {
 			'downloads.unwatchedOnly' => 'Alleen onbekeken',
 			'downloads.nextNUnwatched' => ({required Object count}) => 'Volgende ${count} onbekeken',
 			'downloads.customAmount' => 'Aangepast aantal...',
+			'downloads.includeSpecials' => 'Specials opnemen',
 			'downloads.howManyEpisodes' => 'Hoeveel afleveringen?',
 			'downloads.itemsQueued' => ({required Object count}) => '${count} items in downloadwachtrij',
 			'downloads.keepSynced' => 'Gesynchroniseerd houden',
@@ -2942,13 +2952,13 @@ extension on TranslationsNl {
 			'companionRemote.pairing.authFailed' => 'Authenticatie mislukt. Beide apparaten hebben hetzelfde Plex-account nodig.',
 			'companionRemote.pairing.failedToConnect' => ({required Object error}) => 'Kan niet verbinden: ${error}',
 			'companionRemote.remote.disconnectConfirm' => 'Wil je de verbinding met de externe sessie verbreken?',
+			_ => null,
+		} ?? switch (path) {
 			'companionRemote.remote.reconnecting' => 'Opnieuw verbinden...',
 			'companionRemote.remote.attemptOf' => ({required Object current}) => 'Poging ${current} van 5',
 			'companionRemote.remote.retryNow' => 'Nu opnieuw proberen',
 			'companionRemote.remote.tabRemote' => 'Afstandsbediening',
 			'companionRemote.remote.tabPlay' => 'Afspelen',
-			_ => null,
-		} ?? switch (path) {
 			'companionRemote.remote.tabMore' => 'Meer',
 			'companionRemote.remote.menu' => 'Menu',
 			'companionRemote.remote.tabNavigation' => 'Tabnavigatie',

@@ -118,6 +118,9 @@
     "continueWatchingAction": "Actie voor Doorgaan met kijken",
     "continueWatchingPlay": "Afspelen",
     "continueWatchingDetails": "Details openen",
+    "episodeAction": "Afleveringsactie",
+    "episodePlay": "Afspelen",
+    "episodeDetails": "Details openen",
     "useGlobalHubs": "Startlayout gebruiken",
     "useGlobalHubsDescription": "Toon gecombineerde home-hubs. Anders bibliotheekaanbevelingen gebruiken.",
     "showServerNameOnHubs": "Servernaam tonen bij hubs",
@@ -771,7 +774,8 @@
       "studio": "Studio",
       "random": "Willekeurig",
       "dateShared": "Gedeeld op",
-      "latestEpisodeAirDate": "Laatste afleveringsuitzending"
+      "latestEpisodeAirDate": "Laatste afleveringsuitzending",
+      "lastEpisodeDateAdded": "Datum laatst toegevoegde aflevering"
     }
   },
   "about": {
@@ -1027,6 +1031,7 @@
     "unwatchedOnly": "Alleen onbekeken",
     "nextNUnwatched": "Volgende ${count} onbekeken",
     "customAmount": "Aangepast aantal...",
+    "includeSpecials": "Specials opnemen",
     "howManyEpisodes": "Hoeveel afleveringen?",
     "itemsQueued": "${count} items in downloadwachtrij",
     "keepSynced": "Gesynchroniseerd houden",

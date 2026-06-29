@@ -4,7 +4,10 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:plezy/media/media_backend.dart';
 import 'package:plezy/media/media_item.dart';
 import 'package:plezy/media/media_kind.dart';
+import 'package:plezy/media/media_source_info.dart';
 import 'package:plezy/mpv/mpv.dart';
+import 'package:plezy/mpv/player/player_stream_controllers.dart';
+import 'package:plezy/services/settings_service.dart';
 import 'package:plezy/services/track_manager.dart';
 
 import '../test_helpers/prefs.dart';
@@ -18,18 +21,19 @@ import '../test_helpers/prefs.dart';
 //   - Constructor wiring (mutable fields are settable, default values).
 //   - `cacheExternalSubtitles` / `lastExternalSubtitles` round-trip.
 //   - `addExternalSubtitles` invokes the player's addSubtitleTrack for each
-//     entry with a non-null URI, and silently swallows errors thrown by the
-//     player (the Future.wait branch wraps each item in try/catch).
+//     entry with a non-null URI, preserves order, and silently swallows errors
+//     thrown by the player.
 //   - `cycleSubtitleTrack` / `cycleAudioTrack` are no-ops when the player has
 //     fewer than 2 real tracks (early-return paths).
+//   - `applyTrackSelectionWhenReady` waits for subtitle tracks when server
+//     metadata says they exist.
 //   - `onPlaybackRestart` is a no-op when not waiting for external subs.
 //   - `onSecondarySubtitleTrackChanged` is a documented no-op.
 //   - `dispose` is idempotent (timers/subscriptions cleared).
 //
 // What's NOT covered:
-//   - `applyTrackSelection` / `applyTrackSelectionWhenReady` — depends on
-//     `SettingsService.getInstance()` returning a service AND `Player.streams`
-//     emitting Tracks. Out of scope without re-implementing the player.
+//   - Most `applyTrackSelection` selection permutations — the matching logic
+//     itself lives in [TrackSelectionService] and is covered there.
 //   - `onAudioTrackChanged` / `onSubtitleTrackChanged` — server-sync paths
 //     require a fully-faked PlexClient and MediaSourceInfo with realistic
 //     stream IDs. The matching logic itself lives in [TrackSelectionService]
@@ -41,19 +45,35 @@ import '../test_helpers/prefs.dart';
 MediaItem _meta({String id = 'rk1'}) => MediaItem(id: id, backend: MediaBackend.plex, kind: MediaKind.movie);
 
 /// Player that records calls and can be configured per-test.
-class _FakePlayer implements Player {
+class _FakePlayer with PlayerStreamControllersMixin implements Player {
   PlayerState _state;
-  _FakePlayer({Tracks tracks = const Tracks(), TrackSelection track = const TrackSelection()})
-    : _state = PlayerState(tracks: tracks, track: track);
+  _FakePlayer({
+    Tracks tracks = const Tracks(),
+    TrackSelection track = const TrackSelection(),
+    this.attachesExternalSubtitlesAtOpen = false,
+  }) : _state = PlayerState(tracks: tracks, track: track);
 
   @override
   PlayerState get state => _state;
+
+  late final PlayerStreams _streams = createStreams();
+
+  @override
+  PlayerStreams get streams => _streams;
+
+  @override
+  final bool attachesExternalSubtitlesAtOpen;
 
   @override
   bool get disposed => false;
 
   set tracks(Tracks t) {
     _state = _state.copyWith(tracks: t);
+  }
+
+  void emitTracks(Tracks t) {
+    tracks = t;
+    tracksController.add(t);
   }
 
   // ── Recording surface ────────────────────────────────────────────
@@ -63,6 +83,7 @@ class _FakePlayer implements Player {
 
   /// If non-null and >0, fail this many addSubtitleTrack calls before succeeding.
   int failAddSubtitleTimes = 0;
+  Future<void> Function(String uri)? onAddSubtitleTrack;
 
   @override
   Future<void> addSubtitleTrack({required String uri, String? title, String? language, bool select = false}) async {
@@ -71,6 +92,7 @@ class _FakePlayer implements Player {
       throw StateError('simulated addSubtitleTrack failure');
     }
     addSubtitleCalls.add((uri: uri, title: title, language: language, select: select));
+    await onAddSubtitleTrack?.call(uri);
   }
 
   @override
@@ -86,6 +108,7 @@ class _FakePlayer implements Player {
 TrackManager _make({
   required _FakePlayer player,
   MediaItem? metadata,
+  MediaSourceInfo? mediaInfo,
   bool active = true,
   void Function(String, {Duration? duration})? showMessage,
 }) {
@@ -96,17 +119,29 @@ TrackManager _make({
     getProfileSettings: () => null,
     waitForProfileSettings: () async {},
     metadata: metadata ?? _meta(),
+    mediaInfo: mediaInfo,
     showMessage: showMessage,
   );
 }
 
-Future<void> _noopPersister({
-  required String id,
-  required int partId,
-  required String trackType,
-  String? languageCode,
-  int? streamID,
-}) async {}
+MediaSourceInfo _mediaInfoWithSubtitles({bool selected = false}) {
+  return MediaSourceInfo(
+    videoUrl: 'https://example.com/video.mp4',
+    audioTracks: [MediaAudioTrack(id: 1, language: 'English', languageCode: 'eng', selected: true)],
+    subtitleTracks: [
+      MediaSubtitleTrack(id: 10, language: 'English', languageCode: 'eng', selected: selected, forced: false),
+    ],
+    chapters: const [],
+  );
+}
+
+Future<void> _drainAsync() async {
+  for (var i = 0; i < 5; i++) {
+    await Future<void>.delayed(Duration.zero);
+  }
+}
+
+Future<void> _noopPersister({required int partId, required String trackType, int? streamID}) async {}
 
 void main() {
   // The constructor doesn't touch prefs, but [dispose] / [applyTrackSelection]
@@ -194,7 +229,7 @@ void main() {
       expect(player.addSubtitleCalls, isEmpty);
     });
 
-    test('forwards each subtitle with a URI to the player in parallel', () async {
+    test('forwards each subtitle with a URI to the player in metadata order', () async {
       final player = _FakePlayer();
       final mgr = _make(player: player);
       addTearDown(mgr.dispose);
@@ -206,11 +241,37 @@ void main() {
       await mgr.addExternalSubtitles(subs);
 
       expect(player.addSubtitleCalls, hasLength(2));
-      // Order is non-deterministic (Future.wait in parallel) — assert by URI set.
-      final uris = player.addSubtitleCalls.map((c) => c.uri).toSet();
-      expect(uris, {'https://example/a.srt', 'https://example/b.srt'});
+      expect(player.addSubtitleCalls.map((c) => c.uri), ['https://example/a.srt', 'https://example/b.srt']);
       // None should be auto-selected — manager picks afterwards.
       expect(player.addSubtitleCalls.every((c) => c.select == false), isTrue);
+    });
+
+    test('does not start the next add until the previous subtitle completes', () async {
+      final player = _FakePlayer();
+      final mgr = _make(player: player);
+      addTearDown(mgr.dispose);
+      final firstCompletes = Completer<void>();
+      addTearDown(() {
+        if (!firstCompletes.isCompleted) firstCompletes.complete();
+      });
+      player.onAddSubtitleTrack = (uri) async {
+        if (uri == 'https://example/a.srt') {
+          await firstCompletes.future;
+        }
+      };
+
+      final addFuture = mgr.addExternalSubtitles([
+        SubtitleTrack.uri('https://example/a.srt', title: 'EN'),
+        SubtitleTrack.uri('https://example/b.srt', title: 'FR'),
+      ]);
+      await _drainAsync();
+
+      expect(player.addSubtitleCalls.map((c) => c.uri), ['https://example/a.srt']);
+
+      firstCompletes.complete();
+      await addFuture;
+
+      expect(player.addSubtitleCalls.map((c) => c.uri), ['https://example/a.srt', 'https://example/b.srt']);
     });
 
     test('skips subtitle entries with null URI', () async {
@@ -277,6 +338,39 @@ void main() {
 
       expect(player.addSubtitleCalls, hasLength(1));
       expect(player.addSubtitleCalls.single.uri, 'https://example/ready.srt');
+    });
+  });
+
+  // ============================================================
+  // applyTrackSelectionWhenReady
+  // ============================================================
+
+  group('applyTrackSelectionWhenReady', () {
+    test('waits for player subtitle tracks when Plex metadata advertises subtitles', () async {
+      await SettingsService.getInstance();
+      final player = _FakePlayer(
+        tracks: const Tracks(
+          audio: [AudioTrack(id: '1', language: 'eng')],
+        ),
+      );
+      final mgr = _make(player: player, mediaInfo: _mediaInfoWithSubtitles());
+      addTearDown(mgr.dispose);
+
+      mgr.applyTrackSelectionWhenReady();
+      await _drainAsync();
+
+      expect(player.selectedSubtitle, isEmpty);
+
+      player.emitTracks(
+        const Tracks(
+          audio: [AudioTrack(id: '1', language: 'eng')],
+          subtitle: [SubtitleTrack(id: '10', language: 'eng')],
+        ),
+      );
+      await _drainAsync();
+
+      expect(player.selectedSubtitle, hasLength(1));
+      expect(player.selectedSubtitle.single.id, 'no');
     });
   });
 
@@ -381,6 +475,32 @@ void main() {
 
       expect(mgr.waitingForExternalSubsTrackSelection, isFalse);
       expect(player.addSubtitleCalls, hasLength(1));
+    });
+  });
+
+  group('onBackendSwitched', () {
+    test('re-adds cached external subtitles for post-open fallback backends', () async {
+      final player = _FakePlayer();
+      final mgr = _make(player: player);
+      addTearDown(mgr.dispose);
+
+      mgr.cacheExternalSubtitles([SubtitleTrack.uri('https://example/fallback.srt', title: 'EN')]);
+
+      await mgr.onBackendSwitched();
+
+      expect(player.addSubtitleCalls.map((c) => c.uri), ['https://example/fallback.srt']);
+    });
+
+    test('does not duplicate subtitles when fallback attached them at open', () async {
+      final player = _FakePlayer(attachesExternalSubtitlesAtOpen: true);
+      final mgr = _make(player: player);
+      addTearDown(mgr.dispose);
+
+      mgr.cacheExternalSubtitles([SubtitleTrack.uri('https://example/fallback.srt', title: 'EN')]);
+
+      await mgr.onBackendSwitched();
+
+      expect(player.addSubtitleCalls, isEmpty);
     });
   });
 

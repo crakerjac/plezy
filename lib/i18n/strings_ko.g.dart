@@ -247,6 +247,9 @@ class _TranslationsSettingsKo extends TranslationsSettingsEn {
 	@override String get continueWatchingAction => '계속 보기 동작';
 	@override String get continueWatchingPlay => '재생';
 	@override String get continueWatchingDetails => '상세 정보 열기';
+	@override String get episodeAction => '에피소드 동작';
+	@override String get episodePlay => '재생';
+	@override String get episodeDetails => '상세 정보 열기';
 	@override String get useGlobalHubs => '홈 레이아웃 사용';
 	@override String get useGlobalHubsDescription => '통합 홈 허브를 표시합니다. 끄면 라이브러리 추천을 사용합니다.';
 	@override String get showServerNameOnHubs => '허브에 서버 이름 표시';
@@ -1285,6 +1288,7 @@ class _TranslationsDownloadsKo extends TranslationsDownloadsEn {
 	@override String get unwatchedOnly => '시청하지 않은 것만';
 	@override String nextNUnwatched({required Object count}) => '다음 ${count}개 미시청';
 	@override String get customAmount => '직접 입력...';
+	@override String get includeSpecials => '스페셜 포함';
 	@override String get howManyEpisodes => '몇 개의 에피소드?';
 	@override String itemsQueued({required Object count}) => '${count}개 항목이 다운로드 대기열에 추가됨';
 	@override String get keepSynced => '동기화 유지';
@@ -1755,6 +1759,7 @@ class _TranslationsLibrariesSortLabelsKo extends TranslationsLibrariesSortLabels
 	@override String get random => '무작위';
 	@override String get dateShared => '공유된 날짜';
 	@override String get latestEpisodeAirDate => '최신 에피소드 방영일';
+	@override String get lastEpisodeDateAdded => '최신 에피소드 추가일';
 }
 
 // Path: companionRemote.session
@@ -2029,6 +2034,9 @@ extension on TranslationsKo {
 			'settings.continueWatchingAction' => '계속 보기 동작',
 			'settings.continueWatchingPlay' => '재생',
 			'settings.continueWatchingDetails' => '상세 정보 열기',
+			'settings.episodeAction' => '에피소드 동작',
+			'settings.episodePlay' => '재생',
+			'settings.episodeDetails' => '상세 정보 열기',
 			'settings.useGlobalHubs' => '홈 레이아웃 사용',
 			'settings.useGlobalHubsDescription' => '통합 홈 허브를 표시합니다. 끄면 라이브러리 추천을 사용합니다.',
 			'settings.showServerNameOnHubs' => '허브에 서버 이름 표시',
@@ -2430,11 +2438,11 @@ extension on TranslationsKo {
 			'messages.logsUploaded' => '로그 업로드 완료',
 			'messages.logsUploadFailed' => '로그 업로드 실패',
 			'messages.logId' => '로그 ID',
+			_ => null,
+		} ?? switch (path) {
 			'subtitlingStyling.text' => '텍스트',
 			'subtitlingStyling.border' => '테두리',
 			'subtitlingStyling.background' => '배경',
-			_ => null,
-		} ?? switch (path) {
 			'subtitlingStyling.fontSize' => '글자 크기',
 			'subtitlingStyling.textColor' => '텍스트 색상',
 			'subtitlingStyling.borderSize' => '테두리 크기',
@@ -2638,6 +2646,7 @@ extension on TranslationsKo {
 			'libraries.sortLabels.random' => '무작위',
 			'libraries.sortLabels.dateShared' => '공유된 날짜',
 			'libraries.sortLabels.latestEpisodeAirDate' => '최신 에피소드 방영일',
+			'libraries.sortLabels.lastEpisodeDateAdded' => '최신 에피소드 추가일',
 			'about.title' => '소개',
 			'about.openSourceLicenses' => '오픈소스 라이선스',
 			'about.versionLabel' => ({required Object version}) => '버전 ${version}',
@@ -2870,6 +2879,7 @@ extension on TranslationsKo {
 			'downloads.unwatchedOnly' => '시청하지 않은 것만',
 			'downloads.nextNUnwatched' => ({required Object count}) => '다음 ${count}개 미시청',
 			'downloads.customAmount' => '직접 입력...',
+			'downloads.includeSpecials' => '스페셜 포함',
 			'downloads.howManyEpisodes' => '몇 개의 에피소드?',
 			'downloads.itemsQueued' => ({required Object count}) => '${count}개 항목이 다운로드 대기열에 추가됨',
 			'downloads.keepSynced' => '동기화 유지',
@@ -2942,13 +2952,13 @@ extension on TranslationsKo {
 			'companionRemote.pairing.authFailed' => '인증에 실패했습니다. 두 기기 모두 같은 Plex 계정이 필요합니다.',
 			'companionRemote.pairing.failedToConnect' => ({required Object error}) => '연결 실패: ${error}',
 			'companionRemote.remote.disconnectConfirm' => '원격 세션 연결을 해제하시겠습니까?',
+			_ => null,
+		} ?? switch (path) {
 			'companionRemote.remote.reconnecting' => '재연결 중...',
 			'companionRemote.remote.attemptOf' => ({required Object current}) => '${current}/5 시도 중',
 			'companionRemote.remote.retryNow' => '지금 재시도',
 			'companionRemote.remote.tabRemote' => '리모컨',
 			'companionRemote.remote.tabPlay' => '재생',
-			_ => null,
-		} ?? switch (path) {
 			'companionRemote.remote.tabMore' => '더 보기',
 			'companionRemote.remote.menu' => '메뉴',
 			'companionRemote.remote.tabNavigation' => '탭 탐색',

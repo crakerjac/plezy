@@ -5,9 +5,14 @@ part of '../../video_player_screen.dart';
 /// behind a startup gate, and which post-open follow-up (fallback switch
 /// or mpv decoder refresh) releases it.
 class _FrameRateStartupPlan {
-  _FrameRateStartupPlan({required this.fps});
+  _FrameRateStartupPlan({required this.fps, this.width = 0, this.height = 0});
 
   final double? fps;
+
+  /// Native video dimensions, so a display-mode fallback can avoid downscaling
+  /// the video below its resolution just to match cadence (0 = unknown).
+  final int width;
+  final int height;
   bool attemptedMpvPreLoad = false;
   bool didPreLoadSwitch = false;
   bool preOpenExoHandled = false;
@@ -89,10 +94,18 @@ extension _VideoPlayerOpenMethods on VideoPlayerScreenState {
     required SettingsService settingsService,
     required double fps,
     required int durationMs,
+    int videoWidth = 0,
+    int videoHeight = 0,
   }) {
     final delaySec = settingsService.read(SettingsService.displaySwitchDelay);
     _frameRate.beginSuppressWindow(delaySec);
-    return player.setVideoFrameRate(fps, durationMs, extraDelayMs: delaySec * 1000);
+    return player.setVideoFrameRate(
+      fps,
+      durationMs,
+      extraDelayMs: delaySec * 1000,
+      videoWidth: videoWidth,
+      videoHeight: videoHeight,
+    );
   }
 
   /// Whether the Android pre-open frame-rate negotiation applies: the user
@@ -137,8 +150,10 @@ extension _VideoPlayerOpenMethods on VideoPlayerScreenState {
     required double? preKnownFps,
     required bool hasVideoUrl,
     required Future<void> Function() ensureAudioFocus,
+    int preKnownWidth = 0,
+    int preKnownHeight = 0,
   }) async {
-    final plan = _FrameRateStartupPlan(fps: preKnownFps);
+    final plan = _FrameRateStartupPlan(fps: preKnownFps, width: preKnownWidth, height: preKnownHeight);
     final willAutoSwitch = _shouldAutoSwitchFrameRateForOpen(settingsService, preKnownFps);
     // willAutoSwitch is Android-only, so the strategy fork below is between
     // the two Android backends: mpv needs its decoder refreshed after a
@@ -161,6 +176,8 @@ extension _VideoPlayerOpenMethods on VideoPlayerScreenState {
           settingsService: settingsService,
           fps: preKnownFps!,
           durationMs: durationMs,
+          videoWidth: plan.width,
+          videoHeight: plan.height,
         );
         if (!mounted || player != currentPlayer) return null;
         if (plan.didPreLoadSwitch) {
@@ -192,6 +209,8 @@ extension _VideoPlayerOpenMethods on VideoPlayerScreenState {
           settingsService: settingsService,
           fps: preKnownFps!,
           durationMs: durationMs,
+          videoWidth: plan.width,
+          videoHeight: plan.height,
         );
         if (!mounted || player != currentPlayer) return null;
         plan.preOpenExoHandled = true;
@@ -215,7 +234,17 @@ extension _VideoPlayerOpenMethods on VideoPlayerScreenState {
     required SettingsService settingsService,
     required _FrameRateStartupPlan plan,
     required Future<void> Function(String reason) resumeAfterStartupGate,
+    bool playbackResumedForStartupFrame = false,
   }) async {
+    Future<void> resumeAfterRefresh(String reason) async {
+      if (playbackResumedForStartupFrame) {
+        appLogger.d('Frame rate matching: continuing already-resumed playback after $reason');
+        await _playWithPlaybackIntent(currentPlayer);
+      } else {
+        await resumeAfterStartupGate(reason);
+      }
+    }
+
     // Fallback refresh-rate path. The player was opened paused;
     // setVideoFrameRate awaits the real display-change event (+ settle +
     // user delay) before returning, then we start playback.
@@ -229,6 +258,8 @@ extension _VideoPlayerOpenMethods on VideoPlayerScreenState {
           settingsService: settingsService,
           fps: plan.fps!,
           durationMs: durationMs,
+          videoWidth: plan.width,
+          videoHeight: plan.height,
         );
         if (!mounted || player != currentPlayer) return;
         if (didSwitch) {
@@ -241,7 +272,7 @@ extension _VideoPlayerOpenMethods on VideoPlayerScreenState {
       // Always resume — either the switch completed and we want to play,
       // or no switch was needed and we need to start playback now that the
       // preparation gate has been cleared.
-      await resumeAfterStartupGate('post-open frame rate switch');
+      await resumeAfterRefresh('post-open frame rate switch');
 
       unawaited(
         Sentry.addBreadcrumb(
@@ -256,10 +287,10 @@ extension _VideoPlayerOpenMethods on VideoPlayerScreenState {
         if (startupReady) {
           await Future<void>.delayed(const Duration(milliseconds: 100));
           await _refreshAndroidMpvDecoderAfterFrameRateSwitch(reason: 'pre-load frame rate startup');
-          await resumeAfterStartupGate('startup decoder refresh');
+          await resumeAfterRefresh('startup decoder refresh');
         } else {
           appLogger.w('Frame rate matching: skipping Android MPV decoder refresh because startup frame timed out');
-          await resumeAfterStartupGate('startup frame timeout');
+          await resumeAfterRefresh('startup frame timeout');
         }
       }
 
@@ -287,10 +318,11 @@ extension _VideoPlayerOpenMethods on VideoPlayerScreenState {
     final trackManager = _trackManager;
     if (trackManager == null) return;
     appLogger.d('Frame rate matching: resuming playback after $reason');
+    _playbackIntentShouldPlay = true;
     if (externalSubtitlePlan.requiresPostOpenAdd) {
       await trackManager.resumeAfterSubtitleLoad();
     } else {
-      await currentPlayer.play();
+      await _playWithPlaybackIntent(currentPlayer);
     }
   }
 
@@ -394,9 +426,10 @@ extension _VideoPlayerOpenMethods on VideoPlayerScreenState {
     );
   }
 
-  /// Apply track selection for a freshly opened source: mpv backends get
-  /// external subtitles via the post-open sub-add dance (opened paused to
-  /// avoid the issue #226 race), others arm selection directly.
+  /// Apply track selection for a freshly opened source: backends that cannot
+  /// attach external subtitles during open use the post-open sub-add dance
+  /// (opened paused to avoid the issue #226 race), others arm selection
+  /// directly.
   /// [shouldResumeAfterSubtitleLoad] lets a startup gate own the resume.
   /// [applySelectionWhenResumeSkipped] is for flows that legitimately stay
   /// paused (e.g. a transcode restart while paused): selection is still
@@ -416,6 +449,7 @@ extension _VideoPlayerOpenMethods on VideoPlayerScreenState {
         );
       } finally {
         if (shouldResumeAfterSubtitleLoad()) {
+          _playbackIntentShouldPlay = true;
           await trackManager.resumeAfterSubtitleLoad();
         } else if (applySelectionWhenResumeSkipped) {
           trackManager.waitingForExternalSubsTrackSelection = false;
