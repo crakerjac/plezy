@@ -31,26 +31,26 @@ const _kLastImportedGeneratedAt = 'plexsyncer_last_imported_generated_at';
 
 /// A single resolved item ready to be registered in the database.
 class ResolvedManifestItem {
-  final String  ratingKey;
-  final String  type;
-  final String  title;
+  final String ratingKey;
+  final String type;
+  final String title;
   final String? summary;
   final String? thumb;
   final String? art;
-  final int?    duration;
-  final int?    year;
+  final int? duration;
+  final int? year;
 
   // Episodes only
   final String? grandparentTitle;
   final String? grandparentRatingKey;
   final String? grandparentThumb;
   final String? grandparentArt;
-  final int?    grandparentYear;
+  final int? grandparentYear;
   final String? parentTitle;
   final String? parentRatingKey;
   final String? parentThumb;
-  final int?    seasonNumber;
-  final int?    episodeNumber;
+  final int? seasonNumber;
+  final int? episodeNumber;
 
   /// SAF content:// URI for the video file — confirmed present on device.
   final String fileUri;
@@ -80,29 +80,29 @@ class ResolvedManifestItem {
 
 /// Result returned by [ManifestImportService.readManifest].
 class ManifestReadResult {
-  final String  serverId;
-  final String  serverName;
-  final String  generatedAt;
+  final String serverId;
+  final String serverName;
+  final String generatedAt;
   final List<ResolvedManifestItem> resolved;
-  final int     missing;         // files listed in manifest but not found on device
-  final String? error;           // null on success
+  final int missing; // files listed in manifest but not found on device
+  final String? error; // null on success
 
   /// SAF URI of the PlexSyncer subfolder (e.g. content://.../PlexSyncer).
   /// Used by the prune step to identify which DB items belong to PlexSyncer.
-  final String  psRootUri;
+  final String psRootUri;
 
   /// All serverId:ratingKey pairs present in this manifest.
   /// Items previously imported but no longer here were removed by PlexSyncer.
   final Set<String> manifestGlobalKeys;
 
   const ManifestReadResult({
-    this.serverId          = '',
-    this.serverName        = '',
-    this.generatedAt       = '',
-    this.resolved          = const [],
-    this.missing           = 0,
+    this.serverId = '',
+    this.serverName = '',
+    this.generatedAt = '',
+    this.resolved = const [],
+    this.missing = 0,
     this.error,
-    this.psRootUri         = '',
+    this.psRootUri = '',
     this.manifestGlobalKeys = const {},
   });
 
@@ -111,8 +111,7 @@ class ManifestReadResult {
 
 class ManifestImportService {
   static ManifestImportService? _instance;
-  static ManifestImportService get instance =>
-      _instance ??= ManifestImportService._();
+  static ManifestImportService get instance => _instance ??= ManifestImportService._();
   ManifestImportService._();
 
   /// Read, parse, and resolve the manifest, returning ready-to-register items.
@@ -128,20 +127,22 @@ class ManifestImportService {
 
     if (!storageService.isUsingSaf) {
       return const ManifestReadResult(
-        error: 'No SAF download folder configured.\n'
-               'Set a download folder in Settings → Downloads first.',
+        error:
+            'No SAF download folder configured.\n'
+            'Set a download folder in Settings → Downloads first.',
       );
     }
 
     final safBaseUri = storageService.safBaseUri!;
-    final saf        = SafStorageService.instance;
+    final saf = SafStorageService.instance;
 
     // Navigate into the PlexSyncer subfolder first.
     final psRoot = await saf.getChild(safBaseUri, [kPlexSyncerFolder]);
     if (psRoot == null) {
       return const ManifestReadResult(
-        error: 'PlexSyncer folder not found in the configured SAF root.\n'
-               'Make sure rclone / Round Sync has finished transferring files.',
+        error:
+            'PlexSyncer folder not found in the configured SAF root.\n'
+            'Make sure rclone / Round Sync has finished transferring files.',
       );
     }
 
@@ -152,8 +153,9 @@ class ManifestImportService {
     } catch (e) {
       appLogger.e('ManifestImport: cannot read manifest', error: e);
       return const ManifestReadResult(
-        error: 'Could not read PlexSyncer/_plezy_meta/manifest.json.\n'
-               'Make sure the sync folder has been transferred to this device.',
+        error:
+            'Could not read PlexSyncer/_plezy_meta/manifest.json.\n'
+            'Make sure the sync folder has been transferred to this device.',
       );
     }
 
@@ -168,26 +170,26 @@ class ManifestImportService {
       return const ManifestReadResult(error: 'manifest.json contains invalid JSON.');
     }
 
-    final serverId     = (manifest['serverId']     as String?) ?? '';
-    final serverName   = (manifest['serverName']   as String?) ?? '';
-    final generatedAt  = (manifest['generatedAt']  as String?) ?? '';
+    final serverId = (manifest['serverId'] as String?) ?? '';
+    final serverName = (manifest['serverName'] as String?) ?? '';
+    final generatedAt = (manifest['generatedAt'] as String?) ?? '';
 
     if (serverId.isEmpty) {
       return const ManifestReadResult(error: 'manifest.json is missing serverId.');
     }
 
     // ── Resolve each item ────────────────────────────────────────────────────
-    final resolved           = <ResolvedManifestItem>[];
+    final resolved = <ResolvedManifestItem>[];
     final manifestGlobalKeys = <String>{};
-    int missing              = 0;
+    int missing = 0;
 
     for (final raw in rawItems) {
       if (raw is! Map<String, dynamic>) continue;
 
-      final ratingKey    = (raw['ratingKey']    as String?) ?? '';
-      final type         = (raw['type']         as String?) ?? '';
+      final ratingKey = (raw['ratingKey'] as String?) ?? '';
+      final type = (raw['type'] as String?) ?? '';
       final relativePath = (raw['relativePath'] as String?) ?? '';
-      final title        = (raw['title']        as String?) ?? '';
+      final title = (raw['title'] as String?) ?? '';
 
       if (ratingKey.isEmpty || type.isEmpty || relativePath.isEmpty) {
         appLogger.w('ManifestImport: incomplete item, skipping: $raw');
@@ -209,43 +211,42 @@ class ManifestImportService {
         continue;
       }
 
-      resolved.add(ResolvedManifestItem(
-        ratingKey:            ratingKey,
-        type:                 type,
-        title:                title,
-        fileUri:              fileUri,
-        summary:              raw['summary']             as String?,
-        thumb:                raw['thumb']               as String?,
-        art:                  raw['art']                 as String?,
-        duration:             raw['duration']            as int?,
-        year:                 raw['year']                as int?,
-        grandparentTitle:     raw['grandparentTitle']    as String?,
-        grandparentRatingKey: raw['grandparentRatingKey'] as String?,
-        grandparentThumb:     raw['grandparentThumb']    as String?,
-        grandparentArt:       raw['grandparentArt']      as String?,
-        grandparentYear:      raw['grandparentYear']     as int?,
-        parentTitle:          raw['parentTitle']         as String?,
-        parentRatingKey:      raw['parentRatingKey']     as String?,
-        parentThumb:          raw['parentThumb']         as String?,
-        seasonNumber:         raw['seasonNumber']        as int?,
-        episodeNumber:        raw['episodeNumber']       as int?,
-      ));
+      resolved.add(
+        ResolvedManifestItem(
+          ratingKey: ratingKey,
+          type: type,
+          title: title,
+          fileUri: fileUri,
+          summary: raw['summary'] as String?,
+          thumb: raw['thumb'] as String?,
+          art: raw['art'] as String?,
+          duration: raw['duration'] as int?,
+          year: raw['year'] as int?,
+          grandparentTitle: raw['grandparentTitle'] as String?,
+          grandparentRatingKey: raw['grandparentRatingKey'] as String?,
+          grandparentThumb: raw['grandparentThumb'] as String?,
+          grandparentArt: raw['grandparentArt'] as String?,
+          grandparentYear: raw['grandparentYear'] as int?,
+          parentTitle: raw['parentTitle'] as String?,
+          parentRatingKey: raw['parentRatingKey'] as String?,
+          parentThumb: raw['parentThumb'] as String?,
+          seasonNumber: raw['seasonNumber'] as int?,
+          episodeNumber: raw['episodeNumber'] as int?,
+        ),
+      );
     }
 
-    appLogger.i(
-      'ManifestImport: resolved ${resolved.length} items, $missing missing',
-    );
+    appLogger.i('ManifestImport: resolved ${resolved.length} items, $missing missing');
     return ManifestReadResult(
-      serverId:           serverId,
-      serverName:         serverName,
-      generatedAt:        generatedAt,
-      resolved:           resolved,
-      missing:            missing,
-      psRootUri:          psRoot.uri,
+      serverId: serverId,
+      serverName: serverName,
+      generatedAt: generatedAt,
+      resolved: resolved,
+      missing: missing,
+      psRootUri: psRoot.uri,
       manifestGlobalKeys: manifestGlobalKeys,
     );
   }
-
 
   /// Reads only the manifest header (fast — no SAF tree walk) and compares
   /// [generatedAt] to the last successfully imported value stored in prefs.
@@ -291,10 +292,7 @@ class ManifestImportService {
 
   // ── Private ────────────────────────────────────────────────────────────────
 
-  Future<String> _readManifestBytes(
-    SafStorageService saf,
-    String safBaseUri,
-  ) async {
+  Future<String> _readManifestBytes(SafStorageService saf, String safBaseUri) async {
     final metaDir = await saf.getChild(safBaseUri, ['_plezy_meta']);
     if (metaDir == null) throw Exception('_plezy_meta directory not found');
 
@@ -307,11 +305,7 @@ class ManifestImportService {
 
   /// Walk the SAF tree one segment at a time to resolve a relative path like
   /// "TV Shows/ALF (1986)/Season 01/S01E01 - A_L_F.mp4" to a content:// URI.
-  Future<String?> _resolveToUri(
-    SafStorageService saf,
-    String safBaseUri,
-    String relativePath,
-  ) async {
+  Future<String?> _resolveToUri(SafStorageService saf, String safBaseUri, String relativePath) async {
     final segments = relativePath.split('/').where((s) => s.isNotEmpty).toList();
     if (segments.isEmpty) return null;
 
