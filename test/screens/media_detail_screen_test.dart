@@ -3,11 +3,13 @@ import 'package:drift/native.dart';
 import 'package:plezy/media/ids.dart';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:material_symbols_icons/symbols.dart';
 import 'package:plezy/database/app_database.dart';
+import 'package:plezy/focus/focusable_action_bar.dart';
 import 'package:plezy/i18n/strings.g.dart';
 import 'package:plezy/media/library_query.dart';
 import 'package:plezy/media/media_backend.dart';
@@ -21,6 +23,8 @@ import 'package:plezy/providers/multi_server_provider.dart';
 import 'package:plezy/providers/watch_state_store.dart';
 import 'package:plezy/screens/media_detail_screen.dart';
 import 'package:plezy/services/data_aggregation_service.dart';
+
+import '../test_helpers/paged_fakes.dart';
 import 'package:plezy/services/download_manager_service.dart';
 import 'package:plezy/services/download_storage_service.dart';
 import 'package:plezy/services/jellyfin_api_cache.dart';
@@ -38,6 +42,7 @@ import 'package:provider/provider.dart';
 
 import '../test_helpers/prefs.dart';
 import '../test_helpers/profile_navigation.dart';
+import '../test_helpers/media_items.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -61,7 +66,7 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
 
     const title = 'The Surprisingly Long Movie Title That Needs Two Whole Lines';
-    final movie = MediaItem(
+    final movie = testMediaItem(
       id: 'movie_1',
       backend: MediaBackend.jellyfin,
       kind: MediaKind.movie,
@@ -87,10 +92,57 @@ void main() {
     expect(titleText.style!.fontSize!, lessThan(baseFontSize));
   });
 
+  testWidgets('TV detail exposes hero information as one semantic node', (tester) async {
+    final semantics = tester.ensureSemantics();
+    await SettingsService.getInstance();
+    tester.view.physicalSize = const Size(1280, 720);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final movie = testMediaItem(
+      id: 'semantic_movie',
+      backend: MediaBackend.jellyfin,
+      kind: MediaKind.movie,
+      title: 'Semantic Movie',
+      summary: 'One concise detail announcement.',
+      year: 2025,
+      genres: ['Drama', 'Mystery'],
+    );
+
+    await tester.pumpWidget(
+      TranslationProvider(
+        child: MaterialApp(
+          theme: monoTheme(dark: true),
+          home: withProfileNavigationScope(child: MediaDetailScreen(metadata: movie)),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 200));
+
+    final information = find.bySemanticsIdentifier('tv_detail_information');
+    expect(information, findsOneWidget);
+    final node = tester.getSemantics(information);
+    expect(node.label, contains('Semantic Movie'));
+    expect(node.label, contains('Movie'));
+    expect(node.label, contains('2025'));
+    expect(node.label, contains('Drama, Mystery'));
+    expect(node.label, contains('One concise detail announcement.'));
+    expect(node.getSemanticsData().hasAction(SemanticsAction.tap), isFalse);
+    expect(tester.widget<Semantics>(information).properties.onTap, isNull);
+
+    // Visual content and the separate action row remain present.
+    expect(find.text('Semantic Movie'), findsOneWidget);
+    expect(find.text('One concise detail announcement.'), findsOneWidget);
+    expect(find.byType(FocusableActionBar), findsOneWidget);
+    semantics.dispose();
+  });
+
   testWidgets('TV detail reveals without waiting for directional input', (tester) async {
     await SettingsService.getInstance();
 
-    final movie = MediaItem(
+    final movie = testMediaItem(
       id: 'movie_1',
       backend: MediaBackend.jellyfin,
       kind: MediaKind.movie,
@@ -189,7 +241,7 @@ void main() {
   testWidgets('TV detail defaults to first regular season when specials precede it', (tester) async {
     await SettingsService.getInstance();
 
-    final show = MediaItem(
+    final show = testMediaItem(
       id: 'show_1',
       backend: MediaBackend.jellyfin,
       kind: MediaKind.show,
@@ -197,7 +249,7 @@ void main() {
       serverId: 'server_1',
       serverName: 'Server',
     );
-    final specials = MediaItem(
+    final specials = testMediaItem(
       id: 'season_0',
       backend: MediaBackend.jellyfin,
       kind: MediaKind.season,
@@ -207,7 +259,7 @@ void main() {
       serverId: show.serverId,
       serverName: show.serverName,
     );
-    final season1 = MediaItem(
+    final season1 = testMediaItem(
       id: 'season_1',
       backend: MediaBackend.jellyfin,
       kind: MediaKind.season,
@@ -217,7 +269,7 @@ void main() {
       serverId: show.serverId,
       serverName: show.serverName,
     );
-    final specialEpisode = MediaItem(
+    final specialEpisode = testMediaItem(
       id: 'episode_special_1',
       backend: MediaBackend.jellyfin,
       kind: MediaKind.episode,
@@ -229,7 +281,7 @@ void main() {
       serverId: show.serverId,
       serverName: show.serverName,
     );
-    final episode1 = MediaItem(
+    final episode1 = testMediaItem(
       id: 'episode_1',
       backend: MediaBackend.jellyfin,
       kind: MediaKind.episode,
@@ -288,7 +340,7 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
 
     const summary = 'Light theme detail text should stay readable.';
-    final movie = MediaItem(
+    final movie = testMediaItem(
       id: 'movie_1',
       backend: MediaBackend.jellyfin,
       kind: MediaKind.movie,
@@ -317,7 +369,7 @@ void main() {
   testWidgets('TV detail shows every season tab and prefetches adjacent first page', (tester) async {
     await SettingsService.getInstance();
 
-    final show = MediaItem(
+    final show = testMediaItem(
       id: 'show_1',
       backend: MediaBackend.jellyfin,
       kind: MediaKind.show,
@@ -325,7 +377,7 @@ void main() {
       serverId: 'server_1',
       serverName: 'Server',
     );
-    final season1 = MediaItem(
+    final season1 = testMediaItem(
       id: 'season_1',
       backend: MediaBackend.jellyfin,
       kind: MediaKind.season,
@@ -335,7 +387,7 @@ void main() {
       serverId: show.serverId,
       serverName: show.serverName,
     );
-    final season2 = MediaItem(
+    final season2 = testMediaItem(
       id: 'season_2',
       backend: MediaBackend.jellyfin,
       kind: MediaKind.season,
@@ -345,7 +397,7 @@ void main() {
       serverId: show.serverId,
       serverName: show.serverName,
     );
-    final episode1 = MediaItem(
+    final episode1 = testMediaItem(
       id: 'episode_1',
       backend: MediaBackend.jellyfin,
       kind: MediaKind.episode,
@@ -357,7 +409,7 @@ void main() {
       serverId: show.serverId,
       serverName: show.serverName,
     );
-    final episode2 = MediaItem(
+    final episode2 = testMediaItem(
       id: 'episode_2',
       backend: MediaBackend.jellyfin,
       kind: MediaKind.episode,
@@ -413,7 +465,7 @@ void main() {
   testWidgets('TV detail keeps every season tab when a season episode load fails', (tester) async {
     await SettingsService.getInstance();
 
-    final show = MediaItem(
+    final show = testMediaItem(
       id: 'show_1',
       backend: MediaBackend.jellyfin,
       kind: MediaKind.show,
@@ -421,7 +473,7 @@ void main() {
       serverId: 'server_1',
       serverName: 'Server',
     );
-    final season1 = MediaItem(
+    final season1 = testMediaItem(
       id: 'season_1',
       backend: MediaBackend.jellyfin,
       kind: MediaKind.season,
@@ -431,7 +483,7 @@ void main() {
       serverId: show.serverId,
       serverName: show.serverName,
     );
-    final season2 = MediaItem(
+    final season2 = testMediaItem(
       id: 'season_2',
       backend: MediaBackend.jellyfin,
       kind: MediaKind.season,
@@ -441,7 +493,7 @@ void main() {
       serverId: show.serverId,
       serverName: show.serverName,
     );
-    final episode1 = MediaItem(
+    final episode1 = testMediaItem(
       id: 'episode_1',
       backend: MediaBackend.jellyfin,
       kind: MediaKind.episode,
@@ -453,7 +505,7 @@ void main() {
       serverId: show.serverId,
       serverName: show.serverName,
     );
-    final episode2 = MediaItem(
+    final episode2 = testMediaItem(
       id: 'episode_2',
       backend: MediaBackend.jellyfin,
       kind: MediaKind.episode,
@@ -505,7 +557,7 @@ void main() {
   testWidgets('TV detail completes adjacent prefetch after focus moves to that season', (tester) async {
     await SettingsService.getInstance();
 
-    final show = MediaItem(
+    final show = testMediaItem(
       id: 'show_1',
       backend: MediaBackend.jellyfin,
       kind: MediaKind.show,
@@ -513,7 +565,7 @@ void main() {
       serverId: 'server_1',
       serverName: 'Server',
     );
-    final season1 = MediaItem(
+    final season1 = testMediaItem(
       id: 'season_1',
       backend: MediaBackend.jellyfin,
       kind: MediaKind.season,
@@ -523,7 +575,7 @@ void main() {
       serverId: show.serverId,
       serverName: show.serverName,
     );
-    final season2 = MediaItem(
+    final season2 = testMediaItem(
       id: 'season_2',
       backend: MediaBackend.jellyfin,
       kind: MediaKind.season,
@@ -533,7 +585,7 @@ void main() {
       serverId: show.serverId,
       serverName: show.serverName,
     );
-    final episode1 = MediaItem(
+    final episode1 = testMediaItem(
       id: 'episode_1',
       backend: MediaBackend.jellyfin,
       kind: MediaKind.episode,
@@ -545,7 +597,7 @@ void main() {
       serverId: show.serverId,
       serverName: show.serverName,
     );
-    final episode2 = MediaItem(
+    final episode2 = testMediaItem(
       id: 'episode_2',
       backend: MediaBackend.jellyfin,
       kind: MediaKind.episode,
@@ -605,7 +657,7 @@ void main() {
   });
 
   group('watch state freshness (phone layout)', () {
-    MediaItem buildShow() => MediaItem(
+    MediaItem buildShow() => testMediaItem(
       id: 'show_1',
       backend: MediaBackend.jellyfin,
       kind: MediaKind.show,
@@ -616,7 +668,7 @@ void main() {
       serverName: 'Server',
     );
 
-    MediaItem buildSeason(MediaItem show, int index) => MediaItem(
+    MediaItem buildSeason(MediaItem show, int index) => testMediaItem(
       id: 'season_$index',
       backend: MediaBackend.jellyfin,
       kind: MediaKind.season,
@@ -629,7 +681,7 @@ void main() {
       serverName: show.serverName,
     );
 
-    MediaItem buildEpisode(MediaItem show, MediaItem season, int index) => MediaItem(
+    MediaItem buildEpisode(MediaItem show, MediaItem season, int index) => testMediaItem(
       id: '${season.id}_episode_$index',
       backend: MediaBackend.jellyfin,
       kind: MediaKind.episode,
@@ -975,11 +1027,7 @@ class _FakeMediaServerClient implements MediaServerClient {
     if (error != null) throw error;
     final all =
         await (childrenPageFutures[parentId] ?? Future.value(childrenByParent[parentId] ?? const <MediaItem>[]));
-    final offset = start ?? 0;
-    final limit = size ?? all.length;
-    final end = (offset + limit).clamp(0, all.length).toInt();
-    final items = offset >= all.length ? const <MediaItem>[] : all.sublist(offset, end);
-    return LibraryPage(items: items, totalCount: all.length, offset: offset);
+    return fakeLibraryPage(all, start: start, size: size);
   }
 
   @override

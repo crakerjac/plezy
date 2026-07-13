@@ -3,7 +3,6 @@ import 'dart:math' as math;
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
 import '../focus/dpad_navigator.dart';
@@ -185,7 +184,7 @@ class AppMenuButtonState<T> extends State<AppMenuButton<T>> {
   }
 
   Future<void> _handlePressed() async {
-    await showButtonMenu(focusFirstItem: InputModeTracker.isKeyboardMode(context));
+    await showButtonMenu(focusFirstItem: InputModeTracker.isKeyboardMode(context, listen: false));
   }
 
   @override

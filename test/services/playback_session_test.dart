@@ -1,16 +1,17 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:plezy/media/media_backend.dart';
-import 'package:plezy/media/media_item.dart';
+
 import 'package:plezy/media/media_kind.dart';
 import 'package:plezy/media/media_version.dart';
 import 'package:plezy/models/transcode_quality_preset.dart';
 import 'package:plezy/services/playback_context.dart';
 import 'package:plezy/services/playback_initialization_types.dart';
 import 'package:plezy/services/playback_session.dart';
+import '../test_helpers/media_items.dart';
 
 PlaybackContext _context(PlaybackInitializationResult result) {
   return PlaybackContext(
-    metadata: MediaItem(id: 'item-1', backend: MediaBackend.plex, kind: MediaKind.movie, serverId: 'srv'),
+    metadata: testMediaItem(id: 'item-1', backend: MediaBackend.plex, kind: MediaKind.movie, serverId: 'srv'),
     result: result,
     sourceKind: result.usesLocalMedia ? PlaybackSourceKind.localFile : PlaybackSourceKind.remoteDirect,
     reportingMode: PlaybackReportingMode.online,
@@ -74,6 +75,26 @@ void main() {
         requestedMediaSourceId: 'requested',
       );
       expect(session.mediaSourceId, 'requested');
+    });
+
+    test('prefers the result source id over derived and requested ids', () {
+      // Offline fallback playback: the result names the downloaded version,
+      // which must win over the (stale) requested id even when a version
+      // list would derive something else.
+      final versions = [MediaVersion(id: 'v0'), MediaVersion(id: 'v1')];
+      final session = PlaybackSession.fromContext(
+        _context(
+          PlaybackInitializationResult(
+            availableVersions: versions,
+            videoUrl: 'u',
+            selectedMediaIndex: 1,
+            selectedMediaSourceId: 'downloaded',
+          ),
+        ),
+        requestedQualityPreset: TranscodeQualityPreset.original,
+        requestedMediaSourceId: 'requested',
+      );
+      expect(session.mediaSourceId, 'downloaded');
     });
   });
 

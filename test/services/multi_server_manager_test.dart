@@ -14,24 +14,20 @@ import 'package:plezy/services/plex_client.dart';
 import 'package:plezy/services/jellyfin_client.dart';
 import 'package:plezy/services/multi_server_manager.dart';
 
+import '../test_helpers/backend_client_fixtures.dart';
 import '../test_helpers/prefs.dart';
 
-JellyfinConnection _jellyfinConnection(String userId) => JellyfinConnection(
-  id: 'jf-machine/$userId',
-  baseUrl: 'https://jf.example.com',
-  serverName: 'Shared JF',
-  serverMachineId: 'jf-machine',
+JellyfinConnection _jellyfinConnection(String userId) => testJellyfinConnection(
+  machineId: 'jf-machine',
   userId: userId,
+  serverName: 'Shared JF',
   userName: userId,
   accessToken: 'token-$userId',
   deviceId: 'device',
   createdAt: DateTime.fromMillisecondsSinceEpoch(0),
 );
 
-JellyfinClient _jellyfinClient(String userId) => JellyfinClient.forTesting(
-  connection: _jellyfinConnection(userId),
-  httpClient: MockClient((_) async => http.Response('{}', 200)),
-);
+JellyfinClient _jellyfinClient(String userId) => testJellyfinClient(connection: _jellyfinConnection(userId));
 
 // NOTE on coverage scope:
 // [MultiServerManager.addServer] / `connectToAllServers` / `_createClientForServer`
@@ -199,6 +195,62 @@ void main() {
       expect(m.authErrorServerIds, isNot(contains('server-1')));
       expect(client.config.token, 'new-token');
     });
+
+    test('concurrent Plex account refreshes do not invalidate each other', () async {
+      final db = AppDatabase.forTesting(NativeDatabase.memory());
+      PlexApiCache.initialize(db);
+      addTearDown(db.close);
+
+      final manager = MultiServerManager();
+      addTearDown(manager.dispose);
+
+      PlexClient client(String serverId) => PlexClient.forTesting(
+        config: PlexConfig(
+          baseUrl: 'https://$serverId.example',
+          token: 'old-$serverId',
+          clientIdentifier: 'client-$serverId',
+          product: 'Plezy',
+          version: '1.0.0',
+        ),
+        serverId: ServerId(serverId),
+        serverName: serverId,
+        httpClient: MockClient((_) async => http.Response('{}', 200)),
+      );
+
+      final clientA = client('server-a');
+      final clientB = client('server-b');
+      manager.debugRegisterClientForTesting(clientA, online: true);
+      manager.debugRegisterClientForTesting(clientB, online: true);
+
+      PlexAccountConnection account(String accountId, String serverId) => PlexAccountConnection(
+        id: accountId,
+        accountToken: 'account-token',
+        clientIdentifier: 'client-$serverId',
+        accountLabel: accountId,
+        servers: [
+          PlexServer(
+            name: serverId,
+            clientIdentifier: serverId,
+            accessToken: 'new-$serverId',
+            connections: const [],
+            owned: true,
+          ),
+        ],
+        createdAt: DateTime.fromMillisecondsSinceEpoch(0),
+      );
+
+      final results = await Future.wait([
+        manager.refreshTokensForProfile(account('account-a', 'server-a')),
+        manager.refreshTokensForProfile(account('account-b', 'server-b')),
+      ]);
+
+      expect(results, [
+        {'server-a'},
+        {'server-b'},
+      ]);
+      expect(clientA.config.token, 'new-server-a');
+      expect(clientB.config.token, 'new-server-b');
+    });
   });
 
   group('Jellyfin connection updates', () {
@@ -319,6 +371,113 @@ void main() {
       expect(m.getClient(ServerId('jf-machine')), same(userB));
       expect(m.isServerOnline(ServerId('jf-machine')), isTrue);
       expect(m.authErrorServerIds, isNot(contains('jf-machine')));
+    });
+  });
+
+  // ============================================================
+  // addJellyfinConnection reuse
+  // ============================================================
+
+  group('addJellyfinConnection reuse', () {
+    // The reuse branch is what keeps a passive rebind (re-adding the same
+    // persisted connection) from tearing down a live client and aborting its
+    // in-flight requests. The identity assertions are load-bearing: any
+    // recreation implies the prior client was closed.
+    test('re-adding an identical connection reuses the live client', () async {
+      var probes = 0;
+      final client = JellyfinClient.forTesting(
+        connection: _jellyfinConnection('user-a'),
+        httpClient: MockClient((request) async {
+          probes++;
+          expect(request.url.path, '/Users/Me');
+          return http.Response('{}', 200, headers: {'content-type': 'application/json'});
+        }),
+      );
+      addTearDown(client.close);
+      final m = MultiServerManager();
+      addTearDown(m.dispose);
+      m.debugRegisterJellyfinClientForTesting(client);
+
+      final healthy = await m.addJellyfinConnection(_jellyfinConnection('user-a'));
+
+      expect(healthy, isTrue);
+      expect(m.getJellyfinClientByCompoundId('jf-machine/user-a'), same(client));
+      expect(m.getClient(ServerId('jf-machine')), same(client));
+      // One fresh health probe on the existing client; no recreation.
+      expect(probes, 1);
+    });
+
+    test('reuse rebinds an inactive compound client without closing the active one', () async {
+      JellyfinClient clientFor(String userId) => JellyfinClient.forTesting(
+        connection: _jellyfinConnection(userId),
+        httpClient: MockClient((_) async => http.Response('{}', 200, headers: {'content-type': 'application/json'})),
+      );
+      final userA = clientFor('user-a');
+      final userB = clientFor('user-b');
+      addTearDown(userA.close);
+      addTearDown(userB.close);
+      final m = MultiServerManager();
+      addTearDown(m.dispose);
+      m.debugRegisterJellyfinClientForTesting(userA);
+      m.debugRegisterJellyfinClientForTesting(userB); // takes the machine slot
+
+      await m.addJellyfinConnection(_jellyfinConnection('user-a'));
+
+      expect(m.getClient(ServerId('jf-machine')), same(userA));
+      expect(m.getJellyfinClientByCompoundId('jf-machine/user-a'), same(userA));
+      // The other user's client stays registered for a future switch back.
+      expect(m.getJellyfinClientByCompoundId('jf-machine/user-b'), same(userB));
+    });
+  });
+
+  group('canReuseJellyfinClient', () {
+    // A false verdict routes addJellyfinConnection to the pre-existing
+    // replace path (covered by 'ignores stale admin-status persistence from
+    // a replaced Jellyfin client' above).
+    final base = _jellyfinConnection('user-a');
+
+    test('identical connection is reusable', () {
+      expect(MultiServerManager.canReuseJellyfinClient(live: base, incoming: _jellyfinConnection('user-a')), isTrue);
+    });
+
+    test('changed access token requires recreation', () {
+      expect(
+        MultiServerManager.canReuseJellyfinClient(
+          live: base,
+          incoming: base.copyWith(accessToken: 'rotated'),
+        ),
+        isFalse,
+      );
+    });
+
+    test('changed device id requires recreation', () {
+      expect(
+        MultiServerManager.canReuseJellyfinClient(
+          live: base,
+          incoming: base.copyWith(deviceId: 'other-device'),
+        ),
+        isFalse,
+      );
+    });
+
+    test('same URL set with a different active URL is reusable', () {
+      // The live client rotates its active endpoint on its own; the add-path
+      // race reorders the candidate list. Neither warrants a teardown.
+      final live = base.copyWith(
+        baseUrl: 'https://a.example.com',
+        baseUrls: ['https://a.example.com', 'https://b.example.com'],
+      );
+      final incoming = base.copyWith(
+        baseUrl: 'https://b.example.com',
+        baseUrls: ['https://b.example.com', 'https://a.example.com'],
+      );
+      expect(MultiServerManager.canReuseJellyfinClient(live: live, incoming: incoming), isTrue);
+    });
+
+    test('an added or removed URL requires recreation', () {
+      final twoUrls = base.copyWith(baseUrls: ['https://jf.example.com', 'https://alt.example.com']);
+      expect(MultiServerManager.canReuseJellyfinClient(live: twoUrls, incoming: base), isFalse);
+      expect(MultiServerManager.canReuseJellyfinClient(live: base, incoming: twoUrls), isFalse);
     });
   });
 

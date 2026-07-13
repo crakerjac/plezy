@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:plezy/focus/key_event_utils.dart';
 import 'package:plezy/widgets/overlay_sheet.dart';
 
 void main() {
@@ -50,6 +52,92 @@ void main() {
     expect(tester.takeException(), isNull);
     expect(parentController.positions.length, 1);
     expect(find.text('Item 0'), findsOneWidget);
+  });
+
+  testWidgets('desktop default constraints scale with window height', (tester) async {
+    tester.view.physicalSize = const Size(1280, 800);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: ThemeData(platform: TargetPlatform.android),
+        home: OverlaySheetHost(
+          child: Scaffold(
+            body: Center(
+              child: Builder(
+                builder: (context) => ElevatedButton(
+                  onPressed: () {
+                    OverlaySheetController.of(context).show<void>(
+                      builder: (_) => ListView.builder(
+                        itemCount: 100,
+                        itemBuilder: (_, index) => ListTile(title: Text('Item $index')),
+                      ),
+                    );
+                  },
+                  child: const Text('Open'),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('Open'));
+    await tester.pumpAndSettle();
+
+    // Unbounded list content fills the default constraints: 75% of window
+    // height (previously a fixed 400 on desktop) capped at 700 wide.
+    final sheetSize = tester.getSize(find.byType(ListView));
+    expect(sheetSize.height, 800 * 0.75);
+    expect(sheetSize.width, 700);
+  });
+
+  testWidgets('pointer-opened sheet claims focus and handles Back before the screen', (tester) async {
+    final screenFocusNode = FocusNode(debugLabel: 'Screen');
+    addTearDown(screenFocusNode.dispose);
+    var screenBacks = 0;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Focus(
+          focusNode: screenFocusNode,
+          autofocus: true,
+          onKeyEvent: (_, event) {
+            if (event.logicalKey == LogicalKeyboardKey.gameButtonB) {
+              if (event is KeyUpEvent) screenBacks++;
+              return KeyEventResult.handled;
+            }
+            return KeyEventResult.ignored;
+          },
+          child: OverlaySheetHost(
+            child: Scaffold(
+              body: Center(
+                child: Builder(
+                  builder: (context) => ElevatedButton(
+                    onPressed: () => OverlaySheetController.of(context).show<void>(
+                      builder: (_) => const SizedBox(height: 120, child: Center(child: Text('SHEET'))),
+                    ),
+                    child: const Text('Open'),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('Open'));
+    await tester.pumpAndSettle();
+
+    expect(FocusManager.instance.primaryFocus?.debugLabel, 'OverlaySheetScope');
+    await tester.sendKeyEvent(LogicalKeyboardKey.gameButtonB);
+    await tester.pumpAndSettle();
+
+    expect(find.text('SHEET'), findsNothing);
+    expect(screenBacks, 0);
   });
 
   group('opt-in canPop / onSystemBack', () {
@@ -133,6 +221,24 @@ void main() {
       expect(find.text('SHEET'), findsNothing, reason: 'sheet closed');
       expect(find.text('Open'), findsOneWidget, reason: 'screen not popped');
       expect(backs, 0, reason: 'onSystemBack not called while a sheet was open');
+    });
+
+    testWidgets('system back does not duplicate a handled TV key Back on an open sheet', (tester) async {
+      var backs = 0;
+      await pushHost(tester, canPop: false, onSystemBack: () => backs++);
+      await tester.tap(find.text('Open'));
+      await tester.pumpAndSettle();
+
+      BackKeyCoordinator.markHandled();
+      await tester.binding.handlePopRoute();
+      await tester.pumpAndSettle();
+
+      expect(find.text('SHEET'), findsOneWidget);
+      expect(backs, 0);
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.gameButtonB);
+      await tester.pumpAndSettle();
+      expect(find.text('SHEET'), findsNothing);
     });
   });
 }

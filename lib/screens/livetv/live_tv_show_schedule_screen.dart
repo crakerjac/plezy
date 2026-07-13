@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 import '../../focus/focusable_action_bar.dart';
 import '../../focus/focusable_wrapper.dart';
 import '../../i18n/strings.g.dart';
+import '../../media/media_server_client.dart';
 import '../../models/livetv_channel.dart';
 import '../../mixins/mounted_set_state_mixin.dart';
 import '../../models/livetv_program.dart';
@@ -16,8 +17,10 @@ import '../../widgets/app_icon.dart';
 import '../../widgets/focused_scroll_scaffold.dart';
 import '../../widgets/loading_indicator_box.dart';
 import '../../widgets/overlay_sheet.dart';
+import '../../widgets/settings_section.dart';
 import 'live_tv_actions_mixin.dart';
 import 'livetv_recording_actions.dart';
+import 'livetv_styles.dart';
 
 /// Shows all upcoming airings of a show, matching the Plex "upcoming episodes" view.
 class LiveTvShowScheduleScreen extends StatefulWidget {
@@ -90,7 +93,7 @@ class _LiveTvShowScheduleScreenState extends State<LiveTvShowScheduleScreen>
   /// lookup is needed.
   bool get _canRecord {
     final client = context.read<MultiServerProvider>().getClientForServer(ServerId(widget.serverId));
-    return client != null && client.capabilities.liveTvDvr;
+    return client?.liveTvDvr != null;
   }
 
   Future<void> _onRecordShow() async {
@@ -137,37 +140,41 @@ class _LiveTvShowScheduleScreenState extends State<LiveTvShowScheduleScreen>
           else if (_programs.isEmpty)
             SliverFillRemaining(child: Center(child: Text(t.liveTv.noPrograms)))
           else
-            SliverList(
-              delegate: SliverChildBuilderDelegate((context, index) {
-                final program = _programs[index];
-                final channel = findChannelForProgram(program);
-                void onTap() {
-                  if (program.isCurrentlyAiring && channel != null) {
-                    tuneChannel(channel);
-                  } else {
-                    showProgramDetails(
-                      program: program,
-                      channel: channel,
-                      posterThumb: program.thumb,
-                      posterServerId: widget.serverId,
-                    );
-                  }
-                }
-
-                return FocusableWrapper(
-                  autofocus: index == 0,
-                  autoScroll: true,
-                  useComfortableZone: true,
-                  useBackgroundFocus: true,
-                  disableScale: true,
-                  onSelect: onTap,
-                  onBack: () => Navigator.pop(context),
-                  child: _ScheduleListTile(program: program, channel: channel, onTap: onTap),
-                );
-              }, childCount: _programs.length),
+            SliverToBoxAdapter(
+              child: SettingsGroup(
+                children: [for (var index = 0; index < _programs.length; index++) _buildScheduleItem(index)],
+              ),
             ),
         ],
       ),
+    );
+  }
+
+  Widget _buildScheduleItem(int index) {
+    final program = _programs[index];
+    final channel = findChannelForProgram(program);
+    void onTap() {
+      if (program.isCurrentlyAiring && channel != null) {
+        tuneChannel(channel);
+      } else {
+        showProgramDetails(
+          program: program,
+          channel: channel,
+          posterThumb: program.thumb,
+          posterServerId: widget.serverId,
+        );
+      }
+    }
+
+    return FocusableWrapper(
+      autofocus: index == 0,
+      autoScroll: true,
+      useComfortableZone: true,
+      useBackgroundFocus: true,
+      disableScale: true,
+      onSelect: onTap,
+      onBack: () => Navigator.pop(context),
+      child: _ScheduleListTile(program: program, channel: channel, onTap: onTap),
     );
   }
 }
@@ -226,12 +233,7 @@ class _ScheduleListTile extends StatelessWidget {
       canRequestFocus: false,
       onTap: onTap,
       child: Container(
-        decoration: isLive
-            ? BoxDecoration(
-                color: theme.colorScheme.primary.withValues(alpha: 0.08),
-                border: Border(left: BorderSide(color: theme.colorScheme.primary, width: 3)),
-              )
-            : null,
+        color: isLive ? airingFill(context) : null,
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
         child: Column(
           crossAxisAlignment: .start,
