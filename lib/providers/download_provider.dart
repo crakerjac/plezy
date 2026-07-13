@@ -1419,7 +1419,7 @@ class DownloadProvider extends ChangeNotifier with DisposableChangeNotifierMixin
   Future<ImportSummary> importFromManifest({MediaServerClient? Function(String serverId)? clientResolver}) async {
     final summary = await PlexSyncerImportService.instance.doImport(
       downloadManager: _downloadManager,
-      clientResolver:  clientResolver,
+      clientResolver: clientResolver,
     );
     await refresh();
     return summary;

@@ -77,14 +77,13 @@ class DownloadsScreenState extends State<DownloadsScreen>
       final hasUpdate = await ManifestImportService.instance.checkForUpdates();
       if (!mounted || !hasUpdate) return;
       appLogger.i('PlexSyncer: manifest updated — notifying user');
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: const Text('PlexSyncer folder updated — tap to import'),
-        duration: const Duration(seconds: 8),
-        action: SnackBarAction(
-          label: 'Import',
-          onPressed: _importFromManifest,
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('PlexSyncer folder updated — tap to import'),
+          duration: const Duration(seconds: 8),
+          action: SnackBarAction(label: 'Import', onPressed: _importFromManifest),
         ),
-      ));
+      );
     } catch (e) {
       appLogger.d('PlexSyncer: auto-check failed: $e');
     }
@@ -110,21 +109,15 @@ class DownloadsScreenState extends State<DownloadsScreen>
           builder: (_) => AlertDialog(
             title: const Text('Scan failed'),
             content: Text(summary.error!),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text('OK'),
-              ),
-            ],
+            actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('OK'))],
           ),
         );
         return;
       }
 
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(summary.toUserMessage()),
-        duration: const Duration(seconds: 5),
-      ));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(summary.toUserMessage()), duration: const Duration(seconds: 5)));
     } finally {
       if (mounted) setState(() => _isImporting = false);
     }
@@ -221,29 +214,27 @@ class DownloadsScreenState extends State<DownloadsScreen>
                 PopupMenuButton<DownloadSortOrder>(
                   icon: Icon(
                     Symbols.sort_rounded,
-                    color: _sortOrder != DownloadSortOrder.defaultOrder
-                        ? Theme.of(context).colorScheme.primary
-                        : null,
+                    color: _sortOrder != DownloadSortOrder.defaultOrder ? Theme.of(context).colorScheme.primary : null,
                   ),
                   tooltip: 'Sort',
                   onSelected: (order) => setState(() => _sortOrder = order),
-                  itemBuilder: (_) => DownloadSortOrder.values.map((order) =>
-                    PopupMenuItem(
-                      value: order,
-                      child: Row(
-                        children: [
-                          SizedBox(
-                            width: 20,
-                            child: _sortOrder == order
-                                ? const Icon(Icons.check, size: 16)
-                                : null,
+                  itemBuilder: (_) => DownloadSortOrder.values
+                      .map(
+                        (order) => PopupMenuItem(
+                          value: order,
+                          child: Row(
+                            children: [
+                              SizedBox(
+                                width: 20,
+                                child: _sortOrder == order ? const Icon(Icons.check, size: 16) : null,
+                              ),
+                              const SizedBox(width: 8),
+                              Text(order.label),
+                            ],
                           ),
-                          const SizedBox(width: 8),
-                          Text(order.label),
-                        ],
-                      ),
-                    ),
-                  ).toList(),
+                        ),
+                      )
+                      .toList(),
                 ),
               FocusableActionBar(
                 key: _actionBarKey,
@@ -263,11 +254,7 @@ class DownloadsScreenState extends State<DownloadsScreen>
                     tooltip: 'Scan PlexSyncer folder',
                     onPressed: _isImporting ? null : _importFromManifest,
                     child: _isImporting
-                        ? const SizedBox(
-                            width: 24,
-                            height: 24,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
+                        ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2))
                         : null,
                   ),
                 ],
@@ -371,9 +358,9 @@ enum DownloadSortOrder { defaultOrder, az, za, random }
 extension DownloadSortOrderLabel on DownloadSortOrder {
   String get label => switch (this) {
     DownloadSortOrder.defaultOrder => 'Default',
-    DownloadSortOrder.az           => 'A–Z',
-    DownloadSortOrder.za           => 'Z–A',
-    DownloadSortOrder.random       => 'Random',
+    DownloadSortOrder.az => 'A–Z',
+    DownloadSortOrder.za => 'Z–A',
+    DownloadSortOrder.random => 'Random',
   };
 }
 

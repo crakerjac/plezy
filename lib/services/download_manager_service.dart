@@ -2914,12 +2914,8 @@ class DownloadManagerService {
 
   /// Register an externally-synced file as a completed download.
   /// Called by [PlexSyncerImportService] for each manifest item not already in the DB.
-  Future<void> registerSyncedDownload({
-    required MediaItem metadata,
-    required String    fileUri,
-    String?            thumbPath,
-  }) async {
-    final serverId  = metadata.serverId;
+  Future<void> registerSyncedDownload({required MediaItem metadata, required String fileUri, String? thumbPath}) async {
+    final serverId = metadata.serverId;
     final ratingKey = metadata.id;
     final globalKey = metadata.globalKey;
 
@@ -2931,14 +2927,14 @@ class DownloadManagerService {
     await _cachePlexItemForOffline(serverId, ratingKey, metadata);
 
     await _database.insertDownload(
-      serverId:             ServerId(serverId),
-      ratingKey:            ratingKey,
-      globalKey:            globalKey,
-      type:                 metadata.kind.id,
-      parentRatingKey:      metadata.parentId,
+      serverId: ServerId(serverId),
+      ratingKey: ratingKey,
+      globalKey: globalKey,
+      type: metadata.kind.id,
+      parentRatingKey: metadata.parentId,
       grandparentRatingKey: metadata.grandparentId,
-      status:               DownloadStatus.completed.index,
-      mediaIndex:           0,
+      status: DownloadStatus.completed.index,
+      mediaIndex: 0,
     );
 
     await _database.updateVideoFilePath(globalKey, fileUri);
@@ -2952,7 +2948,7 @@ class DownloadManagerService {
 
   /// Cache a minimal show/season stub so the TV Shows grid works offline.
   Future<void> registerSyncedParentStub(MediaItem stub) async {
-    final serverId  = stub.serverId;
+    final serverId = stub.serverId;
     final ratingKey = stub.id;
     if (serverId == null) return;
     await _cachePlexItemForOffline(serverId, ratingKey, stub);
@@ -2962,37 +2958,37 @@ class DownloadManagerService {
   /// Merges with any existing entry to preserve Chapter/Marker/Media arrays.
   Future<void> _cachePlexItemForOffline(String serverId, String ratingKey, MediaItem m) async {
     final plexCache = PlexApiCache.instance;
-    final endpoint  = '/library/metadata/$ratingKey';
+    final endpoint = '/library/metadata/$ratingKey';
 
     // Build Plex wire-format JSON from MediaItem fields.
     final Map<String, dynamic> newJson = {
-      'ratingKey':            m.id,
-      'type':                 m.kind.id,
-      if (m.title != null)            'title':                 m.title,
-      if (m.summary != null)          'summary':               m.summary,
-      if (m.thumbPath != null)        'thumb':                 m.thumbPath,
-      if (m.artPath != null)          'art':                   m.artPath,
-      if (m.clearLogoPath != null)    'clearLogo':             m.clearLogoPath,
-      if (m.durationMs != null)       'duration':              m.durationMs,
-      if (m.year != null)             'year':                  m.year,
-      if (m.parentId != null)         'parentRatingKey':       m.parentId,
-      if (m.parentTitle != null)      'parentTitle':           m.parentTitle,
-      if (m.parentThumbPath != null)  'parentThumb':           m.parentThumbPath,
-      if (m.index != null)            'index':                 m.index,
-      if (m.parentIndex != null)      'parentIndex':           m.parentIndex,
-      if (m.grandparentId != null)    'grandparentRatingKey':  m.grandparentId,
-      if (m.grandparentTitle != null) 'grandparentTitle':      m.grandparentTitle,
-      if (m.grandparentThumbPath != null) 'grandparentThumb':  m.grandparentThumbPath,
-      if (m.grandparentArtPath != null)   'grandparentArt':    m.grandparentArtPath,
-      if (m.viewCount != null)        'viewCount':             m.viewCount,
-      if (m.viewOffsetMs != null)     'viewOffset':            m.viewOffsetMs,
-      if (m.leafCount != null)        'leafCount':             m.leafCount,
-      if (m.viewedLeafCount != null)  'viewedLeafCount':       m.viewedLeafCount,
-      if (m.addedAt != null)          'addedAt':               m.addedAt,
-      if (m.serverName != null)       'serverName':            m.serverName,
+      'ratingKey': m.id,
+      'type': m.kind.id,
+      if (m.title != null) 'title': m.title,
+      if (m.summary != null) 'summary': m.summary,
+      if (m.thumbPath != null) 'thumb': m.thumbPath,
+      if (m.artPath != null) 'art': m.artPath,
+      if (m.clearLogoPath != null) 'clearLogo': m.clearLogoPath,
+      if (m.durationMs != null) 'duration': m.durationMs,
+      if (m.year != null) 'year': m.year,
+      if (m.parentId != null) 'parentRatingKey': m.parentId,
+      if (m.parentTitle != null) 'parentTitle': m.parentTitle,
+      if (m.parentThumbPath != null) 'parentThumb': m.parentThumbPath,
+      if (m.index != null) 'index': m.index,
+      if (m.parentIndex != null) 'parentIndex': m.parentIndex,
+      if (m.grandparentId != null) 'grandparentRatingKey': m.grandparentId,
+      if (m.grandparentTitle != null) 'grandparentTitle': m.grandparentTitle,
+      if (m.grandparentThumbPath != null) 'grandparentThumb': m.grandparentThumbPath,
+      if (m.grandparentArtPath != null) 'grandparentArt': m.grandparentArtPath,
+      if (m.viewCount != null) 'viewCount': m.viewCount,
+      if (m.viewOffsetMs != null) 'viewOffset': m.viewOffsetMs,
+      if (m.leafCount != null) 'leafCount': m.leafCount,
+      if (m.viewedLeafCount != null) 'viewedLeafCount': m.viewedLeafCount,
+      if (m.addedAt != null) 'addedAt': m.addedAt,
+      if (m.serverName != null) 'serverName': m.serverName,
     };
 
-    final existing     = await plexCache.get(ServerId(serverId), endpoint);
+    final existing = await plexCache.get(ServerId(serverId), endpoint);
     final existingMeta = PlexCacheParser.extractFirstMetadata(existing);
 
     final Map<String, dynamic> merged;
@@ -3005,7 +3001,11 @@ class DownloadManagerService {
       merged = newJson;
     }
 
-    await plexCache.put(ServerId(serverId), endpoint, {'MediaContainer': {'Metadata': [merged]}});
+    await plexCache.put(ServerId(serverId), endpoint, {
+      'MediaContainer': {
+        'Metadata': [merged],
+      },
+    });
     await plexCache.pinForOffline(ServerId(serverId), ratingKey);
   }
 
