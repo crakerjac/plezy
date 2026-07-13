@@ -1,5 +1,4 @@
 import 'dart:async';
-import '../media/ids.dart';
 import 'dart:collection';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
@@ -590,9 +589,6 @@ class DownloadProvider extends ChangeNotifier with DisposableChangeNotifierMixin
   /// Returns null if artwork directory isn't initialized or artworkPath is null
   String? getArtworkLocalPath(ServerId serverId, String? artworkPath) {
     if (artworkPath == null) return null;
-    // Strip Plex timestamp suffix so timestamped and non-timestamped URLs
-    // resolve to the same local file (e.g. /thumb/1777409847 → /thumb).
-    final canonical = artworkPath.replaceAll(RegExp(r'/\d+$'), '');
     return DownloadArtworkService.localPathSync(DownloadStorageService.instance, serverId, artworkPath);
   }
 

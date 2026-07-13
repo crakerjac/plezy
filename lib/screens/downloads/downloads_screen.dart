@@ -104,7 +104,7 @@ class DownloadsScreenState extends State<DownloadsScreen>
       if (!mounted) return;
 
       if (summary.hasError) {
-        showDialog<void>(
+        await showDialog<void>(
           context: context,
           builder: (_) => AlertDialog(
             title: const Text('Scan failed'),
