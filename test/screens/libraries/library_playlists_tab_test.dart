@@ -7,26 +7,27 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:plezy/database/app_database.dart';
-import 'package:plezy/focus/input_mode_tracker.dart';
 import 'package:plezy/media/ids.dart';
 import 'package:plezy/media/media_backend.dart';
+import 'package:plezy/media/media_item.dart';
 import 'package:plezy/media/media_kind.dart';
 import 'package:plezy/media/media_library.dart';
 import 'package:plezy/media/media_playlist.dart';
 import 'package:plezy/models/plex/plex_config.dart';
-import 'package:plezy/navigation/main_screen_scope.dart';
 import 'package:plezy/providers/multi_server_provider.dart';
 import 'package:plezy/screens/libraries/tabs/library_playlists_tab.dart';
-import 'package:plezy/services/data_aggregation_service.dart';
 import 'package:plezy/services/multi_server_manager.dart';
 import 'package:plezy/services/plex_client.dart';
 import 'package:plezy/services/plex_api_cache.dart';
 import 'package:plezy/services/settings_service.dart';
-import 'package:plezy/theme/mono_theme.dart';
+import 'package:plezy/utils/platform_detector.dart';
 import 'package:plezy/widgets/card_inflation_budget.dart';
 import 'package:plezy/widgets/focusable_media_card.dart';
-import 'package:provider/provider.dart';
+import 'package:plezy/widgets/media_card_sliver_layout.dart';
 
+import '../../test_helpers/backend_client_fixtures.dart';
+import '../../test_helpers/library_tab_scaffold.dart';
+import '../../test_helpers/multi_server_fixtures.dart';
 import '../../test_helpers/prefs.dart';
 
 final _serverId = ServerId('playlist-server');
@@ -37,6 +38,13 @@ final _library = MediaLibrary(
   kind: MediaKind.movie,
   serverId: _serverId,
 );
+final _musicLibrary = MediaLibrary(
+  id: 'music',
+  backend: MediaBackend.plex,
+  title: 'Music',
+  kind: MediaKind.artist,
+  serverId: _serverId,
+);
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -45,8 +53,11 @@ void main() {
     resetSharedPreferencesForTest();
     SettingsService.resetForTesting();
     CardInflationBudget.reset();
+    TvDetectionService.debugSetAppleTVOverride(false);
     await SettingsService.getInstance();
   });
+
+  tearDown(() => TvDetectionService.debugSetAppleTVOverride(null));
 
   testWidgets('grid lazily builds playlist cards and preserves focus navigation', (tester) async {
     final harness = _PlaylistHarness();
@@ -55,7 +66,13 @@ void main() {
     var backCalls = 0;
     var sidebarCalls = 0;
 
-    await _pumpTab(tester, harness: harness, onBack: () => backCalls++, onSidebar: () => sidebarCalls++);
+    await _pumpTab(
+      tester,
+      harness: harness,
+      library: _library,
+      onBack: () => backCalls++,
+      onSidebar: () => sidebarCalls++,
+    );
 
     expect(find.byType(SliverGrid), findsOneWidget);
     final cards = tester.widgetList<FocusableMediaCard>(find.byType(FocusableMediaCard)).toList();
@@ -108,7 +125,13 @@ void main() {
     var backCalls = 0;
     var sidebarCalls = 0;
 
-    await _pumpTab(tester, harness: harness, onBack: () => backCalls++, onSidebar: () => sidebarCalls++);
+    await _pumpTab(
+      tester,
+      harness: harness,
+      library: _library,
+      onBack: () => backCalls++,
+      onSidebar: () => sidebarCalls++,
+    );
 
     expect(find.byType(SliverList), findsOneWidget);
     final cards = tester.widgetList<FocusableMediaCard>(find.byType(FocusableMediaCard)).toList();
@@ -128,6 +151,26 @@ void main() {
     expect(backCalls, 1);
     expect(sidebarCalls, 1);
   });
+
+  testWidgets('music library playlists use square grid geometry and square cards', (tester) async {
+    final harness = _PlaylistHarness(playlistType: 'audio');
+    addTearDown(harness.dispose);
+    addTearDown(harness.rebuild.dispose);
+    TvDetectionService.debugSetAppleTVOverride(true);
+    await SettingsService.instance.write(SettingsService.tvFullCardLayout, true);
+
+    await _pumpTab(tester, harness: harness, library: _musicLibrary, onBack: () {}, onSidebar: () {});
+
+    final layout = tester.widget<MediaCardSliverLayout>(find.byType(MediaCardSliverLayout));
+    expect(layout.shape, CardShape.square);
+    expect(layout.fullBleedImage, isFalse);
+    expect(
+      tester
+          .widgetList<FocusableMediaCard>(find.byType(FocusableMediaCard))
+          .every((card) => card.cardShapeOverride == CardShape.square),
+      isTrue,
+    );
+  });
 }
 
 FocusableMediaCard _cardFor(List<FocusableMediaCard> cards, int index) {
@@ -137,46 +180,19 @@ FocusableMediaCard _cardFor(List<FocusableMediaCard> cards, int index) {
 Future<void> _pumpTab(
   WidgetTester tester, {
   required _PlaylistHarness harness,
+  required MediaLibrary library,
   required VoidCallback onBack,
   required VoidCallback onSidebar,
 }) async {
-  tester.view.devicePixelRatio = 1;
-  tester.view.physicalSize = const Size(800, 600);
-  addTearDown(() {
-    tester.view.resetDevicePixelRatio();
-    tester.view.resetPhysicalSize();
-  });
-
-  await tester.pumpWidget(
-    ChangeNotifierProvider<MultiServerProvider>.value(
-      value: harness.provider,
-      child: InputModeTracker(
-        child: MaterialApp(
-          theme: monoTheme(dark: true),
-          home: MainScreenFocusScope(
-            focusSidebar: onSidebar,
-            focusContent: () {},
-            isSidebarFocused: false,
-            sideNavigationWidth: 0,
-            child: Scaffold(
-              body: NestedScrollView(
-                headerSliverBuilder: (context, _) => [
-                  SliverOverlapAbsorber(
-                    handle: NestedScrollView.sliverOverlapAbsorberHandleFor(context),
-                    sliver: const SliverToBoxAdapter(child: SizedBox(height: 1)),
-                  ),
-                ],
-                body: ValueListenableBuilder<int>(
-                  valueListenable: harness.rebuild,
-                  builder: (context, _, _) =>
-                      LibraryPlaylistsTab(library: _library, suppressAutoFocus: true, onBack: onBack),
-                ),
-              ),
-            ),
-          ),
-        ),
-      ),
+  await pumpLibraryTab(
+    tester,
+    provider: harness.provider,
+    tab: ValueListenableBuilder<int>(
+      valueListenable: harness.rebuild,
+      builder: (context, _, _) => LibraryPlaylistsTab(library: library, suppressAutoFocus: true, onBack: onBack),
     ),
+    size: const Size(800, 600),
+    focusSidebar: onSidebar,
   );
   await tester.pumpAndSettle();
 }
@@ -184,6 +200,7 @@ Future<void> _pumpTab(
 class _PlaylistHarness {
   static const totalPlaylists = 400;
 
+  final String playlistType;
   final requestStarts = <int>[];
   final rebuild = ValueNotifier(0);
   late final PlexClient client;
@@ -191,10 +208,10 @@ class _PlaylistHarness {
   late final MultiServerManager manager;
   late final MultiServerProvider provider;
 
-  _PlaylistHarness() {
+  _PlaylistHarness({this.playlistType = 'video'}) {
     database = AppDatabase.forTesting(NativeDatabase.memory());
     PlexApiCache.initialize(database);
-    client = PlexClient.forTesting(
+    client = testPlexClient(
       config: PlexConfig(
         baseUrl: 'https://plex.example.com',
         token: 'token',
@@ -214,7 +231,7 @@ class _PlaylistHarness {
           return {
             'ratingKey': 'playlist-$index',
             'type': 'playlist',
-            'playlistType': 'video',
+            'playlistType': playlistType,
             'title': 'Playlist $index',
             'smart': false,
           };
@@ -229,7 +246,7 @@ class _PlaylistHarness {
       }),
     );
     manager = MultiServerManager()..debugRegisterClientForTesting(client);
-    provider = MultiServerProvider(manager, DataAggregationService(manager));
+    provider = testMultiServerProvider(manager);
   }
 
   Future<void> dispose() async {

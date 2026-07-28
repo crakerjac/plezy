@@ -82,13 +82,19 @@ fi
 
 # 4. Workflow and script regression guards
 section "workflow and script guards"
-if python3 scripts/check_build_workflow.py &&
-   python3 scripts/check_update_packages_workflow.py &&
-   python3 scripts/test_pubspec_version.py &&
-   python3 scripts/test_clean_translations.py; then
+if bash scripts/ci_guard_checks.sh; then
   ok "workflow and script guards passed"
 else
   fail "workflow or script guard failed"
+  FAILED=1
+fi
+
+# 5. Icon consistency
+section "icon consistency"
+if dart run scripts/check_icon_consistency.dart; then
+  ok "production icons use AppIcon and rounded Symbols"
+else
+  fail "icon consistency violations found"
   FAILED=1
 fi
 
@@ -98,7 +104,7 @@ out="$(mktemp)"
 if scripts/format_native.sh --check >"$out" 2>&1; then
   ok "native files correctly formatted"
 else
-  fail "native formatting issues"
+  fail "native formatting check failed"
   sed 's/^/    /' "$out"
   FAILED=1
 fi

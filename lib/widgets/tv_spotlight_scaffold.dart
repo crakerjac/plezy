@@ -41,7 +41,7 @@ class TvSpotlightController extends ValueNotifier<MediaItem?> {
       fallback ??= hub.items.first;
       if (current == null) continue;
       for (final item in hub.items) {
-        if (item.globalKey == current.globalKey) return current;
+        if (item.globalKey == current.globalKey) return item;
       }
     }
     return fallback;
@@ -139,6 +139,30 @@ class TvSpotlightScaffold extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// Pins a toolbar to the top of the viewport across the full bleed width,
+/// sliding with the sidebar so it stays put while the content box translates.
+///
+/// Excluded from default focus traversal so that initial/tab-switch focus
+/// lands on content (hero/rails) rather than the toolbar; its buttons stay
+/// reachable via explicit UP from the content. Reads the offset aspect from
+/// its own element, so a sidebar flip rebuilds only this overlay.
+class TvToolbarOverlay extends StatelessWidget {
+  const TvToolbarOverlay({super.key, required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final fullBleedWidth = MainScreenFocusScope.fullBleedWidthOf(context);
+    return SideNavigationBleedBuilder(
+      targetBleed: MainScreenFocusScope.sideNavigationBleedOf(context),
+      child: ExcludeFocusTraversal(child: child),
+      builder: (context, animatedBleed, child) =>
+          Positioned(top: 0, left: -animatedBleed, width: fullBleedWidth, child: child!),
     );
   }
 }

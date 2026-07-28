@@ -1,8 +1,9 @@
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:auto_updater/auto_updater.dart';
 import 'package:package_info_plus/package_info_plus.dart';
-import 'package:logger/logger.dart';
+import 'package:plezy/utils/app_logger.dart';
 import 'package:plezy/utils/media_server_http_client.dart';
 import 'base_shared_preferences_service.dart';
 
@@ -13,7 +14,6 @@ import 'base_shared_preferences_service.dart';
 /// via auto_updater for native update dialogs and in-app installs.
 /// On all other platforms: falls back to GitHub API check + browser link dialog.
 class UpdateService {
-  static final Logger _logger = Logger();
   static const String _githubRepo = 'edde746/plezy';
   static const String _feedUrl = 'https://cdn.jsdelivr.net/gh/edde746/plezy@appcast/appcast.xml';
 
@@ -47,8 +47,8 @@ class UpdateService {
     try {
       await autoUpdater.setFeedURL(_feedUrl);
       _nativeUpdaterInitialized = true;
-    } catch (e) {
-      _logger.e('Failed to initialize native auto updater: $e');
+    } catch (error, stackTrace) {
+      appLogger.e('Failed to initialize native auto updater', error: error, stackTrace: stackTrace);
     }
   }
 
@@ -61,8 +61,8 @@ class UpdateService {
     }
     try {
       await autoUpdater.checkForUpdates(inBackground: inBackground);
-    } catch (e) {
-      _logger.e('Native update check failed: $e');
+    } catch (error, stackTrace) {
+      appLogger.e('Native update check failed', error: error, stackTrace: stackTrace);
     }
   }
 
@@ -72,7 +72,8 @@ class UpdateService {
     try {
       final execPath = Platform.resolvedExecutable;
       return execPath.contains('/Caskroom/') || execPath.contains('/homebrew/');
-    } catch (_) {
+    } catch (error, stackTrace) {
+      appLogger.e('Failed to determine Homebrew install status', error: error, stackTrace: stackTrace);
       return false;
     }
   }
@@ -83,7 +84,8 @@ class UpdateService {
     try {
       final exeDir = File(Platform.resolvedExecutable).parent.path;
       return File('$exeDir\\.winget').existsSync();
-    } catch (_) {
+    } catch (error, stackTrace) {
+      appLogger.e('Failed to determine winget install status', error: error, stackTrace: stackTrace);
       return false;
     }
   }
@@ -94,7 +96,8 @@ class UpdateService {
     try {
       final exeDir = File(Platform.resolvedExecutable).parent.path;
       return File('$exeDir\\unins000.exe').existsSync();
-    } catch (_) {
+    } catch (error, stackTrace) {
+      appLogger.e('Failed to determine Windows installation status', error: error, stackTrace: stackTrace);
       return false;
     }
   }
@@ -113,14 +116,16 @@ class UpdateService {
   static Future<bool> shouldCheckForUpdates() async {
     final prefs = await BaseSharedPreferencesService.sharedCache();
     final lastCheckString = prefs.getString(_keyLastCheckTime);
-
     if (lastCheckString == null) return true;
 
-    final lastCheck = DateTime.parse(lastCheckString);
     final now = DateTime.now();
-    final timeSinceLastCheck = now.difference(lastCheck);
+    final lastCheck = DateTime.tryParse(lastCheckString);
+    if (lastCheck == null || lastCheck.isAfter(now)) {
+      await prefs.remove(_keyLastCheckTime);
+      return true;
+    }
 
-    return timeSinceLastCheck >= _checkCooldown;
+    return now.difference(lastCheck) >= _checkCooldown;
   }
 
   static Future<void> _updateLastCheckTime() async {
@@ -129,9 +134,13 @@ class UpdateService {
   }
 
   /// Internal method that performs the actual update check
-  /// [respectCooldown] - if true, checks cooldown and updates last check time
-  static Future<Map<String, dynamic>?> _performUpdateCheck({required bool respectCooldown}) async {
-    if (!isUpdateCheckEnabled) {
+  /// [respectCooldown] - if true, checks cooldown and records the attempt before the request
+  static Future<Map<String, dynamic>?> _performUpdateCheck({
+    required bool respectCooldown,
+    MediaServerHttpClient? client,
+    bool forceEnabled = false,
+  }) async {
+    if (!forceEnabled && !isUpdateCheckEnabled) {
       return null;
     }
 
@@ -144,7 +153,11 @@ class UpdateService {
       final packageInfo = await PackageInfo.fromPlatform();
       final currentVersion = packageInfo.version;
 
-      final response = await httpClient.get(
+      if (respectCooldown) {
+        await _updateLastCheckTime();
+      }
+
+      final response = await (client ?? httpClient).get(
         'https://api.github.com/repos/$_githubRepo/releases/latest',
         headers: {'Accept': 'application/vnd.github+json'},
       );
@@ -162,16 +175,7 @@ class UpdateService {
           // Check if this version was skipped
           final skippedVersion = await getSkippedVersion();
           if (skippedVersion == cleanVersion) {
-            // Update last check time even when skipped (if respecting cooldown)
-            if (respectCooldown) {
-              await _updateLastCheckTime();
-            }
             return null;
-          }
-
-          // Update last check time on success (if respecting cooldown)
-          if (respectCooldown) {
-            await _updateLastCheckTime();
           }
 
           return {
@@ -185,16 +189,19 @@ class UpdateService {
           };
         }
       }
-
-      // Update last check time even when no update (if respecting cooldown)
-      if (respectCooldown) {
-        await _updateLastCheckTime();
-      }
-    } catch (e) {
-      _logger.e('Failed to check for updates: $e');
+    } catch (error, stackTrace) {
+      appLogger.e('Failed to check for updates', error: error, stackTrace: stackTrace);
     }
 
     return null;
+  }
+
+  @visibleForTesting
+  static Future<Map<String, dynamic>?> debugPerformUpdateCheck({
+    required bool respectCooldown,
+    required MediaServerHttpClient client,
+  }) {
+    return _performUpdateCheck(respectCooldown: respectCooldown, client: client, forceEnabled: true);
   }
 
   /// Check for updates on GitHub (manual check, ignores cooldown)
@@ -237,8 +244,8 @@ class UpdateService {
       }
 
       return false;
-    } catch (e) {
-      _logger.e('Error comparing versions: $e');
+    } catch (error, stackTrace) {
+      appLogger.e('Error comparing versions', error: error, stackTrace: stackTrace);
       return false;
     }
   }

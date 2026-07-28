@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 import 'package:provider/provider.dart';
 
 import '../connection/connection_registry.dart';
@@ -30,10 +31,21 @@ import '../services/music/music_playback_service.dart';
 import '../services/music/music_playback_service_impl.dart';
 import '../services/offline_watch_sync_service.dart';
 import '../services/storage_service.dart';
+import '../services/system_shelf_service.dart';
 import '../utils/app_logger.dart';
 import '../watch_together/providers/watch_together_provider.dart';
 import '../widgets/music/mini_player.dart';
 import 'profile_navigation_scope.dart';
+
+CatalogSourcesProvider _createCatalogSourcesProvider(BuildContext context) {
+  return CatalogSourcesProvider(
+    plexSessionSupplier: () => resolvePlexDiscoverSession(
+      activeProfile: context.read<ActiveProfileProvider>(),
+      connections: context.read<ConnectionRegistry>(),
+      profileConnections: context.read<ProfileConnectionRegistry>(),
+    ),
+  );
+}
 
 /// Root route for an active profile session.
 ///
@@ -47,7 +59,8 @@ import 'profile_navigation_scope.dart';
 /// on the root navigator so they survive this subtree being replaced.
 class ProfileSessionScreen extends StatefulWidget {
   const ProfileSessionScreen({super.key, this.isOfflineMode = false, this.initialPromptHandled = false})
-    : profileShellBuilder = null;
+    : profileShellBuilder = null,
+      trackerHttpClientFactory = null;
 
   @visibleForTesting
   const ProfileSessionScreen.forTesting({
@@ -55,11 +68,13 @@ class ProfileSessionScreen extends StatefulWidget {
     this.isOfflineMode = false,
     this.initialPromptHandled = false,
     required this.profileShellBuilder,
-  });
+    required http.Client Function() httpClientFactory,
+  }) : trackerHttpClientFactory = httpClientFactory;
 
   final bool isOfflineMode;
   final bool initialPromptHandled;
   final WidgetBuilder? profileShellBuilder;
+  final http.Client Function()? trackerHttpClientFactory;
 
   @override
   State<ProfileSessionScreen> createState() => _ProfileSessionScreenState();
@@ -91,13 +106,22 @@ class _ProfileSessionScreenState extends State<ProfileSessionScreen> {
   /// doing it from inside MainScreen can't work, the remount unmounts it
   /// before any settle-await completes.
   void _onSessionProfileChanged(String? activeId) {
+    final shelf = SystemShelfService();
     if (!_seenFirstActiveId) {
       _seenFirstActiveId = true;
       _lastSessionActiveId = activeId;
+      if (activeId != null) shelf.beginProfileSession(activeId);
       return;
     }
-    if (_lastSessionActiveId == activeId) return;
+    final oldOwner = _lastSessionActiveId;
+    if (oldOwner == activeId) return;
+    if (oldOwner != null) {
+      // endProfileSession invalidates synchronously and queues its clear before
+      // the new owner is admitted below.
+      unawaited(shelf.endProfileSession(oldOwner));
+    }
     _lastSessionActiveId = activeId;
+    if (activeId != null) shelf.beginProfileSession(activeId);
     unawaited(ApiCache.clearRegisteredVolatile());
   }
 
@@ -126,7 +150,7 @@ class _ProfileSessionScreenState extends State<ProfileSessionScreen> {
               ),
               ChangeNotifierProvider(
                 create: (context) {
-                  final provider = TraktAccountProvider();
+                  final provider = TraktAccountProvider(httpClientFactory: widget.trackerHttpClientFactory);
                   unawaited(
                     provider.onActiveProfileChanged(activeId).catchError((Object e, StackTrace s) {
                       appLogger.w('Trakt profile hydrate failed', error: e, stackTrace: s);
@@ -137,7 +161,7 @@ class _ProfileSessionScreenState extends State<ProfileSessionScreen> {
               ),
               ChangeNotifierProvider(
                 create: (context) {
-                  final provider = TrackersProvider();
+                  final provider = TrackersProvider(httpClientFactory: widget.trackerHttpClientFactory);
                   unawaited(
                     provider.onActiveProfileChanged(activeId).catchError((Object e, StackTrace s) {
                       appLogger.w('Trackers profile hydrate failed', error: e, stackTrace: s);
@@ -164,14 +188,15 @@ class _ProfileSessionScreenState extends State<ProfileSessionScreen> {
                   return provider;
                 },
               ),
-              ChangeNotifierProxyProvider3<
+              ChangeNotifierProxyProvider4<
                 TraktAccountProvider,
                 TrackersProvider,
                 SeerrAccountProvider,
+                ActiveProfileProvider,
                 CatalogSourcesProvider
               >(
                 create: (context) {
-                  final provider = CatalogSourcesProvider();
+                  final provider = _createCatalogSourcesProvider(context);
                   unawaited(
                     provider.onActiveProfileChanged(activeId).catchError((Object e, StackTrace s) {
                       appLogger.w('Catalog sources profile hydrate failed', error: e, stackTrace: s);
@@ -179,9 +204,10 @@ class _ProfileSessionScreenState extends State<ProfileSessionScreen> {
                   );
                   return provider;
                 },
-                update: (_, trakt, trackers, seerr, previous) {
-                  final provider = previous ?? CatalogSourcesProvider();
+                update: (context, trakt, trackers, seerr, activeProfile, previous) {
+                  final provider = previous ?? _createCatalogSourcesProvider(context);
                   provider.update(trakt, trackers, seerr);
+                  unawaited(provider.onProfileBindingStateChanged(activeProfile.isBinding));
                   return provider;
                 },
               ),
@@ -213,6 +239,7 @@ class _ProfileSessionScreenState extends State<ProfileSessionScreen> {
                     context.read<HiddenLibrariesProvider>(),
                     context.read<LibrariesProvider>(),
                     isProfileBinding: () => activeProfile.isBinding,
+                    profileId: activeId,
                   );
                 },
               ),

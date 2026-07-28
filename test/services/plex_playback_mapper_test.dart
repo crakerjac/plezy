@@ -150,6 +150,7 @@ void main() {
 
       expect(result.selectedMediaIndex, 1);
       expect(result.videoUrl, 'http://plex:32400/library/parts/20/file.mkv?X-Plex-Token=tok');
+      expect(result.mediaInfo?.mediaSourceId, '102');
     });
 
     test('selects version by preferred signature when the id misses', () {
@@ -185,6 +186,7 @@ void main() {
       );
 
       expect(result.selectedMediaIndex, 1);
+      expect(result.mediaInfo?.mediaSourceId, '202');
     });
 
     test('keeps the requested index when id and signature both miss', () {
@@ -214,6 +216,7 @@ void main() {
       );
 
       expect(result.selectedMediaIndex, 1);
+      expect(result.mediaInfo?.mediaSourceId, '302');
     });
 
     test('signature-resolved version still falls back when unplayable', () {
@@ -333,6 +336,41 @@ void main() {
       expect(criteria.primaries, 'bt2020');
       expect(criteria.matrix, 'bt2020nc');
     });
+
+    test('skips unidentifiable subtitle streams without blocking playback', () {
+      final result = parsePlexVideoPlaybackDataFromJson(
+        {
+          'Media': [
+            {
+              'id': 1,
+              'Part': [
+                {
+                  'id': 10,
+                  'key': '/library/parts/10/file.mp4',
+                  'accessible': 1,
+                  'exists': 1,
+                  'Stream': [
+                    {'streamType': 1, 'id': 100},
+                    {'streamType': 2, 'id': 301, 'selected': true},
+                    {'streamType': 3, 'languageCode': 'eng'},
+                    {'streamType': 3, 'id': 'cc1', 'languageCode': 'eng'},
+                    {'streamType': 3, 'id': '401', 'languageCode': 'spa', 'selected': true},
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+        baseUrl: 'http://plex:32400',
+        token: 'token',
+      );
+
+      expect(result.videoUrl, 'http://plex:32400/library/parts/10/file.mp4?X-Plex-Token=token');
+      expect(result.mediaInfo, isNotNull);
+      expect(result.mediaInfo!.audioTracks.map((track) => track.id), [301]);
+      expect(result.mediaInfo!.subtitleTracks.map((track) => track.id), [401]);
+      expect(result.mediaInfo!.subtitleTracks.single.selected, isTrue);
+    });
   });
 
   group('parsePlexFileInfoFromJson', () {
@@ -394,6 +432,31 @@ void main() {
       expect(info?.audioTracks.single.id, 301);
       expect(info?.audioTracks.single.selected, isTrue);
       expect(info?.subtitleTracks.single.key, '/subtitles/401');
+    });
+
+    test('skips unidentifiable subtitle streams in file info', () {
+      final info = parsePlexFileInfoFromJson({
+        'Media': [
+          {
+            'container': 'mp4',
+            'Part': [
+              {
+                'file': '/media/movie.mp4',
+                'Stream': [
+                  {'streamType': 1, 'id': 100},
+                  {'streamType': 3, 'id': null, 'languageCode': 'eng'},
+                  {'streamType': 3, 'id': 'cea-608', 'languageCode': 'eng'},
+                  {'streamType': 3, 'id': 402, 'languageCode': 'spa'},
+                ],
+              },
+            ],
+          },
+        ],
+      });
+
+      expect(info, isNotNull);
+      expect(info!.filePath, '/media/movie.mp4');
+      expect(info.subtitleTracks.map((track) => track.id), [402]);
     });
   });
 }

@@ -47,8 +47,10 @@ import '../utils/resolution_label.dart';
 import '../utils/track_label_builder.dart';
 import '../exceptions/media_server_exceptions.dart';
 import '../i18n/strings.g.dart';
+import '../utils/json_utils.dart';
 import '../utils/jellyfin_time.dart';
 import 'jellyfin_auth_header.dart';
+import 'jellyfin_endpoint_discovery.dart';
 import '../media/download_resolution.dart';
 import 'api_cache.dart';
 import 'download_artwork_helpers.dart';
@@ -60,6 +62,7 @@ import 'jellyfin_playback_urls.dart';
 import 'jellyfin_trickplay_service.dart';
 import 'playback_initialization_types.dart';
 import 'scrub_preview_source.dart';
+import 'track_selection_service.dart';
 import '../mpv/mpv.dart';
 
 part 'jellyfin_client/parts/browse.dart';
@@ -73,6 +76,20 @@ part 'jellyfin_client/parts/live_tv.dart';
 part 'jellyfin_client/parts/images_downloads.dart';
 part 'jellyfin_client/parts/metadata_edit.dart';
 
+/// Canonical declarations of the [JellyfinClient] internals that the `part`
+/// mixins call into.
+///
+/// Every part mixin is `on _JellyfinClientInternals`, so each shared member is
+/// declared exactly once here instead of being re-declared per file. Members
+/// used by a single part stay declared in that part.
+mixin _JellyfinClientInternals on MediaServerCacheMixin {
+  JellyfinConnection get connection;
+  FailoverHttpClient get _http;
+  MediaItem? _mapItem(Map<String, dynamic> json);
+  List<MediaItem> _mapItems(Iterable<Map<String, dynamic>> items);
+  String? _absolutizeImagePath(String? path);
+}
+
 /// [MediaServerClient] over a Jellyfin server.
 ///
 /// Constructs from a [JellyfinConnection] and a [MediaServerHttpClient] (the
@@ -82,6 +99,7 @@ part 'jellyfin_client/parts/metadata_edit.dart';
 class JellyfinClient
     with
         MediaServerCacheMixin,
+        _JellyfinClientInternals,
         _JellyfinBrowseMethods,
         _JellyfinMusicMethods,
         _JellyfinPlaybackMethods,
@@ -111,11 +129,11 @@ class JellyfinClient
     FavoriteChannelsRepository? favoritesRepository,
     void Function()? onAllEndpointsExhausted,
   }) async {
-    // Register before any HTTP traffic so the very first probe URL doesn't
-    // leak the token verbatim. `LogRedactionManager.redact()` also has
-    // pattern-based fallbacks for `api_key=`, `X-Emby-Token`, and the
-    // `Authorization: MediaBrowser ... Token="..."` header.
-    LogRedactionManager.registerServer(connection.baseUrl, connection.accessToken);
+    // Register every normalized connection endpoint and the token before any
+    // HTTP traffic. Orchestration logs contain no literals; this additionally
+    // protects unavoidable network-layer diagnostics.
+    _registerConnectionDiagnostics(connection);
+    final endpointDiscovery = JellyfinEndpointDiscovery();
     String version = '1.0';
     try {
       final pkg = await PackageInfo.fromPlatform();
@@ -153,20 +171,25 @@ class JellyfinClient
       prioritizedEndpoints: connection.baseUrls,
       onEndpointSwitch: (newBaseUrl, {required persist}) => client._handleEndpointSwitch(newBaseUrl, persist: persist),
       onAllEndpointsExhausted: onAllEndpointsExhausted,
+      validateCandidate: (candidateBaseUrl, abort) async =>
+          (await endpointDiscovery.probe(candidateBaseUrl, abort: abort)).machineId == connection.serverMachineId,
     );
     client = JellyfinClient._(connection: connection, http: http, favoritesRepository: favoritesRepository);
     return client;
   }
 
-  /// Test-only factory that injects an [http.Client] so URL-builder tests
-  /// can capture the request URI without spinning up a real Jellyfin server.
+  /// Test-only factory that injects independent authenticated-application and
+  /// unauthenticated public-probe clients.
   @visibleForTesting
   static JellyfinClient forTesting({
     required JellyfinConnection connection,
     required http.Client httpClient,
+    http.Client Function()? endpointProbeHttpClientFactory,
     FavoriteChannelsRepository? favoritesRepository,
     void Function()? onAllEndpointsExhausted,
   }) {
+    _registerConnectionDiagnostics(connection);
+    final endpointDiscovery = JellyfinEndpointDiscovery(testHttpClientFactory: endpointProbeHttpClientFactory);
     late JellyfinClient client;
     final mediaHttp = FailoverHttpClient(
       baseUrl: connection.baseUrl,
@@ -175,6 +198,8 @@ class JellyfinClient
       prioritizedEndpoints: connection.baseUrls,
       onEndpointSwitch: (newBaseUrl, {required persist}) => client._handleEndpointSwitch(newBaseUrl, persist: persist),
       onAllEndpointsExhausted: onAllEndpointsExhausted,
+      validateCandidate: (candidateBaseUrl, abort) async =>
+          (await endpointDiscovery.probe(candidateBaseUrl, abort: abort)).machineId == connection.serverMachineId,
       client: httpClient,
     );
     client = JellyfinClient._(connection: connection, http: mediaHttp, favoritesRepository: favoritesRepository);
@@ -197,13 +222,20 @@ class JellyfinClient
   /// to re-broadcast status so admin-gated UI rebuilds.
   FutureOr<void> Function(JellyfinConnection connection)? onConnectionUpdated;
 
+  static void _registerConnectionDiagnostics(JellyfinConnection connection) {
+    LogRedactionManager.registerToken(connection.accessToken);
+    for (final baseUrl in connection.baseUrls) {
+      LogRedactionManager.registerServerUrl(baseUrl);
+    }
+  }
+
   Future<void> _handleEndpointSwitch(String newBaseUrl, {required bool persist}) async {
+    LogRedactionManager.registerServerUrl(newBaseUrl);
     final changed = connection.baseUrl != newBaseUrl;
     if (changed) {
-      appLogger.i('Applying Jellyfin endpoint switch', error: newBaseUrl);
+      appLogger.i('Applying Jellyfin endpoint switch');
       _http.baseUrl = newBaseUrl;
       _connection = _connection.copyWith(baseUrl: newBaseUrl);
-      LogRedactionManager.registerServer(newBaseUrl, connection.accessToken);
     }
 
     if (persist) {
@@ -285,7 +317,7 @@ class JellyfinClient
   @override
   Future<HealthStatus> checkHealth() async {
     try {
-      final response = await _http.get('/Users/Me', timeout: const Duration(seconds: 8));
+      final response = await _http.get('/Users/Me', timeout: MediaServerTimeouts.jellyfinProbe);
       final ok = response.statusCode >= 200 && response.statusCode < 300;
       if (ok) {
         final data = response.data;

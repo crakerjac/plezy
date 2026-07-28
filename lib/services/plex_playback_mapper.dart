@@ -10,6 +10,10 @@ import 'plex_mappers.dart';
 
 const _streamReader = PlexFileInfoStreamReader();
 
+void _logMalformedStream(Object error, StackTrace stackTrace, Map<String, dynamic> _) {
+  appLogger.w('Skipping malformed Plex stream metadata', error: error, stackTrace: stackTrace);
+}
+
 List<Map> _mapList(Object? raw) {
   final values = flexibleList(raw);
   if (values == null || values.isEmpty) return const [];
@@ -122,7 +126,7 @@ PlexVideoPlaybackData parsePlexVideoPlaybackDataFromJson(
         if (partKey != null) {
           videoUrl = '$baseUrl$partKey'.withPlexToken(token);
 
-          final streams = walkStreams(flexibleList(part['Stream']), _streamReader);
+          final streams = walkStreams(flexibleList(part['Stream']), _streamReader, onMalformed: _logMalformedStream);
           final chapters = plexChaptersFromCacheJson(metadataJson);
 
           mediaInfo = MediaSourceInfo(
@@ -131,6 +135,7 @@ PlexVideoPlaybackData parsePlexVideoPlaybackDataFromJson(
             subtitleTracks: streams.subtitleTracks,
             chapters: chapters,
             partId: flexibleInt(part['id']),
+            mediaSourceId: availableVersions[mediaIndex].id,
             displayCriteria: PlexMappers.displayCriteriaFromJson(Map<String, dynamic>.from(media), streams.videoStream),
             videoAspectRatio: flexibleDouble(media['aspectRatio']),
           );
@@ -161,7 +166,7 @@ MediaFileInfo? parsePlexFileInfoFromJson(Map<String, dynamic>? metadataJson) {
     // One pass over the streams array, capturing both the raw video / audio
     // map pointers (for fields the parsed track classes don't carry —
     // colorSpace, bitDepth, …) and the parsed track lists.
-    final parsedTracks = walkStreams(flexibleList(part?['Stream']), _streamReader);
+    final parsedTracks = walkStreams(flexibleList(part?['Stream']), _streamReader, onMalformed: _logMalformedStream);
     final videoStream = parsedTracks.videoStream;
     final audioStream = parsedTracks.audioStream;
 

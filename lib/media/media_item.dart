@@ -45,8 +45,10 @@ sealed class MediaItem with _$MediaItem {
     String? grandparentTitle,
     String? grandparentThumbPath,
     String? grandparentArtPath,
+    List<String>? grandparentBackdropPaths,
     String? thumbPath,
     String? artPath,
+    List<String>? backdropPaths,
     String? clearLogoPath,
     String? backgroundSquarePath,
     int? durationMs,
@@ -105,8 +107,10 @@ sealed class MediaItem with _$MediaItem {
         grandparentTitle: grandparentTitle,
         grandparentThumbPath: grandparentThumbPath,
         grandparentArtPath: grandparentArtPath,
+        grandparentBackdropPaths: grandparentBackdropPaths,
         thumbPath: thumbPath,
         artPath: artPath,
+        backdropPaths: backdropPaths,
         clearLogoPath: clearLogoPath,
         backgroundSquarePath: backgroundSquarePath,
         durationMs: durationMs,
@@ -164,8 +168,10 @@ sealed class MediaItem with _$MediaItem {
         grandparentTitle: grandparentTitle,
         grandparentThumbPath: grandparentThumbPath,
         grandparentArtPath: grandparentArtPath,
+        grandparentBackdropPaths: grandparentBackdropPaths,
         thumbPath: thumbPath,
         artPath: artPath,
+        backdropPaths: backdropPaths,
         clearLogoPath: clearLogoPath,
         backgroundSquarePath: backgroundSquarePath,
         durationMs: durationMs,
@@ -230,8 +236,10 @@ sealed class MediaItem with _$MediaItem {
     String? grandparentTitle,
     String? grandparentThumbPath,
     String? grandparentArtPath,
+    List<String>? grandparentBackdropPaths,
     String? thumbPath,
     String? artPath,
+    List<String>? backdropPaths,
     String? clearLogoPath,
     String? backgroundSquarePath,
     @JsonKey(fromJson: flexibleInt) int? durationMs,
@@ -305,8 +313,10 @@ sealed class MediaItem with _$MediaItem {
     String? grandparentTitle,
     String? grandparentThumbPath,
     String? grandparentArtPath,
+    List<String>? grandparentBackdropPaths,
     String? thumbPath,
     String? artPath,
+    List<String>? backdropPaths,
     String? clearLogoPath,
     String? backgroundSquarePath,
     @JsonKey(fromJson: flexibleInt) int? durationMs,
@@ -449,16 +459,37 @@ sealed class MediaItem with _$MediaItem {
   /// rules, the unwatched-episode lookups in episode_collection.dart).
   bool get isUnwatchedOrInProgress => !isWatched || hasActiveProgress;
 
-  /// Whether this container (show/season) has some but not all leaves watched.
-  bool get isPartiallyWatched =>
-      viewedLeafCount != null && leafCount != null && viewedLeafCount! > 0 && viewedLeafCount! < leafCount!;
+  /// Positive leaf total used for aggregate watch state, or null when this
+  /// item is a leaf or has no authoritative total. A season's direct children
+  /// are episodes, so [childCount] is a valid fallback there; it is not valid
+  /// for shows, whose direct children are seasons.
+  int? get leafWatchTotal {
+    if (!kind.usesLeafWatchCounts) return null;
+    final total = leafCount ?? (kind == MediaKind.season ? childCount : null);
+    return total != null && total > 0 ? total : null;
+  }
 
-  /// Whether the item is fully watched. Series/seasons consult leaf counts;
-  /// individual movies/episodes use [viewCount].
+  /// Normalized aggregate completion in the inclusive range 0–1.
+  double? get leafWatchFraction {
+    final total = leafWatchTotal;
+    final viewed = viewedLeafCount;
+    if (total == null || viewed == null) return null;
+    if (viewed <= 0) return 0;
+    if (viewed >= total) return 1;
+    return viewed / total;
+  }
+
+  /// Whether this container has some but not all leaves watched.
+  bool get isPartiallyWatched {
+    final fraction = leafWatchFraction;
+    return fraction != null && fraction > 0 && fraction < 1;
+  }
+
+  /// Whether the item is fully watched. Container kinds use positive
+  /// aggregate leaf totals; leaf kinds use their own [viewCount].
   bool get isWatched {
-    if (leafCount != null && viewedLeafCount != null) {
-      return viewedLeafCount! >= leafCount!;
-    }
+    final fraction = leafWatchFraction;
+    if (fraction != null) return fraction >= 1;
     return viewCount != null && viewCount! > 0;
   }
 
@@ -466,17 +497,30 @@ sealed class MediaItem with _$MediaItem {
   /// `UserData.UnplayedItemCount` when leaf totals weren't requested
   /// (e.g. the folder tree's slim field set).
   int? get unwatchedCount {
-    if (leafCount != null && viewedLeafCount != null) return leafCount! - viewedLeafCount!;
+    if (!kind.usesLeafWatchCounts) return null;
+
+    final total = leafWatchTotal;
+    final viewed = viewedLeafCount;
+    if (total != null && viewed != null) {
+      if (viewed <= 0) return total;
+      if (viewed >= total) return 0;
+      return total - viewed;
+    }
+
     final userData = raw?['UserData'];
-    return userData is Map<String, dynamic> ? userData['UnplayedItemCount'] as int? : null;
+    final unwatched = userData is Map<String, dynamic> ? flexibleInt(userData['UnplayedItemCount']) : null;
+    return unwatched != null && unwatched >= 0 ? unwatched : null;
   }
 
   /// Copy with the watched flag applied so [isWatched] reflects it for every
-  /// kind: containers need their leaf counts patched, not just [viewCount].
+  /// kind. This is the single mutation seam used by watch-state overlays.
   MediaItem withWatchedFlag(bool isWatched) {
     var updated = copyWith(viewCount: isWatched ? 1 : 0);
-    if (leafCount != null || viewedLeafCount != null) {
-      updated = updated.copyWith(viewedLeafCount: isWatched ? (leafCount ?? viewedLeafCount ?? 1) : 0);
+    final total = leafWatchTotal;
+    if (total != null) {
+      updated = updated.copyWith(viewedLeafCount: isWatched ? total : 0);
+    } else if (!kind.usesLeafWatchCounts && viewedLeafCount != null) {
+      updated = updated.copyWith(viewedLeafCount: null);
     }
     return updated;
   }
@@ -515,6 +559,10 @@ sealed class MediaItem with _$MediaItem {
     MediaKind.album => title,
     _ => null,
   };
+
+  /// Release year for music items. Track mappers normalize the containing
+  /// album's year into [year] when the backend exposes it as parent metadata.
+  int? get albumYear => kind == MediaKind.track || kind == MediaKind.album ? year : null;
 
   /// Album-artist name for music items: a track's grandparent, an album's
   /// parent.
@@ -567,8 +615,14 @@ sealed class MediaItem with _$MediaItem {
   /// Secondary poster path to try when [posterThumb] returns an image URL that
   /// exists syntactically but the server cannot serve it.
   String? posterThumbFallback({EpisodePosterMode mode = EpisodePosterMode.seriesPoster, bool mixedHubContext = false}) {
-    if (kind != MediaKind.episode || mode != EpisodePosterMode.seasonPoster) return null;
-    final fallback = grandparentThumbPath ?? thumbPath;
+    final String? fallback;
+    if (kind == MediaKind.track) {
+      fallback = parentThumbPath;
+    } else if (kind == MediaKind.episode && mode == EpisodePosterMode.seasonPoster) {
+      fallback = grandparentThumbPath ?? thumbPath;
+    } else {
+      return null;
+    }
     return fallback != null && fallback != posterThumb(mode: mode, mixedHubContext: mixedHubContext) ? fallback : null;
   }
 
@@ -594,20 +648,43 @@ sealed class MediaItem with _$MediaItem {
     return usesWideAspectRatio(mode, mixedHubContext: mixedHubContext) ? CardShape.wide : CardShape.poster;
   }
 
-  /// Returns the best hero art path based on the container's aspect ratio.
-  String? heroArt({required double containerAspectRatio}) {
-    final candidates = heroArtCandidates(containerAspectRatio: containerAspectRatio);
-    if (candidates.isEmpty) return null;
-    return candidates.first;
+  /// Every own-item backdrop in Jellyfin display order. Older persisted
+  /// objects and backends with one backdrop fall back to [artPath].
+  List<String> get resolvedBackdropPaths {
+    final paths = backdropPaths;
+    if (paths != null && paths.isNotEmpty) return paths;
+    final primary = artPath;
+    return primary == null || primary.isEmpty ? const [] : [primary];
+  }
+
+  /// Every inherited series backdrop in Jellyfin display order. Older
+  /// persisted objects fall back to [grandparentArtPath].
+  List<String> get resolvedGrandparentBackdropPaths {
+    final paths = grandparentBackdropPaths;
+    if (paths != null && paths.isNotEmpty) return paths;
+    final primary = grandparentArtPath;
+    return primary == null || primary.isEmpty ? const [] : [primary];
+  }
+
+  /// Backdrops eligible for rotation. Episodes prefer inherited series art;
+  /// other kinds rotate only their own artwork.
+  List<String> get heroBackdropPaths {
+    if (kind == MediaKind.episode) {
+      final inherited = resolvedGrandparentBackdropPaths;
+      if (inherited.isNotEmpty) return inherited;
+    }
+    return resolvedBackdropPaths;
   }
 
   /// Returns hero art candidates in display-preference order.
   List<String> heroArtCandidates({required double containerAspectRatio}) {
+    final own = resolvedBackdropPaths;
+    final inherited = resolvedGrandparentBackdropPaths;
     final preferred = switch (kind) {
-      MediaKind.episode when containerAspectRatio < 1.39 => [backgroundSquarePath, grandparentArtPath, artPath],
-      MediaKind.episode => [grandparentArtPath, artPath, backgroundSquarePath],
-      _ when containerAspectRatio < 1.39 => [backgroundSquarePath, artPath],
-      _ => [artPath, backgroundSquarePath],
+      MediaKind.episode when containerAspectRatio < 1.39 => <String?>[backgroundSquarePath, ...inherited, ...own],
+      MediaKind.episode => <String?>[...inherited, ...own, backgroundSquarePath],
+      _ when containerAspectRatio < 1.39 => <String?>[backgroundSquarePath, ...own],
+      _ => <String?>[...own, backgroundSquarePath],
     };
 
     final candidates = <String>[];

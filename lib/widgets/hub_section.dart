@@ -46,8 +46,9 @@ enum HubCardSizing {
 /// - Focus never "escapes" to random elements
 class HubSection extends StatefulWidget {
   final MediaHub hub;
+  final HubFocusMemory focusMemory;
   final IconData icon;
-  final void Function(String)? onRefresh;
+  final void Function(MediaItem source)? onRefresh;
   final VoidCallback? onRemoveFromContinueWatching;
   final bool isInContinueWatching;
   final bool usesContinueWatchingAction;
@@ -94,6 +95,7 @@ class HubSection extends StatefulWidget {
   const HubSection({
     super.key,
     required this.hub,
+    required this.focusMemory,
     required this.icon,
     this.onRefresh,
     this.onRemoveFromContinueWatching,
@@ -199,7 +201,7 @@ class HubSectionState extends State<HubSection> with MountedSetStateMixin, Skele
     final clamped = index.clamp(0, _totalItemCount - 1).toInt();
     _focusedIndex = clamped;
     // Remember this position for this specific hub
-    HubFocusMemory.setForHub(_focusMemoryKey, clamped);
+    widget.focusMemory.setForHub(_focusMemoryKey, clamped);
     _notifyFocusedItemChanged();
     _scrollToIndex(clamped);
     _hubFocusNode.requestFocus();
@@ -211,7 +213,7 @@ class HubSectionState extends State<HubSection> with MountedSetStateMixin, Skele
 
   /// Request focus using the stored memory for this hub
   void requestFocusFromMemory() {
-    final index = HubFocusMemory.getForHub(_focusMemoryKey, _totalItemCount);
+    final index = widget.focusMemory.getForHub(_focusMemoryKey, _totalItemCount);
     requestFocusAt(index);
   }
 
@@ -227,9 +229,6 @@ class HubSectionState extends State<HubSection> with MountedSetStateMixin, Skele
       );
     });
   }
-
-  /// Check if this hub currently has focus
-  bool get hasFocusedItem => _hubFocusNode.hasFocus;
 
   /// Get the number of items in this hub
   int get itemCount => _totalItemCount;
@@ -286,7 +285,7 @@ class HubSectionState extends State<HubSection> with MountedSetStateMixin, Skele
         setState(() {
           _focusedIndex--;
         });
-        HubFocusMemory.setForHub(_focusMemoryKey, _focusedIndex);
+        widget.focusMemory.setForHub(_focusMemoryKey, _focusedIndex);
         _notifyFocusedItemChanged();
         _scrollToIndex(_focusedIndex);
       } else if (widget.onNavigateToSidebar != null) {
@@ -303,7 +302,7 @@ class HubSectionState extends State<HubSection> with MountedSetStateMixin, Skele
         setState(() {
           _focusedIndex++;
         });
-        HubFocusMemory.setForHub(_focusMemoryKey, _focusedIndex);
+        widget.focusMemory.setForHub(_focusMemoryKey, _focusedIndex);
         _notifyFocusedItemChanged();
         _scrollToIndex(_focusedIndex);
       }
@@ -585,7 +584,7 @@ class HubSectionState extends State<HubSection> with MountedSetStateMixin, Skele
                                       child: Column(
                                         mainAxisSize: .min,
                                         children: [
-                                          Icon(
+                                          AppIcon(
                                             Symbols.arrow_forward_rounded,
                                             size: isTv ? 42 : 32,
                                             color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.7),
@@ -695,10 +694,7 @@ class HubSectionState extends State<HubSection> with MountedSetStateMixin, Skele
               padding: widget.inset
                   ? const EdgeInsets.symmetric(vertical: 8)
                   : const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              child: Text(
-                t.messages.noItemsAvailable,
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Colors.grey),
-              ),
+              child: Text(t.messages.noItemsAvailable, style: Theme.of(context).textTheme.bodySmall),
             ),
         ],
       ),
@@ -711,7 +707,7 @@ class HubSectionState extends State<HubSection> with MountedSetStateMixin, Skele
     setState(() {
       _focusedIndex = clamped;
     });
-    HubFocusMemory.setForHub(_focusMemoryKey, clamped);
+    widget.focusMemory.setForHub(_focusMemoryKey, clamped);
     _notifyFocusedItemChanged();
     _scrollToIndex(clamped);
     _hubFocusNode.requestFocus();

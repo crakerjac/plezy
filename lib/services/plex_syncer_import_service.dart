@@ -61,6 +61,7 @@ class PlexSyncerImportService {
   /// state with the DB.
   Future<ImportSummary> doImport({
     required DownloadManagerService downloadManager,
+    required String activeProfileId,
     MediaServerClient? Function(String serverId)? clientResolver,
   }) async {
     final allExisting = await downloadManager.getAllDownloads();
@@ -149,11 +150,12 @@ class PlexSyncerImportService {
         }
       }
 
-      await downloadManager.registerSyncedDownload(metadata: metadata, fileUri: item.fileUri, thumbPath: item.thumb);
+      await downloadManager.registerSyncedDownload(metadata: metadata, fileUri: item.fileUri, activeProfileId: activeProfileId, thumbPath: item.thumb);
 
       if (clientResolver != null) {
         final client = clientResolver(serverId);
         if (client != null) {
+          await downloadManager.saveMetadata(metadata, client);
           await downloadManager.downloadArtworkForMetadata(metadata, client);
           if (kind == MediaKind.episode &&
               item.grandparentRatingKey?.isNotEmpty == true &&

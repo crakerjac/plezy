@@ -119,9 +119,12 @@ class MediaCard extends StatefulWidget {
   /// Either a [MediaItem] or a [MediaPlaylist]. Typed as [Object] because Dart
   /// has no nominal union type — runtime `is` checks select the variant.
   final Object item;
+
+  /// Optional collection position announced with the card.
+  final String? semanticValue;
   final double? width;
   final double? height;
-  final void Function(String itemId)? onRefresh;
+  final void Function(MediaItem source)? onRefresh;
   final VoidCallback? onRemoveFromContinueWatching;
   final VoidCallback? onListRefresh; // Callback to refresh the entire parent list
   /// Overrides the card's default media navigation for specialized surfaces.
@@ -140,9 +143,18 @@ class MediaCard extends StatefulWidget {
   final EpisodePosterMode? episodePosterModeOverride;
   final bool fullBleedImage;
 
+  /// Paint-time black tint amount for the artwork, from 0 (clear) to 1 (black).
+  final Animation<double>? artworkDim;
+
+  /// Overrides the silhouette inferred from the item itself. Collection and
+  /// playlist records do not encode the media-library shape, so their owning
+  /// surface supplies this for music libraries.
+  final CardShape? cardShapeOverride;
+
   const MediaCard({
     super.key,
     required this.item,
+    this.semanticValue,
     this.width,
     this.height,
     this.onRefresh,
@@ -160,6 +172,8 @@ class MediaCard extends StatefulWidget {
     this.showServerName = false,
     this.episodePosterModeOverride,
     this.fullBleedImage = false,
+    this.artworkDim,
+    this.cardShapeOverride,
   }) : usesContinueWatchingAction = usesContinueWatchingAction ?? isInContinueWatching;
 
   @override
@@ -292,13 +306,16 @@ class MediaCardState extends State<MediaCard> with ContextMenuTapMixin<MediaCard
     }
 
     final semanticLabel = mediaCardSemanticLabel(item);
+    final enableDetailLinks = widget.onTap == null;
+    final preservePointerDetailSemantics = !PlatformDetector.isTV() || MediaQuery.accessibleNavigationOf(context);
+    final preserveDetailSemantics =
+        preservePointerDetailSemantics && enableDetailLinks && item is MediaItem && _hasPointerDetailLinks(item);
     final localPosterPath = _getLocalPosterPath(context, item);
 
-    final cardWidget = viewMode == ViewMode.grid
-        ? _buildGridCard(context, item, localPosterPath)
+    Widget cardWidget = viewMode == ViewMode.grid
+        ? _buildGridCard(context, item, localPosterPath, preserveDetailSemantics: preserveDetailSemantics)
         : _MediaCardList(
             item: item,
-            semanticLabel: semanticLabel,
             onTap: () => _handleTap(context, item),
             onTapDown: storeTapPosition,
             onLongPress: showContextMenuFromTap,
@@ -309,8 +326,21 @@ class MediaCardState extends State<MediaCard> with ContextMenuTapMixin<MediaCard
             localPosterPath: localPosterPath,
             showServerName: widget.showServerName,
             episodePosterModeOverride: widget.episodePosterModeOverride,
-            enableDetailLinks: widget.onTap == null,
+            cardShapeOverride: widget.cardShapeOverride,
+            enableDetailLinks: enableDetailLinks,
           );
+
+    cardWidget = Semantics(
+      container: preserveDetailSemantics,
+      explicitChildNodes: preserveDetailSemantics,
+      label: semanticLabel,
+      value: widget.semanticValue,
+      button: true,
+      onTap: handleTap,
+      onLongPress: showContextMenu,
+      excludeSemantics: !preserveDetailSemantics,
+      child: cardWidget,
+    );
 
     // Catalog stand-ins (Explore tab) have no server-backed actions — every
     // entry in the context menu would break on serverId == null. Long-press
@@ -334,29 +364,32 @@ class MediaCardState extends State<MediaCard> with ContextMenuTapMixin<MediaCard
   }
 
   /// Grid layout — inlined from former _MediaCardGrid, _PosterOverlay, and
-  /// flattened Column. Semantics removed (InkWell provides button semantics).
+  /// flattened Column.
   ///
-  /// MergeSemantics collapses the card (texts, progress, button) into ONE
-  /// semantics node. Browse rails/grids show dozens of cards and the
-  /// platform-driven semantics pass runs every frame on TV boxes with an
-  /// accessibility service active — node count is the cost driver. The card
-  /// has a single action (tap; long-press menu), so merging is safe and gives
-  /// screen readers one coherent announcement per card.
-  Widget _buildGridCard(BuildContext context, Object item, String? localPosterPath) {
+  /// Cards without detail links retain one merged semantic node. Cards with
+  /// pointer detail links leave those specific actions as explicit descendants
+  /// of the coherent card announcement.
+  Widget _buildGridCard(
+    BuildContext context,
+    Object item,
+    String? localPosterPath, {
+    required bool preserveDetailSemantics,
+  }) {
+    final Widget card;
     if (widget.fullBleedImage) {
-      return MergeSemantics(
-        child: LayoutBuilder(
-          builder: (context, constraints) {
-            final cardWidth = widget.width ?? (constraints.hasBoundedWidth ? constraints.maxWidth : null);
-            final cardHeight = widget.height ?? (constraints.hasBoundedHeight ? constraints.maxHeight : null);
-            if (cardHeight == null) return _buildStandardGridCard(context, item, localPosterPath);
-            return _buildFullBleedGridCard(context, item, localPosterPath, width: cardWidth, height: cardHeight);
-          },
-        ),
+      card = LayoutBuilder(
+        builder: (context, constraints) {
+          final cardWidth = widget.width ?? (constraints.hasBoundedWidth ? constraints.maxWidth : null);
+          final cardHeight = widget.height ?? (constraints.hasBoundedHeight ? constraints.maxHeight : null);
+          if (cardHeight == null) return _buildStandardGridCard(context, item, localPosterPath);
+          return _buildFullBleedGridCard(context, item, localPosterPath, width: cardWidth, height: cardHeight);
+        },
       );
+    } else {
+      card = _buildStandardGridCard(context, item, localPosterPath);
     }
 
-    return MergeSemantics(child: _buildStandardGridCard(context, item, localPosterPath));
+    return preserveDetailSemantics ? card : MergeSemantics(child: card);
   }
 
   Widget _buildFullBleedGridCard(
@@ -376,26 +409,30 @@ class MediaCardState extends State<MediaCard> with ContextMenuTapMixin<MediaCard
         onSecondaryTapDown: storeTapPosition,
         onSecondaryTap: showContextMenuFromTap,
         borderRadius: BorderRadius.circular(tokens(context).radiusSm),
-        child: CardFocusBorder(
-          borderRadius: _posterFocusRadius(context, item),
-          child: _clipPosterImage(
-            context,
-            item,
-            Stack(
-              fit: StackFit.expand,
-              children: [
-                _buildPosterImage(
-                  context,
-                  item,
-                  isOffline: widget.isOffline,
-                  localPosterPath: localPosterPath,
-                  mixedHubContext: widget.mixedHubContext,
-                  episodePosterModeOverride: widget.episodePosterModeOverride,
-                  knownWidth: width,
-                  knownHeight: height,
-                ),
-                if (item is MediaItem && _showsWatchedIndicator(item)) WatchedIndicator(item: item),
-              ],
+        child: ExcludeSemantics(
+          child: CardFocusBorder(
+            borderRadius: _posterFocusRadius(context, item),
+            child: _clipPosterImage(
+              context,
+              item,
+              Stack(
+                fit: StackFit.expand,
+                children: [
+                  _buildPosterImage(
+                    context,
+                    item,
+                    isOffline: widget.isOffline,
+                    localPosterPath: localPosterPath,
+                    mixedHubContext: widget.mixedHubContext,
+                    episodePosterModeOverride: widget.episodePosterModeOverride,
+                    cardShapeOverride: widget.cardShapeOverride,
+                    knownWidth: width,
+                    knownHeight: height,
+                    artworkDim: widget.artworkDim,
+                  ),
+                  if (item is MediaItem && _showsWatchedIndicator(item)) WatchedIndicator(item: item),
+                ],
+              ),
             ),
           ),
         ),
@@ -410,26 +447,30 @@ class MediaCardState extends State<MediaCard> with ContextMenuTapMixin<MediaCard
 
     // The focus border hugs the poster (captions stay outside it), matching
     // the full-bleed card treatment.
-    final poster = CardFocusBorder(
-      borderRadius: _posterFocusRadius(context, item),
-      child: Stack(
-        children: [
-          _clipPosterImage(
-            context,
-            item,
-            _buildPosterImage(
+    final poster = ExcludeSemantics(
+      child: CardFocusBorder(
+        borderRadius: _posterFocusRadius(context, item),
+        child: Stack(
+          children: [
+            _clipPosterImage(
               context,
               item,
-              isOffline: widget.isOffline,
-              localPosterPath: localPosterPath,
-              mixedHubContext: widget.mixedHubContext,
-              episodePosterModeOverride: widget.episodePosterModeOverride,
-              knownWidth: posterHeight != null ? posterWidth : null,
-              knownHeight: posterHeight,
+              _buildPosterImage(
+                context,
+                item,
+                isOffline: widget.isOffline,
+                localPosterPath: localPosterPath,
+                mixedHubContext: widget.mixedHubContext,
+                episodePosterModeOverride: widget.episodePosterModeOverride,
+                cardShapeOverride: widget.cardShapeOverride,
+                knownWidth: posterHeight != null ? posterWidth : null,
+                knownHeight: posterHeight,
+                artworkDim: widget.artworkDim,
+              ),
             ),
-          ),
-          if (item is MediaItem && _showsWatchedIndicator(item)) WatchedIndicator(item: item),
-        ],
+            if (item is MediaItem && _showsWatchedIndicator(item)) WatchedIndicator(item: item),
+          ],
+        ),
       ),
     );
 
@@ -462,11 +503,13 @@ class MediaCardState extends State<MediaCard> with ContextMenuTapMixin<MediaCard
                   onTap: () => _navigateToFocusedDetail(context, item, isOffline: widget.isOffline),
                 )
               else
-                Text(
-                  item is MediaPlaylist ? item.title : (item as MediaItem).displayTitle,
-                  maxLines: 1,
-                  overflow: .ellipsis,
-                  style: const TextStyle(fontWeight: .w600, fontSize: 13, height: 1.1),
+                ExcludeSemantics(
+                  child: Text(
+                    item is MediaPlaylist ? item.title : (item as MediaItem).displayTitle,
+                    maxLines: 1,
+                    overflow: .ellipsis,
+                    style: const TextStyle(fontWeight: .w600, fontSize: 13, height: 1.1),
+                  ),
                 ),
               // Subtitle
               if (item is MediaPlaylist)
@@ -489,7 +532,6 @@ class MediaCardState extends State<MediaCard> with ContextMenuTapMixin<MediaCard
 class _MediaCardList extends StatelessWidget {
   /// Either a [MediaItem] or a [MediaPlaylist].
   final Object item;
-  final String semanticLabel;
   final VoidCallback onTap;
   final VoidCallback onLongPress;
   final void Function(TapDownDetails)? onTapDown;
@@ -500,11 +542,11 @@ class _MediaCardList extends StatelessWidget {
   final String? localPosterPath;
   final bool showServerName;
   final EpisodePosterMode? episodePosterModeOverride;
+  final CardShape? cardShapeOverride;
   final bool enableDetailLinks;
 
   const _MediaCardList({
     required this.item,
-    required this.semanticLabel,
     required this.onTap,
     required this.onLongPress,
     this.onTapDown,
@@ -515,10 +557,12 @@ class _MediaCardList extends StatelessWidget {
     this.localPosterPath,
     this.showServerName = false,
     this.episodePosterModeOverride,
+    this.cardShapeOverride,
     required this.enableDetailLinks,
   });
 
   CardShape _cardShape() {
+    if (cardShapeOverride case final shape?) return shape;
     if (item is! MediaItem) return CardShape.poster;
     final EpisodePosterMode mode =
         episodePosterModeOverride ?? SettingsService.instance.read(SettingsService.episodePosterMode);
@@ -610,8 +654,7 @@ class _MediaCardList extends StatelessWidget {
       if (mi.kind == MediaKind.track) return mi.trackArtistTitle;
 
       if (mi.parentIndex != null && mi.index != null) {
-        final showEp = SettingsService.instance.read(SettingsService.showEpisodeNumberOnCards);
-        return showEp ? 'S${mi.parentIndex} E${mi.index}' : 'S${mi.parentIndex}';
+        return 'S${mi.parentIndex}${_episodeNumberSuffix(mi)}';
       }
 
       if (mi.displaySubtitle != null) {
@@ -639,31 +682,10 @@ class _MediaCardList extends StatelessWidget {
     return '';
   }
 
-  Widget _buildEpisodeSubtitle(BuildContext context, MediaItem mi) {
-    final style = Theme.of(context).textTheme.bodySmall?.copyWith(
-      color: tokens(context).textMuted.withValues(alpha: 0.85),
-      fontSize: _subtitleFontSize,
-    );
-    final episodeTitle = mi.displaySubtitle ?? mi.displayTitle;
-    final showEp = SettingsService.instance.read(SettingsService.showEpisodeNumberOnCards);
-    final episodeNum = (showEp && mi.index != null) ? ' E${mi.index}' : '';
-    return Row(
-      children: [
-        if (enableDetailLinks)
-          _ClickableText(
-            text: 'S${mi.parentIndex}',
-            style: style,
-            onTap: () => _navigateToFocusedDetail(context, mi, isOffline: isOffline),
-          )
-        else
-          Text('S${mi.parentIndex}', style: style),
-        Text('$episodeNum · ', style: style),
-        Expanded(
-          child: Text(episodeTitle, maxLines: 1, overflow: .ellipsis, style: style),
-        ),
-      ],
-    );
-  }
+  TextStyle? _subtitleStyle(BuildContext context) => Theme.of(context).textTheme.bodySmall?.copyWith(
+    color: tokens(context).textMuted.withValues(alpha: 0.85),
+    fontSize: _subtitleFontSize,
+  );
 
   @override
   Widget build(BuildContext context) {
@@ -687,25 +709,28 @@ class _MediaCardList extends StatelessWidget {
           child: Row(
             crossAxisAlignment: .start,
             children: [
-              SizedBox(
-                width: _posterWidth(),
-                height: _posterHeight(),
-                child: Stack(
-                  children: [
-                    _clipPosterImage(
-                      context,
-                      item,
-                      _buildPosterImage(
+              ExcludeSemantics(
+                child: SizedBox(
+                  width: _posterWidth(),
+                  height: _posterHeight(),
+                  child: Stack(
+                    children: [
+                      _clipPosterImage(
                         context,
                         item,
-                        isOffline: isOffline,
-                        localPosterPath: localPosterPath,
-                        episodePosterModeOverride: episodePosterModeOverride,
+                        _buildPosterImage(
+                          context,
+                          item,
+                          isOffline: isOffline,
+                          localPosterPath: localPosterPath,
+                          episodePosterModeOverride: episodePosterModeOverride,
+                          cardShapeOverride: cardShapeOverride,
+                        ),
                       ),
-                    ),
-                    if (item is MediaItem && _showsWatchedIndicator(item as MediaItem))
-                      WatchedIndicator(item: item as MediaItem),
-                  ],
+                      if (item is MediaItem && _showsWatchedIndicator(item as MediaItem))
+                        WatchedIndicator(item: item as MediaItem),
+                    ],
+                  ),
                 ),
               ),
               const SizedBox(width: 12),
@@ -721,22 +746,26 @@ class _MediaCardList extends StatelessWidget {
                         onTap: () => _navigateToFocusedDetail(context, item as MediaItem, isOffline: isOffline),
                       )
                     else
-                      Text(
-                        _displayTitle(),
-                        maxLines: 2,
-                        overflow: .ellipsis,
-                        style: TextStyle(fontWeight: .w600, fontSize: _titleFontSize, height: 1.2),
+                      ExcludeSemantics(
+                        child: Text(
+                          _displayTitle(),
+                          maxLines: 2,
+                          overflow: .ellipsis,
+                          style: TextStyle(fontWeight: .w600, fontSize: _titleFontSize, height: 1.2),
+                        ),
                       ),
                     const SizedBox(height: 4),
                     if (metadataLine.isNotEmpty) ...[
-                      Text(
-                        metadataLine,
-                        maxLines: 1,
-                        overflow: .ellipsis,
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: tokens(context).textMuted.withValues(alpha: 0.9),
-                          fontSize: _metadataFontSize,
-                          fontWeight: .w500,
+                      ExcludeSemantics(
+                        child: Text(
+                          metadataLine,
+                          maxLines: 1,
+                          overflow: .ellipsis,
+                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: tokens(context).textMuted.withValues(alpha: 0.9),
+                            fontSize: _metadataFontSize,
+                            fontWeight: .w500,
+                          ),
                         ),
                       ),
                       const SizedBox(height: 2),
@@ -745,17 +774,17 @@ class _MediaCardList extends StatelessWidget {
                         (item as MediaItem).isEpisode &&
                         (item as MediaItem).parentIndex != null &&
                         (item as MediaItem).parentId != null) ...[
-                      _buildEpisodeSubtitle(context, item as MediaItem),
+                      _buildEpisodeSubtitleRow(
+                        context,
+                        item as MediaItem,
+                        style: _subtitleStyle(context),
+                        enableDetailLinks: enableDetailLinks,
+                        isOffline: isOffline,
+                      ),
                       const SizedBox(height: 4),
                     ] else if (subtitle != null) ...[
-                      Text(
-                        subtitle,
-                        maxLines: 1,
-                        overflow: .ellipsis,
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: tokens(context).textMuted.withValues(alpha: 0.85),
-                          fontSize: _subtitleFontSize,
-                        ),
+                      ExcludeSemantics(
+                        child: Text(subtitle, maxLines: 1, overflow: .ellipsis, style: _subtitleStyle(context)),
                       ),
                       const SizedBox(height: 4),
                     ],
@@ -763,39 +792,43 @@ class _MediaCardList extends StatelessWidget {
                             SettingsService.instance.read(SettingsService.hideSpoilers) &&
                             (item as MediaItem).shouldHideSpoiler) &&
                         _summary() != null) ...[
-                      Text(
-                        _summary()!,
-                        maxLines: _summaryMaxLines,
-                        overflow: .ellipsis,
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: tokens(context).textMuted.withValues(alpha: 0.7),
-                          fontSize: _summaryFontSize,
-                          height: 1.3,
+                      ExcludeSemantics(
+                        child: Text(
+                          _summary()!,
+                          maxLines: _summaryMaxLines,
+                          overflow: .ellipsis,
+                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: tokens(context).textMuted.withValues(alpha: 0.7),
+                            fontSize: _summaryFontSize,
+                            height: 1.3,
+                          ),
                         ),
                       ),
                     ],
                     if (showServerName && item is MediaItem && (item as MediaItem).serverName != null) ...[
                       const SizedBox(height: 4),
-                      Row(
-                        children: [
-                          BackendBadge(
-                            backend: (item as MediaItem).backend,
-                            size: _metadataFontSize + 2,
-                            color: tokens(context).textMuted.withValues(alpha: 0.6),
-                          ),
-                          const SizedBox(width: 4),
-                          Flexible(
-                            child: Text(
-                              (item as MediaItem).serverName!,
-                              maxLines: 1,
-                              overflow: .ellipsis,
-                              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                color: tokens(context).textMuted.withValues(alpha: 0.6),
-                                fontSize: _metadataFontSize,
+                      ExcludeSemantics(
+                        child: Row(
+                          children: [
+                            BackendBadge(
+                              backend: (item as MediaItem).backend,
+                              size: _metadataFontSize + 2,
+                              color: tokens(context).textMuted.withValues(alpha: 0.6),
+                            ),
+                            const SizedBox(width: 4),
+                            Flexible(
+                              child: Text(
+                                (item as MediaItem).serverName!,
+                                maxLines: 1,
+                                overflow: .ellipsis,
+                                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                  color: tokens(context).textMuted.withValues(alpha: 0.6),
+                                  fontSize: _metadataFontSize,
+                                ),
                               ),
                             ),
-                          ),
-                        ],
+                          ],
+                        ),
                       ),
                     ],
                   ],
@@ -852,22 +885,23 @@ Widget _buildPosterImage(
   String? localPosterPath,
   bool mixedHubContext = false,
   EpisodePosterMode? episodePosterModeOverride,
+  CardShape? cardShapeOverride,
   double? knownWidth,
   double? knownHeight,
+  Animation<double>? artworkDim,
 }) {
-  String? posterUrl;
-
   if (item is MediaPlaylist) {
-    posterUrl = item.displayImagePath;
-
-    return OptimizedMediaImage.playlist(
+    return OptimizedMediaImage(
       client: isOffline ? null : context.tryGetMediaClientWithFallback(serverIdOrNull(item.serverId)),
-      imagePath: posterUrl,
+      imagePath: item.displayImagePath,
       width: knownWidth ?? double.infinity,
       height: knownHeight ?? double.infinity,
       fit: BoxFit.cover,
       placeholder: _buildPosterLoadingPlaceholder,
+      fallbackIcon: Symbols.playlist_play_rounded,
+      imageType: cardShapeOverride == CardShape.square ? ImageType.square : ImageType.poster,
       localFilePath: localPosterPath,
+      artworkDim: artworkDim,
     );
   } else if (item is MediaItem) {
     final EpisodePosterMode episodePosterMode =
@@ -878,61 +912,67 @@ Widget _buildPosterImage(
     final primaryPosterUrl = item.posterThumb(mode: episodePosterMode, mixedHubContext: mixedHubContext);
     final posterFallbackUrl = item.posterThumbFallback(mode: episodePosterMode, mixedHubContext: mixedHubContext);
     final useRememberedFallback = posterFallbackUrl != null && _hasFailedPosterUrl(primaryPosterUrl);
-    posterUrl = useRememberedFallback ? posterFallbackUrl : primaryPosterUrl;
+    final posterUrl = useRememberedFallback ? posterFallbackUrl : primaryPosterUrl;
     final mediaClient = isOffline ? null : context.tryGetMediaClientWithFallback(serverIdOrNull(item.serverId));
     final fallbackIcon = _mediaPosterFallbackIcon(item);
+    final imageType = switch (cardShapeOverride) {
+      CardShape.square => ImageType.square,
+      CardShape.wide => ImageType.thumb,
+      CardShape.poster => ImageType.poster,
+      null => MediaImageHelper.cardImageType(item, episodePosterMode, mixedHubContext: mixedHubContext),
+    };
+
+    OptimizedMediaImage buildImage(
+      String? path,
+      ImageType type, {
+      String? localFilePath,
+      Widget Function(BuildContext, String, dynamic)? errorWidget,
+    }) => OptimizedMediaImage(
+      client: mediaClient,
+      imagePath: path,
+      width: knownWidth ?? double.infinity,
+      height: knownHeight ?? double.infinity,
+      fit: BoxFit.cover,
+      placeholder: _buildPosterLoadingPlaceholder,
+      fallbackIcon: fallbackIcon,
+      errorWidget: errorWidget,
+      imageType: type,
+      localFilePath: localFilePath,
+      artworkDim: artworkDim,
+    );
+
+    // Remember the dead primary URL so later builds go straight to the fallback.
+    Widget Function(BuildContext, String, dynamic)? retryWithFallback(ImageType type) {
+      if (posterFallbackUrl == null || useRememberedFallback) return null;
+      return (_, _, error) {
+        // Only an attempted-and-failed load proves the primary artwork is dead.
+        // An unresolvable URL just means there is no client right now (offline,
+        // profile switch, reconnect); memoizing it would pin this item to
+        // fallback artwork for the process lifetime.
+        if (error is! UnresolvedImageUrl) _rememberFailedPosterUrl(primaryPosterUrl);
+        return buildImage(posterFallbackUrl, type);
+      };
+    }
 
     Widget image;
 
     // Square 1:1 artwork for music (artists/albums/tracks)
-    if (item.kind.isMusic) {
-      image = OptimizedMediaImage(
-        client: mediaClient,
-        imagePath: posterUrl,
-        width: knownWidth ?? double.infinity,
-        height: knownHeight ?? double.infinity,
-        fit: BoxFit.cover,
-        placeholder: _buildPosterLoadingPlaceholder,
-        fallbackIcon: fallbackIcon,
-        imageType: ImageType.square,
+    if (imageType == ImageType.square) {
+      image = buildImage(
+        posterUrl,
+        ImageType.square,
         localFilePath: localPosterPath,
+        errorWidget: retryWithFallback(ImageType.square),
       );
-    } else if (item.usesWideAspectRatio(episodePosterMode, mixedHubContext: mixedHubContext)) {
+    } else if (imageType == ImageType.thumb) {
       // Use thumb image type for 16:9 content (episodes, or movies in mixed hubs)
-      image = OptimizedMediaImage.thumb(
-        client: mediaClient,
-        imagePath: posterUrl,
-        width: knownWidth ?? double.infinity,
-        height: knownHeight ?? double.infinity,
-        fit: BoxFit.cover,
-        placeholder: _buildPosterLoadingPlaceholder,
-        fallbackIcon: fallbackIcon,
-        localFilePath: localPosterPath,
-      );
+      image = buildImage(posterUrl, ImageType.thumb, localFilePath: localPosterPath);
     } else {
-      image = OptimizedMediaImage.poster(
-        client: mediaClient,
-        imagePath: posterUrl,
-        width: knownWidth ?? double.infinity,
-        height: knownHeight ?? double.infinity,
-        fit: BoxFit.cover,
-        placeholder: _buildPosterLoadingPlaceholder,
-        fallbackIcon: fallbackIcon,
-        errorWidget: posterFallbackUrl == null || useRememberedFallback
-            ? null
-            : (_, _, _) {
-                _rememberFailedPosterUrl(primaryPosterUrl);
-                return OptimizedMediaImage.poster(
-                  client: mediaClient,
-                  imagePath: posterFallbackUrl,
-                  width: knownWidth ?? double.infinity,
-                  height: knownHeight ?? double.infinity,
-                  fit: BoxFit.cover,
-                  placeholder: _buildPosterLoadingPlaceholder,
-                  fallbackIcon: fallbackIcon,
-                );
-              },
+      image = buildImage(
+        posterUrl,
+        ImageType.poster,
         localFilePath: localPosterPath,
+        errorWidget: retryWithFallback(ImageType.poster),
       );
     }
 
@@ -952,13 +992,15 @@ Widget _buildPosterImage(
 class _MediaCardHelpers {
   static Widget buildPlaylistMeta(BuildContext context, MediaPlaylist playlist) {
     if (playlist.leafCount != null && playlist.leafCount! > 0) {
-      return Text(
-        t.playlists.itemCount(count: playlist.leafCount!),
-        maxLines: 1,
-        overflow: .ellipsis,
-        style: Theme.of(
-          context,
-        ).textTheme.bodySmall?.copyWith(color: tokens(context).textMuted, fontSize: 11, height: 1.1),
+      return ExcludeSemantics(
+        child: Text(
+          t.playlists.itemCount(count: playlist.leafCount!),
+          maxLines: 1,
+          overflow: .ellipsis,
+          style: Theme.of(
+            context,
+          ).textTheme.bodySmall?.copyWith(color: tokens(context).textMuted, fontSize: 11, height: 1.1),
+        ),
       );
     }
     return const SizedBox.shrink();
@@ -979,73 +1021,120 @@ class _MediaCardHelpers {
     if (mi.kind == MediaKind.collection) {
       final count = mi.childCount ?? mi.leafCount;
       if (count != null && count > 0) {
-        return Text(
-          t.playlists.itemCount(count: count),
-          maxLines: 1,
-          overflow: .ellipsis,
-          style: subtitleStyle,
+        return ExcludeSemantics(
+          child: Text(
+            t.playlists.itemCount(count: count),
+            maxLines: 1,
+            overflow: .ellipsis,
+            style: subtitleStyle,
+          ),
         );
       }
     }
 
     // For albums, show the album artist
     if (mi.kind == MediaKind.album && mi.albumArtistTitle != null) {
-      return Text(mi.albumArtistTitle!, maxLines: 1, overflow: .ellipsis, style: subtitleStyle);
+      return ExcludeSemantics(
+        child: Text(mi.albumArtistTitle!, maxLines: 1, overflow: .ellipsis, style: subtitleStyle),
+      );
     }
 
     // For tracks, show "Artist • duration"
     if (mi.kind == MediaKind.track) {
       final parts = [?mi.trackArtistTitle, if (mi.durationMs case final durationMs?) formatDurationTextual(durationMs)];
       if (parts.isNotEmpty) {
-        return Text(parts.join(' • '), maxLines: 1, overflow: .ellipsis, style: subtitleStyle);
+        return ExcludeSemantics(
+          child: Text(parts.join(' • '), maxLines: 1, overflow: .ellipsis, style: subtitleStyle),
+        );
       }
     }
 
     // For episodes, show "S# · Episode Title" with clickable season link
     if (mi.isEpisode && mi.parentIndex != null) {
-      final episodeTitle = mi.displaySubtitle ?? mi.displayTitle;
-      final showEp = SettingsService.instance.read(SettingsService.showEpisodeNumberOnCards);
-      final episodeSuffix = (showEp && mi.index != null) ? ' E${mi.index}' : '';
       if (enableDetailLinks && mi.parentId != null) {
-        return Row(
-          children: [
-            _ClickableText(
-              text: 'S${mi.parentIndex}',
-              style: subtitleStyle,
-              onTap: () => _navigateToFocusedDetail(context, mi, isOffline: isOffline),
-            ),
-            Text('$episodeSuffix · ', style: subtitleStyle),
-            Expanded(
-              child: Text(episodeTitle, maxLines: 1, overflow: .ellipsis, style: subtitleStyle),
-            ),
-          ],
+        return _buildEpisodeSubtitleRow(
+          context,
+          mi,
+          style: subtitleStyle,
+          enableDetailLinks: true,
+          isOffline: isOffline,
         );
       }
-      return Text(
-        'S${mi.parentIndex}$episodeSuffix · $episodeTitle',
-        maxLines: 1,
-        overflow: .ellipsis,
-        style: subtitleStyle,
+      final episodeTitle = mi.displaySubtitle ?? mi.displayTitle;
+      return ExcludeSemantics(
+        child: Text(
+          'S${mi.parentIndex}${_episodeNumberSuffix(mi)} · $episodeTitle',
+          maxLines: 1,
+          overflow: .ellipsis,
+          style: subtitleStyle,
+        ),
       );
     }
 
     // For other media types, show subtitle/parent/year
     if (mi.displaySubtitle != null) {
-      return Text(mi.displaySubtitle!, maxLines: 1, overflow: .ellipsis, style: subtitleStyle);
+      return ExcludeSemantics(
+        child: Text(mi.displaySubtitle!, maxLines: 1, overflow: .ellipsis, style: subtitleStyle),
+      );
     } else if (mi.parentTitle != null) {
-      return Text(mi.parentTitle!, maxLines: 1, overflow: .ellipsis, style: subtitleStyle);
+      return ExcludeSemantics(
+        child: Text(mi.parentTitle!, maxLines: 1, overflow: .ellipsis, style: subtitleStyle),
+      );
     } else if (mi.year != null) {
       final edition = mi.editionTitle;
-      return Text(
-        edition != null ? '${mi.year} · $edition' : '${mi.year}',
-        maxLines: 1,
-        overflow: .ellipsis,
-        style: subtitleStyle,
+      return ExcludeSemantics(
+        child: Text(
+          edition != null ? '${mi.year} · $edition' : '${mi.year}',
+          maxLines: 1,
+          overflow: .ellipsis,
+          style: subtitleStyle,
+        ),
       );
     }
 
     return const SizedBox.shrink();
   }
+}
+
+/// "S# E# · Episode title" with the season number linking to the season.
+Widget _buildEpisodeSubtitleRow(
+  BuildContext context,
+  MediaItem mi, {
+  required TextStyle? style,
+  required bool enableDetailLinks,
+  required bool isOffline,
+}) {
+  final seasonLabel = 'S${mi.parentIndex}';
+  return Row(
+    children: [
+      if (enableDetailLinks)
+        _ClickableText(
+          text: seasonLabel,
+          style: style,
+          onTap: () => _navigateToFocusedDetail(context, mi, isOffline: isOffline),
+        )
+      else
+        ExcludeSemantics(child: Text(seasonLabel, style: style)),
+      ExcludeSemantics(child: Text('${_episodeNumberSuffix(mi)} · ', style: style)),
+      Expanded(
+        child: ExcludeSemantics(
+          child: Text(mi.displaySubtitle ?? mi.displayTitle, maxLines: 1, overflow: .ellipsis, style: style),
+        ),
+      ),
+    ],
+  );
+}
+
+/// Empty unless [SettingsService.showEpisodeNumberOnCards] is on.
+String _episodeNumberSuffix(MediaItem mi) {
+  final showEp = SettingsService.instance.read(SettingsService.showEpisodeNumberOnCards);
+  return (showEp && mi.index != null) ? ' E${mi.index}' : '';
+}
+
+/// Whether the card renders any pointer detail link for this item.
+bool _hasPointerDetailLinks(MediaItem mi) {
+  if (_hasClickableTitle(mi)) return true;
+  return mi.isEpisode && mi.parentIndex != null && mi.parentId != null;
 }
 
 /// Whether this media item has a clickable title that navigates somewhere.
@@ -1062,7 +1151,8 @@ void _navigateToFocusedDetail(BuildContext context, MediaItem item, {bool isOffl
 }
 
 /// Text widget that shows hover underline + pointer cursor only in pointer mode.
-/// In keyboard/dpad mode, renders as plain text with no interaction.
+/// Keyboard/dpad mode keeps plain visual text while screen readers retain the
+/// separately invokable detail action.
 class _ClickableText extends StatefulWidget {
   final String text;
   final TextStyle? style;
@@ -1081,27 +1171,32 @@ class _ClickableTextState extends State<_ClickableText> {
   Widget build(BuildContext context) {
     final isKeyboard = InputModeTracker.isKeyboardMode(context);
     final baseStyle = widget.style ?? const TextStyle();
+    final text = Semantics(
+      label: widget.text,
+      hint: t.mediaMenu.viewDetails,
+      button: true,
+      onTap: widget.onTap,
+      excludeSemantics: true,
+      child: Text(
+        widget.text,
+        maxLines: 1,
+        overflow: .ellipsis,
+        style: isKeyboard
+            ? baseStyle
+            : baseStyle.copyWith(
+                decoration: _isHovered ? TextDecoration.underline : null,
+                decorationColor: baseStyle.color,
+              ),
+      ),
+    );
 
-    if (isKeyboard) {
-      return Text(widget.text, maxLines: 1, overflow: .ellipsis, style: baseStyle);
-    }
+    if (isKeyboard) return text;
 
     return MouseRegion(
       cursor: SystemMouseCursors.click,
       onEnter: (_) => setState(() => _isHovered = true),
       onExit: (_) => setState(() => _isHovered = false),
-      child: GestureDetector(
-        onTap: widget.onTap,
-        child: Text(
-          widget.text,
-          maxLines: 1,
-          overflow: .ellipsis,
-          style: baseStyle.copyWith(
-            decoration: _isHovered ? TextDecoration.underline : null,
-            decorationColor: baseStyle.color,
-          ),
-        ),
-      ),
+      child: GestureDetector(excludeFromSemantics: true, onTap: widget.onTap, child: text),
     );
   }
 }
@@ -1155,6 +1250,7 @@ class _CardTapRegion extends StatelessWidget {
   Widget build(BuildContext context) {
     if (!PlatformDetector.isDesktopOS()) {
       return GestureDetector(
+        excludeFromSemantics: true,
         behavior: HitTestBehavior.opaque,
         onTap: onTap,
         onTapDown: onTapDown,
@@ -1165,6 +1261,7 @@ class _CardTapRegion extends StatelessWidget {
       );
     }
     return InkWell(
+      excludeFromSemantics: true,
       mouseCursor: SystemMouseCursors.click,
       canRequestFocus: false,
       onTap: onTap,

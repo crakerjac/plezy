@@ -59,16 +59,49 @@ class _ExternalSubtitleOpenPlan {
   List<SubtitleTrack>? get subtitlesAtOpen => attachesAtOpen && hasExternalSubtitles ? externalSubtitles : null;
 }
 
+class _MediaOpenResult {
+  const _MediaOpenResult({required this.didOpen, this.sidecarFallbackUsed = false});
+
+  final bool didOpen;
+  final bool sidecarFallbackUsed;
+}
+
 /// Shared building blocks for opening media on the live player.
 ///
-/// The initial start flow ([_startPlayback]), the in-place reload flow
-/// ([_reloadMediaInPlace]), and the transcode-restart seek
-/// ([_restartPlexTranscodeAt]) all route through these helpers so per-open
+/// The initial start flow ([_startPlayback]) and in-place reload flow
+/// ([_reloadMediaInPlace]) both route through these helpers so per-open
 /// behavior (display priming, frame-rate suppression windows, native
-/// subtitle styling, the open sequence itself) cannot drift between paths.
+/// subtitle styling, and the open sequence) cannot drift between paths.
 /// This is also the only place that reads
 /// [SettingsService.displaySwitchDelay].
 extension _VideoPlayerOpenMethods on VideoPlayerScreenState {
+  PlaybackSession _commitSidecarFallbackSession(PlaybackSession session) {
+    return _updatePlaybackSessionSubtitleSelection(session, const PlaybackSubtitleSelection.off());
+  }
+
+  Future<PlaybackSubtitleSelection> _resolveSubtitleSelectionForOpen({
+    required MediaItem metadata,
+    required PlaybackInitializationResult result,
+    AudioTrack? preferredAudioTrack,
+    SubtitleTrack? preferredSubtitleTrack,
+    SubtitleTrack? preferredSecondarySubtitleTrack,
+    bool preserveSubtitleSourceIdentity = true,
+  }) async {
+    await _waitForProfileSettingsIfNeeded();
+    if (!mounted) return const PlaybackSubtitleSelection.off();
+
+    return PlaybackSubtitleResolver.resolve(
+      metadata: metadata,
+      mediaInfo: result.mediaInfo,
+      sidecars: result.subtitleSidecars,
+      profileSettings: context.read<UserProfileProvider>().profileSettings,
+      preferredAudioTrack: preferredAudioTrack,
+      preferredSubtitleTrack: preferredSubtitleTrack,
+      preferredSecondarySubtitleTrack: preferredSecondarySubtitleTrack,
+      preserveSourceIdentity: preserveSubtitleSourceIdentity,
+    );
+  }
+
   /// Prime native display matching (tvOS HDMI mode) from server metadata
   /// before the decoder emits stream properties. The native side resolves
   /// only after any resulting display-mode switch has settled, plus the
@@ -326,32 +359,35 @@ extension _VideoPlayerOpenMethods on VideoPlayerScreenState {
     }
   }
 
-  /// Gate-release resume that yields to Watch Together when a session owns
-  /// the playback start: track selection is still armed, but instead of
-  /// playing, the sync readiness hold (if any) is released — the
-  /// coordinated group start unpauses later. Shared by the start and reload
-  /// flows.
-  Future<void> _resumeAfterStartupGateOrYieldToWatchTogether({
+  /// Resolves the post-gate playback decision without inventing a play
+  /// intent. Track selection is still armed when playback must remain paused;
+  /// a Watch Together owner also receives its readiness release.
+  Future<void> _finishPlaybackAfterStartupGate({
     required Player currentPlayer,
     required _ExternalSubtitleOpenPlan externalSubtitlePlan,
     required String reason,
-    required bool wtOwnsStart,
+    required bool shouldResume,
+    required bool watchTogetherOwnsStart,
     Completer<void>? wtStartupHold,
   }) async {
-    if (!wtOwnsStart) {
+    if (shouldResume) {
       return _resumeAfterFrameRateStartupGate(
         currentPlayer: currentPlayer,
         externalSubtitlePlan: externalSubtitlePlan,
         reason: reason,
       );
     }
-    appLogger.d('Frame rate matching: yielding post-gate resume to Watch Together ($reason)');
+    appLogger.d(
+      watchTogetherOwnsStart
+          ? 'Frame rate matching: yielding post-gate resume to Watch Together ($reason)'
+          : 'Frame rate matching: preserving paused playback after $reason',
+    );
     final trackManager = _trackManager;
     if (trackManager != null && externalSubtitlePlan.requiresPostOpenAdd) {
       trackManager.waitingForExternalSubsTrackSelection = false;
       trackManager.applyTrackSelectionWhenReady();
     }
-    if (wtStartupHold != null && !wtStartupHold.isCompleted) {
+    if (watchTogetherOwnsStart && wtStartupHold != null && !wtStartupHold.isCompleted) {
       wtStartupHold.complete();
     }
   }
@@ -537,17 +573,17 @@ extension _VideoPlayerOpenMethods on VideoPlayerScreenState {
     await player.setProperty('stream-buffer-size', '${ringBytes ?? mpvDefaultStreamBufferBytes}');
   }
 
-  /// Open [videoUrl] on [player]: stream tuning + force-seekable hint →
-  /// open → native subtitle style.
+  /// Open [videoUrl] on [player]: stream tuning → open → native subtitle style.
   ///
   /// [shouldContinue] is re-checked between the awaits so stale generations
   /// stop without touching the player further. [onOpened] fires immediately
   /// after open() returns (before styling) so callers can flip rollback
   /// bookkeeping at the exact ownership boundary.
   ///
-  /// Returns false if [shouldContinue] stopped the sequence before open;
-  /// true once open() has been issued (even if styling was skipped).
-  Future<bool> _openMediaOnPlayer({
+  /// Returns whether open was issued and whether a selected remote sidecar
+  /// stalled after the primary media was ready, requiring an automatic reopen
+  /// without subtitles.
+  Future<_MediaOpenResult> _openMediaOnPlayer({
     required Player player,
     required SettingsService settingsService,
     required String videoUrl,
@@ -559,7 +595,9 @@ extension _VideoPlayerOpenMethods on VideoPlayerScreenState {
     required bool play,
     List<SubtitleTrack>? externalSubtitlesAtOpen,
     bool Function()? shouldContinue,
+    void Function()? onOpening,
     void Function()? onOpened,
+    void Function(bool available)? onMediaAvailabilityChanged,
   }) async {
     await _applyNetworkStreamTuning(
       player: player,
@@ -567,21 +605,56 @@ extension _VideoPlayerOpenMethods on VideoPlayerScreenState {
       isTranscoding: isTranscoding,
       selectedVersion: selectedVersion,
     );
-    // Transcode streams can be seekable even when MPV cannot prove it
-    // from response headers. Reset non-transcodes so live/direct/offline
-    // streams keep native seekability detection.
-    await player.setProperty('force-seekable', isTranscoding ? 'yes' : 'no');
-    if (shouldContinue != null && !shouldContinue()) return false;
-    await player.open(
-      Media(videoUrl, start: timing.mediaStart, headers: headers),
-      play: play,
-      externalSubtitles: externalSubtitlesAtOpen,
-      timelineOffset: timing.timelineOffset,
-      timelineDuration: timing.timelineDuration,
-    );
-    onOpened?.call();
-    if (shouldContinue != null && !shouldContinue()) return true;
+    if (shouldContinue != null && !shouldContinue()) return const _MediaOpenResult(didOpen: false);
+
+    final media = Media(videoUrl, start: timing.mediaStart, headers: headers);
+    final sidecarOpenGuard = MpvSidecarOpenGuard.armIfNeeded(player: player, subtitles: externalSubtitlesAtOpen);
+    Future<void> openMedia({required bool shouldPlay, List<SubtitleTrack>? externalSubtitles}) {
+      onOpening?.call();
+      return player.open(
+        media,
+        play: shouldPlay,
+        externalSubtitles: externalSubtitles,
+        timelineDuration: timing.timelineDuration,
+      );
+    }
+
+    try {
+      await openMedia(shouldPlay: play, externalSubtitles: externalSubtitlesAtOpen);
+      onOpened?.call();
+      onMediaAvailabilityChanged?.call(true);
+    } catch (_) {
+      await sidecarOpenGuard?.dispose();
+      rethrow;
+    }
+
+    var sidecarFallbackUsed = false;
+    final sidecarOutcome = await sidecarOpenGuard?.wait();
+    if (sidecarOutcome == MpvSidecarOpenOutcome.aborted) {
+      return const _MediaOpenResult(didOpen: true);
+    }
+    if (sidecarOutcome == MpvSidecarOpenOutcome.stalled) {
+      appLogger.w('Selected subtitle sidecar stalled after primary media discovery; reopening without subtitles');
+      if (shouldContinue != null && !shouldContinue()) {
+        return const _MediaOpenResult(didOpen: true);
+      }
+      await player.stop();
+      onMediaAvailabilityChanged?.call(false);
+      if (shouldContinue != null && !shouldContinue()) return const _MediaOpenResult(didOpen: true);
+      // Respect a pause requested while mpv was waiting on the sidecar. A
+      // startup gate encoded by [play] remains authoritative when it is false.
+      await openMedia(shouldPlay: play && _playbackIntentShouldPlay);
+      onMediaAvailabilityChanged?.call(true);
+      sidecarFallbackUsed = true;
+      if (mounted && (shouldContinue == null || shouldContinue())) {
+        showErrorSnackBar(context, t.videoControls.subtitleUnavailableFallback);
+      }
+    }
+
+    if (shouldContinue != null && !shouldContinue()) {
+      return _MediaOpenResult(didOpen: true, sidecarFallbackUsed: sidecarFallbackUsed);
+    }
     await _applyNativeSubtitleStyle(player, settingsService);
-    return true;
+    return _MediaOpenResult(didOpen: true, sidecarFallbackUsed: sidecarFallbackUsed);
   }
 }
