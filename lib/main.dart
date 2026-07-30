@@ -25,6 +25,7 @@ import 'profiles/profile_connection_cleanup.dart';
 import 'profiles/profile_connection_registry.dart';
 import 'profiles/profile_registry.dart';
 import 'profiles/profile_selection_policy.dart';
+import 'models/external_player_models.dart';
 import 'mixins/mounted_set_state_mixin.dart';
 import 'theme/mono_theme.dart';
 import 'profiles/plex_home_service.dart';
@@ -487,6 +488,9 @@ void _startNonessentialInitialization(SettingsService settings) {
 
   if (PlatformDetector.isDesktopOS()) {
     bestEffort('Discord RPC', DiscordRPCService.instance.initialize);
+    // Detection forks helper processes; resolve it here so the External Player
+    // settings page never has to wait on a cold probe.
+    bestEffort('External player detection', KnownPlayers.getForCurrentPlatform);
   }
 
   if (settings.read(SettingsService.crashReporting)) {
@@ -495,6 +499,10 @@ void _startNonessentialInitialization(SettingsService settings) {
 
   bestEffort('Trakt scrobble', TraktScrobbleService.instance.initialize);
   bestEffort('Shader licenses', _registerShaderLicenses);
+  // The startup-gate application can precede the engine's first metrics
+  // report, which reads as a 1.0 display budget; re-derive it now that the
+  // tree is mounted and the display is known.
+  bestEffort('Image cache budget', DevicePerformance.applyImageCacheBudget);
   bestEffort('Environment diagnostics', _logEnvironmentDiagnostics);
 }
 
@@ -511,6 +519,7 @@ Future<void> _logEnvironmentDiagnostics() async {
     'Plezy v${packageInfo.version}+${packageInfo.buildNumber}$commitSuffix$renderer'
     ' [effects: ${DevicePerformance.describeSync()}]',
   );
+  appLogger.i('Display: ${DevicePerformance.describeDisplay()}');
   if (Platform.isAndroid) {
     appLogger.i('Startup RSS: ${ProcessInfo.currentRss >> 20}MB');
   }

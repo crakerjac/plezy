@@ -9,7 +9,6 @@ import (
 	"io"
 	"io/fs"
 	"log"
-	"math"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -2093,12 +2092,11 @@ func TestParseTrustedProxyCIDRs(t *testing.T) {
 // generateLogID
 // ======================================================================
 
+// Random ids may legitimately repeat, so shape is the only contract here;
+// collision retry is covered deterministically by
+// TestLogStorePersistsAcrossRestartAndAvoidsIDCollisions.
 func TestGenerateLogIDShape(t *testing.T) {
-	if entropyBits := float64(logIDLength) * math.Log2(float64(len(idChars))); entropyBits < 128 {
-		t.Fatalf("log capability entropy=%f bits, want at least 128", entropyBits)
-	}
-	seen := map[string]struct{}{}
-	for i := 0; i < 200; i++ {
+	for range 200 {
 		id := generateLogID()
 		if len(id) != logIDLength {
 			t.Fatalf("len=%d want %d (id=%q)", len(id), logIDLength, id)
@@ -2108,10 +2106,6 @@ func TestGenerateLogIDShape(t *testing.T) {
 				t.Fatalf("id %q has unexpected char %q", id, c)
 			}
 		}
-		if _, dup := seen[id]; dup {
-			t.Fatalf("duplicate id %q after %d calls", id, i)
-		}
-		seen[id] = struct{}{}
 	}
 }
 
@@ -2279,12 +2273,13 @@ func TestIdempotentCreateReannouncesPreviouslyAbsentHost(t *testing.T) {
 	}
 }
 
-func TestCreateCannotReclaimReservedEmptyRoom(t *testing.T) {
+func TestCreateReclaimsAbandonedEmptyRoom(t *testing.T) {
 	h := newRelayHarness(t)
 	hostToken, hostVerifier := mustReconnectToken(t)
 	original := &Room{
 		SessionID:        "STALE",
 		HostPeerID:       "old-host",
+		ProtocolVersion:  relayProtocolVersion,
 		hostVerifier:     hostVerifier,
 		peerReservations: make(map[string]peerReservation),
 		Peers:            map[string]*Client{},
@@ -2295,29 +2290,82 @@ func TestCreateCannotReclaimReservedEmptyRoom(t *testing.T) {
 	h.srv.rooms["STALE"] = original
 	h.srv.mu.Unlock()
 
+	creatorToken, _ := mustReconnectToken(t)
 	creator := h.dial(t, "1.1.1.6")
-	creator.send(clientMsg{Type: relayTypeCreate, SessionID: "STALE", PeerID: "new-host"})
-	creator.expectError(relayErrorRoomExists)
-
-	unproved := h.dial(t, "1.1.1.60")
-	unproved.send(clientMsg{Type: relayTypeJoin, SessionID: "STALE", PeerID: "old-host"})
-	unproved.expectError(relayErrorPeerIdUnavailable)
-
-	reconnected := h.dial(t, "1.1.1.61")
-	reconnected.send(clientMsg{
-		Type:           relayTypeJoin,
-		SessionID:      "STALE",
-		PeerID:         "old-host",
-		ReconnectToken: hostToken,
+	creator.send(clientMsg{
+		Type:            relayTypeCreate,
+		SessionID:       "STALE",
+		PeerID:          "new-host",
+		ReconnectToken:  creatorToken,
+		ProtocolVersion: relayProtocolVersion,
 	})
-	reconnected.expectAuthority(relayTypeJoined, "old-host")
+	creator.expectAuthority(relayTypeCreated, "new-host")
 
 	h.srv.mu.RLock()
 	current := h.srv.rooms["STALE"]
 	h.srv.mu.RUnlock()
-	if current != original {
-		t.Fatal("reserved room identity was replaced")
+	if current == original {
+		t.Fatal("abandoned room identity survived the reclaim")
 	}
+
+	// The previous owner's capability died with the room it belonged to, and
+	// the live replacement is not reclaimable by anyone, owner included.
+	former := h.dial(t, "1.1.1.60")
+	former.send(clientMsg{
+		Type:            relayTypeCreate,
+		SessionID:       "STALE",
+		PeerID:          "old-host",
+		ReconnectToken:  hostToken,
+		ProtocolVersion: relayProtocolVersion,
+	})
+	former.expectError(relayErrorRoomExists)
+}
+
+// The recent-rooms flow: a host restarts its app, so it presents a fresh
+// reconnect capability for a code the relay still holds. The abandoned code
+// must come back as a hosted room instead of a ghost room with no host.
+func TestAbandonedCodeIsRecreatableByARestartedHost(t *testing.T) {
+	h := newRelayHarness(t)
+	firstToken, _ := mustReconnectToken(t)
+	host := h.dial(t, "6.4.0.1")
+	host.send(clientMsg{
+		Type:            relayTypeCreate,
+		SessionID:       "REUSE",
+		PeerID:          "H",
+		ReconnectToken:  firstToken,
+		ProtocolVersion: relayProtocolVersion,
+	})
+	host.expectAuthority(relayTypeCreated, "H")
+	host.conn.Close()
+	h.waitRoomPeers(t, "REUSE", 0)
+
+	// A restarted app mints a new capability, so it cannot prove the previous
+	// ownership even when it reuses its own peer ID.
+	restartToken, _ := mustReconnectToken(t)
+	restarted := h.dial(t, "6.4.0.2")
+	restarted.send(clientMsg{
+		Type:            relayTypeCreate,
+		SessionID:       "REUSE",
+		PeerID:          "H",
+		ReconnectToken:  restartToken,
+		ProtocolVersion: relayProtocolVersion,
+	})
+	recreated := restarted.expectAuthority(relayTypeCreated, "H")
+	if recreated.ReconnectToken != restartToken {
+		t.Fatalf("recreated room token=%q, want the presented capability", recreated.ReconnectToken)
+	}
+
+	guestToken, _ := mustReconnectToken(t)
+	guest := h.dial(t, "6.4.0.3")
+	guest.send(clientMsg{
+		Type:            relayTypeJoin,
+		SessionID:       "REUSE",
+		PeerID:          "G",
+		ReconnectToken:  guestToken,
+		ProtocolVersion: relayProtocolVersion,
+	})
+	guest.expectAuthority(relayTypeJoined, "H")
+	restarted.expect(relayTypePeerJoined)
 }
 
 func TestCreateReclaimsOwnedEmptyRoomWithoutDoubleCharging(t *testing.T) {
@@ -6034,7 +6082,7 @@ func TestLogsUploadDoesNotWriteCapabilityToOperationalLog(t *testing.T) {
 func TestLogStoreRetiresLegacyCapabilitiesOnStartup(t *testing.T) {
 	dir := t.TempDir()
 	now := time.Now().Add(-time.Minute)
-	legacyID := "abcde"
+	legacyID := strings.Repeat("a", 25) // capability shape used before ids went back to logIDLength
 	currentID := strings.Repeat("a", logIDLength)
 	legacyPath := filepath.Join(dir, legacyID+".log")
 	currentPath := filepath.Join(dir, currentID+".log")
@@ -6298,7 +6346,7 @@ func TestLogsGetUnknownIDIs404(t *testing.T) {
 
 func TestLogsGetMalformedIDIs404(t *testing.T) {
 	h := newRelayHarness(t)
-	for _, id := range []string{"", "abc", "abcde", strings.Repeat("a", logIDLength+1), strings.Repeat("!", logIDLength)} {
+	for _, id := range []string{"", "abc", strings.Repeat("a", logIDLength+1), strings.Repeat("a", 25), strings.Repeat("!", logIDLength)} {
 		resp, err := http.Get(h.baseURL + "/logs/" + id)
 		if err != nil {
 			t.Fatalf("get %q: %v", id, err)

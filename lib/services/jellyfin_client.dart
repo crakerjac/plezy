@@ -62,6 +62,7 @@ import 'jellyfin_playback_urls.dart';
 import 'jellyfin_trickplay_service.dart';
 import 'playback_initialization_types.dart';
 import 'scrub_preview_source.dart';
+import 'subtitle_preference.dart';
 import 'track_selection_service.dart';
 import '../mpv/mpv.dart';
 
@@ -141,9 +142,11 @@ class JellyfinClient
     } catch (_) {
       // Tests / non-platform contexts — keep the fallback version.
     }
+    // Raw, not header-sanitized: [buildJellyfinAuthHeader] percent-encodes it.
     String? deviceName;
     try {
-      deviceName = sanitizeHeaderValue((await DeviceIdentityService.resolve()).deviceName);
+      final resolved = (await DeviceIdentityService.resolve()).deviceName?.trim();
+      if (resolved != null && resolved.isNotEmpty) deviceName = resolved;
     } catch (_) {
       // Tests / non-platform contexts — keep the fallback name.
     }
