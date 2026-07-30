@@ -9,8 +9,9 @@ enum MusicRepeatMode { off, all, one }
 /// Coarse playback state of the music session.
 enum MusicPlaybackStatus { idle, loading, playing, paused, error }
 
-/// What kind of container playback was started from — drives the
-/// "Playing from …" line in the player UI.
+/// What kind of container playback was started from. The player keeps
+/// artist/playlist/mix provenance stable, while album and ad-hoc queues use
+/// the active track's album for the "Playing from …" line.
 enum MusicPlayContextKind { album, artist, playlist, mix, tracks }
 
 /// Provenance of the current queue (album/artist/playlist/instant mix).
@@ -19,7 +20,8 @@ class MusicPlayContext {
   /// don't).
   final String? id;
 
-  /// Display title ("Playing from {title}").
+  /// Display title of the session source. Used directly for stable
+  /// artist/playlist/mix provenance labels.
   final String title;
 
   final MusicPlayContextKind kind;
@@ -35,14 +37,7 @@ class MusicPlayContext {
 /// profile switch tears the session down. [notifyListeners] fires only on
 /// discrete changes (track, status, queue shape, modes) — progress bars
 /// subscribe to [positionStream] instead.
-///
-/// [StubMusicPlaybackService] is registered until the playback engine lands;
-/// UI gates transport affordances on [isAvailable].
 abstract class MusicPlaybackService extends ChangeNotifier {
-  /// False on the stub — playback affordances should render disabled or
-  /// fall back to a "not supported yet" notice.
-  bool get isAvailable;
-
   MediaItem? get currentTrack;
   MusicPlaybackStatus get status;
   bool get isPlaying => status == MusicPlaybackStatus.playing;
@@ -64,6 +59,18 @@ abstract class MusicPlaybackService extends ChangeNotifier {
   /// Playback failures the UI should surface (snackbar); the service already
   /// handles recovery (skip / stop) itself.
   Stream<Object> get errors;
+
+  /// Claims the latest user intent to replace playback after asynchronous
+  /// queue construction. Callers must check [isPlayIntentCurrent] before
+  /// committing fetched tracks.
+  int beginPlayIntent();
+
+  /// Whether [intent] is still the latest playback-replacement request.
+  bool isPlayIntentCurrent(int intent);
+
+  /// Changes whenever a queue session starts or stops. Asynchronous enqueue
+  /// actions use this to avoid appending fetched tracks to a newer session.
+  int get queueSessionRevision;
 
   /// Start a new queue from [tracks], optionally at [startTrack] (defaults
   /// to the first track). [shuffle] shuffles with the start track anchored
@@ -139,133 +146,4 @@ abstract class MusicPlaybackService extends ChangeNotifier {
   /// Lyrics for [track] (defaults to the current track's backend). Delegates
   /// to `MediaServerClient.fetchLyrics`; null = none available.
   Future<Lyrics?> fetchLyrics(MediaItem track);
-}
-
-/// No-op placeholder bound while the playback engine is not wired yet (or
-/// on platforms where it failed to initialize). Keeps every UI consumer
-/// null-safe without per-call-site feature checks.
-class StubMusicPlaybackService extends MusicPlaybackService {
-  final ValueNotifier<double> _volumeNotifier = ValueNotifier<double>(100);
-  @override
-  bool get isAvailable => false;
-
-  @override
-  MediaItem? get currentTrack => null;
-
-  @override
-  MusicPlaybackStatus get status => MusicPlaybackStatus.idle;
-
-  @override
-  Duration? get duration => null;
-
-  @override
-  Duration get position => Duration.zero;
-
-  @override
-  Stream<Duration> get positionStream => const Stream.empty();
-
-  @override
-  List<MediaItem> get queue => const [];
-
-  @override
-  int get currentIndex => -1;
-
-  @override
-  MusicPlayContext? get playContext => null;
-
-  @override
-  bool get shuffled => false;
-
-  @override
-  MusicRepeatMode get repeatMode => MusicRepeatMode.off;
-
-  @override
-  Stream<Object> get errors => const Stream.empty();
-
-  @override
-  Future<void> playFromList({
-    required List<MediaItem> tracks,
-    MediaItem? startTrack,
-    required MusicPlayContext playContext,
-    bool shuffle = false,
-  }) async {}
-
-  @override
-  Future<void> playInstantMix(MediaItem seed) async {}
-
-  @override
-  Future<void> play() async {}
-
-  @override
-  Future<void> pause() async {}
-
-  @override
-  Future<void> togglePlayPause() async {}
-
-  @override
-  Future<void> next() async {}
-
-  @override
-  Future<void> previous() async {}
-
-  @override
-  Future<void> seek(Duration position) async {}
-
-  @override
-  double get volume => 100;
-  @override
-  ValueListenable<double> get volumeListenable => _volumeNotifier;
-
-  @override
-  Future<void> setVolume(double volume, {bool persist = true}) async {}
-
-  @override
-  void setRepeatMode(MusicRepeatMode mode) {}
-
-  @override
-  void toggleShuffle() {}
-
-  @override
-  Future<void> jumpTo(int index) async {}
-
-  @override
-  void removeAt(int index) {}
-
-  @override
-  void reorder(int from, int to) {}
-
-  @override
-  void addNext(List<MediaItem> tracks) {}
-
-  @override
-  void addToEnd(List<MediaItem> tracks) {}
-
-  @override
-  void clearUpcoming() {}
-
-  @override
-  Future<void> stop() async {}
-
-  @override
-  bool get sleepTimerActive => false;
-
-  @override
-  DateTime? get sleepTimerEndsAt => null;
-
-  @override
-  Duration? get sleepTimerDuration => null;
-
-  @override
-  bool get sleepTimerEndOfTrack => false;
-
-  @override
-  void setSleepTimer(Duration? duration, {bool endOfTrack = false}) {}
-
-  @override
-  Future<Lyrics?> fetchLyrics(MediaItem track) async => null;
-  @override
-  void dispose() {
-    _volumeNotifier.dispose();
-    super.dispose();
-  }
 }

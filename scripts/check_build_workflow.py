@@ -5,8 +5,20 @@ from pathlib import Path
 import re
 import sys
 
+from workflow_yaml import iter_uses_references, job_block
 
-WORKFLOW = Path(__file__).resolve().parents[1] / ".github/workflows/build.yml"
+
+ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_WORKFLOW = ROOT / ".github/workflows/build.yml"
+FLUTTER_VERSION = "3.44.0"
+FLUTTER_COMMIT = "559ffa3f75e7402d65a8def9c28389a9b2e6fe42"
+if len(sys.argv) > 2:
+    raise SystemExit(f"Usage: {Path(sys.argv[0]).name} [workflow-path]")
+WORKFLOW = Path(sys.argv[1]).resolve() if len(sys.argv) == 2 else DEFAULT_WORKFLOW
+# The shared bootstrap both windows-arm jobs call, and the pins it must keep.
+# Resolved beside the workflow rather than from ROOT so that checking a fixture
+# tree exercises this rule instead of silently re-reading the real action.
+SETUP_FLUTTER_GIT = WORKFLOW.parents[1] / "actions/setup-flutter-git/action.yml"
 text = WORKFLOW.read_text(encoding="utf-8")
 errors: list[str] = []
 
@@ -17,11 +29,63 @@ def require(condition: bool, message: str) -> None:
 
 
 def job(name: str) -> str:
+    block = job_block(text, name)
+    require(bool(block), f"missing {name} job")
+    return block
+
+
+def named_step(block: str, name: str) -> str:
     match = re.search(
-        rf"(?ms)^  {re.escape(name)}:\n(.*?)(?=^  [a-zA-Z0-9_-]+:\n|\Z)", text
+        rf"(?ms)^      - name: {re.escape(name)}\n.*?(?=^      - |\Z)",
+        block,
     )
-    require(match is not None, f"missing {name} job")
+    require(match is not None, f"missing '{name}' step")
     return match.group(0) if match else ""
+
+
+def validate_windows_signing(block: str) -> None:
+    install = named_step(block, "Install dependencies")
+    signing = named_step(block, "Sign installer for WinSparkle (EdDSA)")
+    require(
+        block.find("      - name: Install dependencies")
+        < block.find("      - name: Sign installer for WinSparkle (EdDSA)"),
+        "locked root dependencies must be installed before Windows signing",
+    )
+    require(
+        "flutter pub get --enforce-lockfile --no-example" in install,
+        "Windows signing must use the enforced root dependency lock",
+    )
+    require(
+        "dart run auto_updater:sign_update plezy-windows-installer.exe $keyPath"
+        in signing,
+        "Windows signing must execute the locked auto_updater package",
+    )
+    require(
+        "$env:RUNNER_TEMP" in signing,
+        "Windows signing key must live under RUNNER_TEMP",
+    )
+    require(
+        "try {" in signing and "} finally {" in signing,
+        "Windows signing key cleanup must run from a finally block",
+    )
+    require(
+        "Remove-Item -Path $keyPath -Force -ErrorAction SilentlyContinue"
+        in signing,
+        "Windows signing must remove its temporary key",
+    )
+    lowered = signing.lower()
+    for forbidden in (
+        "raw.githubusercontent.com",
+        "invoke-webrequest",
+        "git clone",
+        "_signer",
+        "pubspec.yaml",
+        "dart pub get",
+    ):
+        require(
+            forbidden not in lowered,
+            f"Windows signing step contains mutable or ad-hoc input: {forbidden}",
+        )
 
 
 def require_explicit_shells(name: str, block: str, shell: str) -> None:
@@ -75,7 +139,7 @@ require(
 for expected in (
     "if: matrix.flutter_setup == 'action'",
     "if: matrix.flutter_setup == 'git'",
-    "git clone --depth 1 --branch 3.44.0",
+    "uses: ./.github/actions/setup-flutter-git",
     "flutter pub get --enforce-lockfile --no-example",
     "--dart-define=SENTRY_DIST=github-windows-${{ matrix.arch }}",
     "--split-debug-info=debug-info/windows-${{ matrix.arch }}",
@@ -96,6 +160,28 @@ require(
     "Windows build permissions must remain contents: read",
 )
 require_explicit_shells("build-windows", windows, "pwsh")
+
+setup_flutter_git = (
+    SETUP_FLUTTER_GIT.read_text(encoding="utf-8") if SETUP_FLUTTER_GIT.is_file() else ""
+)
+require(bool(setup_flutter_git), "missing .github/actions/setup-flutter-git/action.yml")
+for expected in (
+    f'$version = "{FLUTTER_VERSION}"',
+    f'$expectedCommit = "{FLUTTER_COMMIT}"',
+    # Fetch the release tag rather than the bare commit: the commit is only
+    # reachable through the tag, and the tag is what makes the SDK report its
+    # own version. Both halves are then verified, so a moved tag fails the job.
+    'git -C $root fetch --depth 1 origin "refs/tags/${version}:refs/tags/${version}"',
+    'git -C $root checkout --detach "refs/tags/$version"',
+    "$actualCommit = git -C $root rev-parse HEAD",
+    "$actualCommit -ne $expectedCommit",
+    r'$versionOutput = & "$root\bin\flutter.bat" --version --machine',
+    "$reportedVersion -ne $version",
+):
+    require(
+        expected in setup_flutter_git,
+        f"shared Flutter bootstrap must keep its verified pin: {expected}",
+    )
 
 linux = job("build-linux")
 require("runs-on: ${{ matrix.runner }}" in linux, "Linux must use its matrix runner")
@@ -124,7 +210,7 @@ require(
 )
 for expected in (
     "channel: ${{ matrix.flutter_channel }}",
-    'flutter-version: "3.44.0"',
+    "flutter-version: ${{ env.FLUTTER_VERSION }}",
     "flutter pub get --enforce-lockfile --no-example",
     "lib/${{ matrix.pkg_config_arch }}/pkgconfig",
     "--dart-define=SENTRY_DIST=github-linux-${{ matrix.arch }}",
@@ -147,8 +233,16 @@ require(
     "Linux build attestation permissions changed",
 )
 require_explicit_shells("build-linux", linux, "bash")
+libmpv_cache = named_step(linux, "Cache libmpv build")
+require(
+    "hashFiles('linux/packaging/build-libmpv.sh', 'linux/packaging/native-inputs.json')"
+    in libmpv_cache,
+    "libmpv cache identity must include its build script and native input manifest",
+)
+
 
 package_windows = job("package-windows")
+validate_windows_signing(package_windows)
 require("needs: build-windows" in package_windows, "Windows packaging must fan in the matrix")
 for artifact in (
     "windows-x64-build",
@@ -161,9 +255,9 @@ for artifact in (
 
 release = job("create-release")
 require(
-    "needs: [build-android, build-ios, build-macos, build-windows, package-windows, build-linux]"
+    "needs: [validate-trusted-ref, build-android, build-ios, build-macos, build-windows, package-windows, build-linux]"
     in release,
-    "release dependencies must include both architecture matrices and Windows packaging",
+    "release dependencies must include the trust gate, both architecture matrices, and Windows packaging",
 )
 for artifact in (
     "android-apk",
@@ -176,9 +270,85 @@ for artifact in (
     "linux-arm64",
 ):
     require(f"name: {artifact}" in release, f"release download lost {artifact}")
+
+release_if = re.search(r"(?m)^    if: (.+)$", release)
+require(release_if is not None, "release job must have an explicit condition")
+release_condition = release_if.group(1) if release_if else ""
+for build_input in (
+    "build_android",
+    "build_ios",
+    "build_macos",
+    "build_windows",
+    "build_linux",
+):
+    require(
+        f"&& inputs.{build_input}" in release_condition,
+        f"release publication must require {build_input}",
+    )
+
+require("draft: true" in release, "build output must remain a draft release")
+require("tag_name:" not in release, "build output must not bind a release tag")
 require(
-    "tag_name: ${{ steps.version.outputs.version }}" in release,
-    "release must explicitly use the pubspec version as its tag",
+    "generate_release_notes:" not in release,
+    "untagged draft releases must not request generated release notes",
+)
+require(
+    "Refuse to overwrite a published release" not in release,
+    "untagged draft creation must not inspect or block on published releases",
+)
+
+trusted_ref = job("validate-trusted-ref")
+require("permissions: {}" in trusted_ref, "trusted-ref validation must have no token permissions")
+require(
+    '"$GITHUB_REF" != "refs/heads/main"' in trusted_ref,
+    "trusted-ref validation must reject non-main refs",
+)
+for protected_job in (
+    "build-android",
+    "build-ios",
+    "build-macos",
+    "build-windows",
+    "build-linux",
+):
+    require(
+        "needs: validate-trusted-ref" in job(protected_job),
+        f"{protected_job} must depend on trusted-ref validation",
+    )
+
+require(
+    text.count(FLUTTER_VERSION) == 1 and f'FLUTTER_VERSION: "{FLUTTER_VERSION}"' in text,
+    "the Flutter SDK version must be written once, as the workflow FLUTTER_VERSION env",
+)
+require(
+    "TRUSTED_BUILD_CACHE_VERSION: trusted-build-v1" in text,
+    "build caches must use a dedicated trusted namespace",
+)
+require("restore-keys:" not in text, "privileged build caches must not use prefix fallback")
+cache_keys = re.findall(r"(?m)^          key: (.+)$", text)
+require(bool(cache_keys), "build workflow must define cache keys")
+for cache_key in cache_keys:
+    require(
+        "TRUSTED_BUILD_CACHE_VERSION" in cache_key,
+        f"cache key is outside the trusted build namespace: {cache_key}",
+    )
+require(
+    text.count("cache-key:") == text.count("cache: true"),
+    "every Flutter SDK cache must define its trusted cache key",
+)
+
+# check_workflow_action_pins.py owns the SHA-pin rule for every workflow, this
+# one included; build.yml only adds the credential invariant on top, because it
+# is workflow_dispatch-only and so escapes the pull-request rule in
+# check_workflow_security.py.
+remote_actions = [
+    reference.rpartition("@")[0]
+    for _, reference in iter_uses_references(text)
+    if not reference.startswith("./")
+]
+require(bool(remote_actions), "build workflow must use pinned actions")
+require(
+    text.count("persist-credentials: false") == remote_actions.count("actions/checkout"),
+    "every build checkout must discard GitHub credentials",
 )
 
 if errors:

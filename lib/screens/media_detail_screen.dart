@@ -1,6 +1,6 @@
 import 'dart:async';
+import 'dart:math' as math;
 import '../media/ids.dart';
-import 'dart:io';
 
 import 'package:cached_network_image_ce/cached_network_image.dart';
 import 'package:flutter/material.dart';
@@ -12,6 +12,7 @@ import '../services/fullscreen_state_manager.dart';
 import 'package:flutter/services.dart';
 import 'package:plezy/utils/platform_detector.dart';
 import 'package:plezy/widgets/app_icon.dart';
+import 'package:plezy/widgets/background_download_warning_banner.dart';
 import 'package:material_symbols_icons/symbols.dart';
 import 'package:provider/provider.dart';
 import '../widgets/collapsible_text.dart';
@@ -22,6 +23,7 @@ import '../focus/dpad_select_long_press_controller.dart';
 import '../focus/focusable_action_bar.dart';
 import '../focus/focusable_wrapper.dart';
 import '../focus/hub_vertical_navigation.dart';
+import '../focus/locked_hub_controller.dart';
 import '../focus/key_event_utils.dart';
 import '../focus/input_mode_tracker.dart';
 import '../widgets/cast_member_strip.dart';
@@ -39,6 +41,8 @@ import '../media/paged_media_list_state.dart';
 import '../widgets/media_card.dart';
 import '../widgets/media_rating_badge.dart';
 import '../i18n/strings.g.dart';
+import '../theme/mono_tokens.dart';
+import '../widgets/cycling_media_backdrop.dart';
 import '../widgets/optimized_media_image.dart';
 import '../utils/media_image_helper.dart';
 import '../utils/media_quality_labels.dart';
@@ -96,6 +100,12 @@ import '../widgets/tv_browse_rail.dart';
 import '../widgets/tv_spotlight_background.dart';
 
 part 'media_detail/action_buttons.dart';
+
+/// Ceiling for the detail hero's backdrop box, as a fraction of the window
+/// height. Roughly the natural height of a 16:9 backdrop on a 16:10 desktop
+/// window, so it does not bite there; it only kicks in on short/wide windows,
+/// where an unbounded box would leave artwork showing under the overview.
+const double _maxHeroArtViewportFraction = 0.86;
 
 const double _tvDetailTallPosterScale = TvBrowseRailLayout.compactTallPosterScale;
 const double _tvDetailEpisodeThumbnailScale = TvBrowseRailLayout.compactEpisodeThumbnailScale;
@@ -258,7 +268,13 @@ PageRoute<bool> mediaDetailRoute({
 }
 
 class _MediaDetailScreenState extends State<MediaDetailScreen>
-    with WatchStateAware, DeletionAware, MountedSetStateMixin, ServerBoundMediaMixin, RouteAware {
+    with
+        WatchStateAware,
+        DeletionAware,
+        DeletionMirrorsWatchState,
+        MountedSetStateMixin,
+        ServerBoundMediaMixin,
+        RouteAware {
   /// Public input alias — used as the live source of truth until the detail
   /// fetch returns. Holds backend-neutral [MediaItem] data.
   MediaItem get _metadata => _fullMetadata ?? widget.metadata;
@@ -279,6 +295,7 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
   bool _hasLoadedExtras = false;
   bool _hasLoadedRelatedHubs = false;
   final _tvDetailRailKey = GlobalKey<TvBrowseRailState>();
+  final _hubFocusMemory = HubFocusMemory();
   PageRoute<dynamic>? _route;
   RouteObserver<PageRoute<dynamic>>? _routeObserver;
   late final ScrollController _scrollController;
@@ -352,6 +369,7 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
 
   late final FocusNode _playButtonFocusNode;
   late final FocusNode _ratingChipFocusNode;
+  late final FocusNode _backButtonFocusNode;
   final _extrasSelectLongPress = DpadSelectLongPressController();
 
   // Context menu key for the three-dots button
@@ -382,7 +400,9 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
   @override
   bool get isServerBoundOffline => widget.isOffline;
 
-  // WatchStateAware: watch the show/movie and all season/episode ratingKeys
+  // WatchStateAware: watch the show/movie and all season/episode ratingKeys.
+  // DeletionMirrorsWatchState reuses these three getters for deletion events —
+  // the same items are on screen either way.
   @override
   Set<String>? get watchedIds {
     final keys = <String>{_metadata.id};
@@ -453,45 +473,48 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
     );
   }
 
-  void _patchItemEverywhere(MediaItem item) {
+  void _patchItemEverywhere(String sourceGlobalKey, MediaItem item) {
     final base = _fullMetadata ?? widget.metadata;
-    if (base.id == item.id) {
+    if (base.globalKey == sourceGlobalKey) {
       _fullMetadata = _normalizeRefreshedItem(item, base);
     }
 
     final onDeckEpisode = _onDeckEpisode;
-    if (onDeckEpisode != null && onDeckEpisode.id == item.id) {
+    if (onDeckEpisode != null && onDeckEpisode.globalKey == sourceGlobalKey) {
       _onDeckEpisode = _normalizeRefreshedItem(item, onDeckEpisode);
     }
 
-    _patchItemInList(_seasons, item);
-    _patchItemInList(_episodes, item);
+    _patchItemInList(_seasons, sourceGlobalKey, item);
+    _patchItemInList(_episodes, sourceGlobalKey, item);
     _syncFlattenEpisodeState();
-    _seasonEpisodePager.patchEpisode(item.id, (existing) => _normalizeRefreshedItem(item, existing));
+    _seasonEpisodePager.patchEpisode(
+      item.id,
+      (existing) => existing.globalKey == sourceGlobalKey ? _normalizeRefreshedItem(item, existing) : existing,
+    );
     final extras = _extras;
     if (extras != null) {
-      _patchItemInList(extras, item);
+      _patchItemInList(extras, sourceGlobalKey, item);
     }
 
-    _relatedHubs = _patchItemInHubs(_relatedHubs, item);
+    _relatedHubs = _patchItemInHubs(_relatedHubs, sourceGlobalKey, item);
   }
 
-  void _patchItemInList(List<MediaItem> items, MediaItem item) {
+  void _patchItemInList(List<MediaItem> items, String sourceGlobalKey, MediaItem item) {
     for (var i = 0; i < items.length; i++) {
-      if (items[i].id == item.id) {
+      if (items[i].globalKey == sourceGlobalKey) {
         items[i] = _normalizeRefreshedItem(item, items[i]);
       }
     }
   }
 
-  List<MediaHub> _patchItemInHubs(List<MediaHub> hubs, MediaItem item) {
+  List<MediaHub> _patchItemInHubs(List<MediaHub> hubs, String sourceGlobalKey, MediaItem item) {
     var changed = false;
     final updatedHubs = <MediaHub>[];
     for (final hub in hubs) {
       var hubChanged = false;
       final items = List<MediaItem>.of(hub.items);
       for (var i = 0; i < items.length; i++) {
-        if (items[i].id == item.id) {
+        if (items[i].globalKey == sourceGlobalKey) {
           items[i] = _normalizeRefreshedItem(item, items[i]);
           hubChanged = true;
         }
@@ -502,49 +525,21 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
     return changed ? updatedHubs : hubs;
   }
 
-  Future<void> _refreshItemInPlace(String itemId) async {
-    final client = _getMediaClientForMetadata(context);
+  Future<void> _refreshItemInPlace(MediaItem source) async {
+    final serverId = source.serverId;
+    if (serverId == null) return;
+    final client = context.tryGetMediaClientForServer(ServerId(serverId));
     if (client == null) return;
 
     try {
-      final refreshed = await client.fetchItem(itemId);
+      final refreshed = await client.fetchItem(source.id);
       if (refreshed == null || !mounted) return;
       setStateIfMounted(() {
-        _patchItemEverywhere(refreshed);
+        _patchItemEverywhere(source.globalKey, refreshed);
       });
     } catch (e) {
-      appLogger.d('Item refresh failed for $itemId', error: e);
+      appLogger.d('Item refresh failed for ${source.globalKey}', error: e);
     }
-  }
-
-  @override
-  Set<String>? get deletionIds {
-    final keys = <String>{_metadata.id};
-    for (final season in _seasons) {
-      keys.add(season.id);
-    }
-    for (final ep in _episodes) {
-      keys.add(ep.id);
-    }
-    return keys;
-  }
-
-  @override
-  String? get deletionServerId => serverBoundServerId;
-
-  @override
-  Set<String>? get deletionGlobalKeys {
-    final serverId = serverBoundServerId;
-    if (serverId == null) return null;
-
-    final keys = <String>{toServerBoundGlobalKey(_metadata.id, serverId: ServerId(serverId))};
-    for (final season in _seasons) {
-      keys.add(toServerBoundGlobalKey(season.id, serverId: ServerId(season.serverId ?? serverId)));
-    }
-    for (final ep in _episodes) {
-      keys.add(toServerBoundGlobalKey(ep.id, serverId: ServerId(ep.serverId ?? serverId)));
-    }
-    return keys;
   }
 
   @override
@@ -673,6 +668,7 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
     _extrasFocusNode.addListener(_handleExtrasFocusChange);
     _playButtonFocusNode = FocusNode(debugLabel: 'play_button');
     _ratingChipFocusNode = FocusNode(debugLabel: 'rating_chip');
+    _backButtonFocusNode = FocusNode(debugLabel: 'media_detail_back');
     _overviewFocusNode = FocusNode(debugLabel: 'overview');
     _infoRowsFocusNode = FocusNode(debugLabel: 'info_rows');
     _loadFullMetadata();
@@ -704,8 +700,16 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
       // than one, the toggle opens a source chooser.
       final candidates = <WatchlistCandidate>[];
       for (final source in sources) {
-        final resolved = await source.resolveItemIds(_metadata.kind, ids);
-        if (resolved != null) candidates.add((source: source, ids: resolved));
+        try {
+          final resolved = await source.resolveItemIds(_metadata.kind, ids);
+          if (resolved != null) candidates.add((source: source, ids: resolved));
+        } catch (e, stackTrace) {
+          appLogger.d(
+            'Watchlist external-id resolution failed for ${source.id.name}',
+            error: e,
+            stackTrace: stackTrace,
+          );
+        }
       }
       if (!mounted || candidates.isEmpty) return;
       setState(() => _watchlistCandidates = candidates);
@@ -859,6 +863,7 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
     _focusedExtraIndexNotifier.dispose();
     _playButtonFocusNode.dispose();
     _ratingChipFocusNode.dispose();
+    _backButtonFocusNode.dispose();
     _overviewFocusNode.dispose();
     _infoRowsFocusNode.dispose();
     _extrasSelectLongPress.dispose();
@@ -1168,20 +1173,23 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
     required ImageType imageType,
     Alignment alignment = Alignment.center,
     Widget Function(BuildContext, String, dynamic)? errorWidget,
+    Widget Function(BuildContext, String)? placeholder,
   }) {
     if (!widget.isOffline || _metadata.serverId == null) return null;
 
     for (final artworkPath in artworkPaths) {
-      final localPath = _offlineArtworkLocalPath(context, artworkPath);
+      final localPath = _offlineArtworkCandidatePath(context, artworkPath);
       if (localPath == null) continue;
 
       return OptimizedMediaImage(
         client: null,
         imagePath: null,
         localFilePath: localPath,
+        cacheMissingLocalFile: true,
         fit: fit,
         alignment: alignment,
         imageType: imageType,
+        placeholder: placeholder,
         errorWidget: errorWidget,
       );
     }
@@ -1189,60 +1197,9 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
     return null;
   }
 
-  String? _offlineArtworkLocalPath(BuildContext context, String? artworkPath) {
+  String? _offlineArtworkCandidatePath(BuildContext context, String? artworkPath) {
     if (!widget.isOffline || _metadata.serverId == null) return null;
-    final localPath = context.read<DownloadProvider>().getArtworkLocalPath(ServerId(_metadata.serverId!), artworkPath);
-    if (localPath == null || !File(localPath).existsSync()) return null;
-    return localPath;
-  }
-
-  Widget _buildHeroNetworkArtwork(
-    BuildContext context, {
-    required MediaServerClient? client,
-    required List<String> artworkPaths,
-    required Size mediaSize,
-    required double dpr,
-    required int memCacheHeight,
-    int index = 0,
-  }) {
-    if (index >= artworkPaths.length) return const PlaceholderContainer();
-
-    final imageUrl = MediaImageHelper.getOptimizedImageUrl(
-      client: client,
-      thumbPath: artworkPaths[index],
-      maxWidth: mediaSize.width,
-      maxHeight: mediaSize.height * 0.6,
-      devicePixelRatio: dpr,
-      imageType: ImageType.art,
-    );
-    if (imageUrl.isEmpty) {
-      return _buildHeroNetworkArtwork(
-        context,
-        client: client,
-        artworkPaths: artworkPaths,
-        mediaSize: mediaSize,
-        dpr: dpr,
-        memCacheHeight: memCacheHeight,
-        index: index + 1,
-      );
-    }
-
-    return CachedNetworkImage(
-      imageUrl: imageUrl,
-      cacheManager: PlexImageCacheManager.instance,
-      fit: BoxFit.cover,
-      memCacheHeight: memCacheHeight,
-      placeholder: (context, url) => const PlaceholderContainer(),
-      errorBuilder: (context, error, stackTrace) => _buildHeroNetworkArtwork(
-        context,
-        client: client,
-        artworkPaths: artworkPaths,
-        mediaSize: mediaSize,
-        dpr: dpr,
-        memCacheHeight: memCacheHeight,
-        index: index + 1,
-      ),
-    );
+    return context.read<DownloadProvider>().getArtworkLocalPath(ServerId(_metadata.serverId!), artworkPath);
   }
 
   String _syncRuleKeyForMetadata(BuildContext context, DownloadProvider downloadProvider, MediaItem metadata) {
@@ -1325,8 +1282,8 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
           globalKey: ruleKey,
           displayTitle: metadata.displayTitle,
         );
-        if (removed && context.mounted) {
-          showSuccessSnackBar(context, t.downloads.syncRuleRemoved);
+        if (removed != null && context.mounted) {
+          showSuccessSnackBar(context, syncRuleRemovalMessage(removed));
         }
 
       case _SyncRuleAction.delete:
@@ -2030,10 +1987,10 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
 
   bool get _hasInfoRows {
     final metadata = _fullMetadata ?? _metadata;
-    return metadata.studio != null || metadata.contentRating != null;
+    return metadata.studio != null || metadata.directors?.isNotEmpty == true || metadata.contentRating != null;
   }
 
-  /// Focus the trailing info rows (studio / contentRating) and scroll them into view.
+  /// Focus the trailing info rows (studio / directors / contentRating) and scroll them into view.
   void _focusInfoRows() {
     _infoRowsFocusNode.requestFocus();
     _scrollSectionIntoView(_infoRowsSectionKey);
@@ -2262,6 +2219,7 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
                 artworkPaths: [posterPath],
                 fit: BoxFit.cover,
                 imageType: ImageType.poster,
+                placeholder: (context, url) => const PlaceholderContainer(),
                 errorWidget: (context, url, error) => const PlaceholderContainer(),
               );
               topImage = SizedBox(
@@ -2305,9 +2263,9 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
               child: MediaContextMenu(
                 key: contextMenuKey,
                 item: season,
-                onRefresh: (itemId) {
+                onRefresh: (source) {
                   _watchStateChanged = true;
-                  unawaited(_refreshItemInPlace(itemId));
+                  unawaited(_refreshItemInPlace(source));
                 },
                 onListRefresh: () {
                   if (widget.isOffline) {
@@ -2542,7 +2500,7 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
     return Padding(
       padding: const EdgeInsets.all(32),
       child: Center(
-        child: Text(message, style: Theme.of(context).textTheme.bodyLarge?.copyWith(color: Colors.grey)),
+        child: Text(message, style: Theme.of(context).textTheme.bodyLarge?.copyWith(color: tokens(context).textMuted)),
       ),
     );
   }
@@ -2608,7 +2566,7 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
               context,
               metadata: episode,
               isOffline: widget.isOffline,
-              onRefresh: () => unawaited(_refreshItemInPlace(episode.id)),
+              onRefresh: () => unawaited(_refreshItemInPlace(episode)),
             );
           },
           onRefresh: widget.isOffline ? null : _refreshItemInPlace,
@@ -3071,6 +3029,7 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
       final backButton = AppBarBackButton(
         style: BackButtonStyle.plain,
         onPressed: () => Navigator.pop(context, _watchStateChanged),
+        focusNode: _backButtonFocusNode,
       );
       final loading = ListenableBuilder(
         listenable: FullscreenStateManager(),
@@ -3127,11 +3086,17 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
             child: Scaffold(
               body: Stack(
                 children: [
+                  // Background art sits behind the scroll view so it can be
+                  // taller than the hero sliver without displacing content.
+                  _buildHeroBackdropLayer(context, metadata, size, headerHeight),
+
                   CustomScrollView(
                     primary: true,
                     slivers: [
-                      // Hero header with background art
-                      SliverToBoxAdapter(child: _buildHeroHeader(context, metadata, size, headerHeight)),
+                      // Hero header content over the background art
+                      SliverToBoxAdapter(
+                        child: SizedBox(height: headerHeight, child: _buildHeroHeader(context, metadata)),
+                      ),
 
                       // Main content
                       SliverToBoxAdapter(
@@ -3240,6 +3205,7 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
                                 HubSection(
                                   key: _relatedHubKeys[i],
                                   hub: _relatedHubs[i],
+                                  focusMemory: _hubFocusMemory,
                                   icon: _getRelatedHubIcon(_relatedHubs[i]),
                                   inset: true,
                                   onVerticalNavigation: (isUp) => _handleRelatedHubNavigation(i, isUp),
@@ -3259,6 +3225,13 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
                                     children: [
                                       if (metadata.studio != null) ...[
                                         _buildInfoRow(t.discover.studio, metadata.studio!),
+                                        const SizedBox(height: 12),
+                                      ],
+                                      if (metadata.directors?.isNotEmpty == true) ...[
+                                        _buildInfoRow(
+                                          metadata.directors!.length > 1 ? t.discover.directors : t.discover.director,
+                                          metadata.directors!.join(', '),
+                                        ),
                                         const SizedBox(height: 12),
                                       ],
                                       if (metadata.contentRating != null) ...[
@@ -3315,6 +3288,7 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
                       AppBarBackButton(
                         style: BackButtonStyle.circular,
                         onPressed: () => Navigator.pop(context, _watchStateChanged),
+                        focusNode: _backButtonFocusNode,
                       ),
                       context: context,
                     )!,
@@ -3374,6 +3348,7 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
             AppBarBackButton(
               style: BackButtonStyle.circular,
               onPressed: () => Navigator.pop(context, _watchStateChanged),
+              focusNode: _backButtonFocusNode,
             ),
             context: context,
           )!,
@@ -3386,9 +3361,10 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
             child: TvBrowseRail(
               key: _tvDetailRailKey,
               hubs: detailHubs,
+              focusMemory: _hubFocusMemory,
               iconForHub: _getTvDetailHubIcon,
               onFocusedHubItemChanged: _handleTvDetailFocusedRailItemChanged,
-              onRefresh: (itemId) => unawaited(_refreshItemInPlace(itemId)),
+              onRefresh: (source) => unawaited(_refreshItemInPlace(source)),
               onActiveHubChanged: _handleTvDetailHubChanged,
               onActivateItem: _handleTvDetailRailItemActivated,
               trailingForHub: _tvDetailTrailingState,
@@ -3420,7 +3396,10 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
                 item: metadata,
                 client: _getArtworkMediaClient(context),
                 showInfo: false,
-                localArtworkPathResolver: widget.isOffline ? (path) => _offlineArtworkLocalPath(context, path) : null,
+                localArtworkPathResolver: widget.isOffline
+                    ? (path) => _offlineArtworkCandidatePath(context, path)
+                    : null,
+                allowNetwork: !widget.isOffline,
               ),
               _buildTvDetailRevealGate(revealContent, handleBack),
             ],
@@ -3591,6 +3570,42 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
     );
   }
 
+  /// The ordered metadata fields the TV detail line renders and its announcement reads,
+  /// built through [text] for plain fields and [rating] for the rating slot.
+  List<T> _tvDetailMetadataParts<T extends Object>(
+    MediaItem metadata, {
+    required T Function(String value) text,
+    required T? Function(MediaItem item) rating,
+  }) {
+    final lineMetadata = _tvDetailFocusedEpisode.value ?? metadata;
+    final parts = <T>[];
+
+    void add(T? part) {
+      if (part != null) parts.add(part);
+    }
+
+    final episodeLabel = formatSeasonEpisodeLabel(lineMetadata.parentIndex, lineMetadata.index);
+    if (lineMetadata.isEpisode && episodeLabel != null) add(text(episodeLabel));
+    if (lineMetadata.isMovie) {
+      add(text(t.discover.movie));
+    } else if (lineMetadata.isShow) {
+      add(text(t.discover.tvShow));
+    }
+    add(rating(lineMetadata));
+    if (lineMetadata.contentRating != null) add(text(formatContentRating(lineMetadata.contentRating!)));
+    if (lineMetadata.durationMs != null) add(text(formatDurationTextual(lineMetadata.durationMs!)));
+    if (lineMetadata.isEpisode && lineMetadata.originallyAvailableAt != null) {
+      add(text(formatAbbreviatedDate(lineMetadata.originallyAvailableAt!)));
+    } else if (lineMetadata.year != null) {
+      add(text(lineMetadata.year.toString()));
+    }
+    for (final label in buildMediaQualityLabels(lineMetadata)) {
+      add(text(label));
+    }
+
+    return parts;
+  }
+
   String _tvDetailInformationSemanticLabel(
     MediaItem metadata, {
     required String? description,
@@ -3607,23 +3622,13 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
     add(metadata.displayTitle);
     if (!identical(lineMetadata, metadata)) add(lineMetadata.displayTitle);
 
-    final episodeLabel = formatSeasonEpisodeLabel(lineMetadata.parentIndex, lineMetadata.index);
-    if (lineMetadata.isEpisode) add(episodeLabel);
-    if (lineMetadata.isMovie) {
-      add(t.discover.movie);
-    } else if (lineMetadata.isShow) {
-      add(t.discover.tvShow);
-    }
-    add(MediaRatingBadge.semanticLabelForMedia(lineMetadata, fallbackItem: metadata));
-    if (lineMetadata.contentRating != null) add(formatContentRating(lineMetadata.contentRating!));
-    if (lineMetadata.durationMs != null) add(formatDurationTextual(lineMetadata.durationMs!));
-    if (lineMetadata.isEpisode && lineMetadata.originallyAvailableAt != null) {
-      add(formatAbbreviatedDate(lineMetadata.originallyAvailableAt!));
-    } else if (lineMetadata.year != null) {
-      add(lineMetadata.year.toString());
-    }
-    for (final label in buildMediaQualityLabels(lineMetadata)) {
-      add(label);
+    final fields = _tvDetailMetadataParts<String>(
+      metadata,
+      text: (value) => value,
+      rating: (item) => MediaRatingBadge.semanticLabelForMedia(item, fallbackItem: metadata),
+    );
+    for (final field in fields) {
+      add(field);
     }
     if (genres.isNotEmpty) add(genres.join(', '));
     add(description);
@@ -3661,37 +3666,18 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
             artworkPaths: [metadata.clearLogoPath],
             fit: BoxFit.contain,
             alignment: .centerLeft,
-            imageType: ImageType.logo,
+            imageType: ImageType.heroLogo,
+            placeholder: (context, url) => titleFallback(context),
             errorWidget: (context, url, error) => titleFallback(context),
           );
           if (localArtwork != null) return localArtwork;
 
-          final client = _getArtworkMediaClient(context);
-          final dpr = MediaImageHelper.effectiveDevicePixelRatio(context);
-          final logoUrl = MediaImageHelper.getOptimizedImageUrl(
-            client: client,
-            thumbPath: metadata.clearLogoPath,
-            maxWidth: width,
-            maxHeight: height,
-            devicePixelRatio: dpr,
-            imageType: ImageType.logo,
-          );
-
-          if (logoUrl.isEmpty) return titleFallback(context);
-
-          return blurArtwork(
-            CachedNetworkImage(
-              imageUrl: logoUrl,
-              cacheManager: PlexImageCacheManager.instance,
-              filterQuality: FilterQuality.medium,
-              fit: BoxFit.contain,
-              alignment: .centerLeft,
-              memCacheWidth: (width * dpr).clamp(200, 1000).round(),
-              placeholder: (context, url) => const SizedBox.shrink(),
-              errorBuilder: (context, error, stackTrace) => titleFallback(context),
-            ),
-            sigma: 10,
-            clip: false,
+          return ClearLogoImage(
+            client: _getArtworkMediaClient(context),
+            logoPath: metadata.clearLogoPath,
+            width: width,
+            height: height,
+            fallbackBuilder: titleFallback,
           );
         },
       ),
@@ -3699,60 +3685,32 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
   }
 
   Widget _buildTvDetailMetadataLine(BuildContext context, MediaItem metadata, double scale) {
-    final lineMetadata = _tvDetailFocusedEpisode.value ?? metadata;
-    final episodeLabel = formatSeasonEpisodeLabel(lineMetadata.parentIndex, lineMetadata.index);
-    final qualityLabels = buildMediaQualityLabels(lineMetadata);
     final textStyle = TextStyle(
       color: _tvDetailForegroundColor(context),
       fontSize: 18 * scale,
       fontWeight: .w700,
       letterSpacing: 0.1,
     );
-    final children = <Widget>[];
-
-    void addSeparator() {
-      if (children.isNotEmpty) children.add(Text('  •  ', maxLines: 1, style: textStyle));
-    }
-
-    void addTextPart(String text) {
-      addSeparator();
-      children.add(Text(text, maxLines: 1, style: textStyle));
-    }
-
-    void addWidgetPart(Widget widget) {
-      addSeparator();
-      children.add(widget);
-    }
-
-    if (lineMetadata.isEpisode && episodeLabel != null) addTextPart(episodeLabel);
-    if (lineMetadata.isMovie) {
-      addTextPart(t.discover.movie);
-    } else if (lineMetadata.isShow) {
-      addTextPart(t.discover.tvShow);
-    }
-    final ratingBadge = MediaRatingBadge.inlineForMedia(
-      item: lineMetadata,
-      fallbackItem: metadata,
-      foregroundColor: textStyle.color,
-      iconSize: textStyle.fontSize,
-      spacing: 4 * scale,
-      textStyle: textStyle,
+    final fields = _tvDetailMetadataParts<Widget>(
+      metadata,
+      text: (value) => Text(value, maxLines: 1, style: textStyle),
+      rating: (item) => MediaRatingBadge.inlineForMedia(
+        item: item,
+        fallbackItem: metadata,
+        foregroundColor: textStyle.color,
+        iconSize: textStyle.fontSize,
+        spacing: 4 * scale,
+        textStyle: textStyle,
+      ),
     );
-    if (ratingBadge != null) {
-      addWidgetPart(ratingBadge);
-    }
-    if (lineMetadata.contentRating != null) addTextPart(formatContentRating(lineMetadata.contentRating!));
-    if (lineMetadata.durationMs != null) addTextPart(formatDurationTextual(lineMetadata.durationMs!));
-    if (lineMetadata.isEpisode && lineMetadata.originallyAvailableAt != null) {
-      addTextPart(formatAbbreviatedDate(lineMetadata.originallyAvailableAt!));
-    } else if (lineMetadata.year != null) {
-      addTextPart(lineMetadata.year.toString());
-    }
-    for (final label in qualityLabels) {
-      addTextPart(label);
-    }
 
-    if (children.isEmpty) return const SizedBox.shrink();
+    if (fields.isEmpty) return const SizedBox.shrink();
+
+    final children = <Widget>[];
+    for (final field in fields) {
+      if (children.isNotEmpty) children.add(Text('  •  ', maxLines: 1, style: textStyle));
+      children.add(field);
+    }
 
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
@@ -3981,7 +3939,16 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
     );
   }
 
-  bool _handleTvDetailRailItemActivated(MediaHub hub, MediaItem item) {
+  Future<bool> _handleTvDetailRailItemActivated(MediaHub hub, MediaItem item) async {
+    if (_isTvDetailEpisodeHub(hub) && item.isEpisode) {
+      await navigateToVideoPlayerWithRefresh(
+        context,
+        metadata: item,
+        isOffline: widget.isOffline,
+        onRefresh: () => unawaited(_refreshItemInPlace(item)),
+      );
+      return true;
+    }
     if (hub.id != _tvDetailActorsHubId) return false;
     final personId = item.raw?[_tvDetailActorPersonIdRawKey];
     if (personId is String && personId.isNotEmpty) {
@@ -4132,107 +4099,125 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
     return _getRelatedHubIcon(hub);
   }
 
-  Widget _buildHeroHeader(BuildContext context, MediaItem metadata, Size size, double headerHeight) {
-    return Stack(
-      children: [
-        // Background Art (fixed height, no parallax)
-        SizedBox(
-          height: headerHeight,
-          width: double.infinity,
-          child: Builder(
-            builder: (context) {
-              final containerAspect = size.width / headerHeight;
-              final heroArtPaths = metadata.heroArtCandidates(containerAspectRatio: containerAspect);
-              if (heroArtPaths.isEmpty) return const PlaceholderContainer();
+  /// Height of the backdrop paint box, which is deliberately taller than the
+  /// hero sliver on wide windows.
+  ///
+  /// Cover-fitting a 16:9 backdrop into a hero that is much wider than 16:9
+  /// scales it to the window width and then throws away the top and bottom of
+  /// the frame. Painting into the artwork's own natural height instead keeps
+  /// the whole frame, and the extra height is spent behind the content that
+  /// follows the hero rather than pushing that content down — the sliver
+  /// layout below is unchanged.
+  ///
+  /// Never shorter than the hero: portrait windows are already taller than the
+  /// artwork and keep cropping the sides as before. Never taller than
+  /// [_maxHeroArtViewportFraction] either, because the scrim ramps across this
+  /// box, so a box that overshoots the window would still be translucent where
+  /// the overview text begins.
+  double _heroArtHeight(Size size, double headerHeight) {
+    const backdropAspect = 16 / 9;
+    final maxArtHeight = math.max(headerHeight, size.height * _maxHeroArtViewportFraction);
+    return (size.width / backdropAspect).clamp(headerHeight, maxArtHeight).toDouble();
+  }
 
-              final localArtwork = _buildOfflineArtworkIfAvailable(
-                context,
-                artworkPaths: heroArtPaths,
-                fit: BoxFit.cover,
-                imageType: ImageType.art,
-                errorWidget: (context, url, error) => const PlaceholderContainer(),
-              );
-              if (localArtwork != null) return localArtwork;
+  /// Backdrop + scrim, painted behind the scroll view and translated with it so
+  /// it keeps the hero's fixed, no-parallax relationship to the content.
+  Widget _buildHeroBackdropLayer(BuildContext context, MediaItem metadata, Size size, double headerHeight) {
+    final artHeight = _heroArtHeight(size, headerHeight);
 
-              final client = _getArtworkMediaClient(context);
-              final mqSize = MediaQuery.sizeOf(context);
-              final dpr = MediaImageHelper.effectiveDevicePixelRatio(context);
-              final (_, memHeight) = MediaImageHelper.getMemCacheDimensions(
-                displayWidth: (mqSize.width * dpr).round(),
-                displayHeight: (headerHeight * dpr).round(),
-                imageType: ImageType.art,
-              );
+    return Positioned(
+      top: 0,
+      left: 0,
+      right: 0,
+      height: artHeight,
+      child: IgnorePointer(
+        child: AnimatedBuilder(
+          animation: _scrollController,
+          builder: (context, child) {
+            final offset = _scrollController.hasClients ? _scrollController.offset : 0.0;
+            return Transform.translate(offset: Offset(0, -offset), child: child);
+          },
+          child: RepaintBoundary(
+            child: Stack(
+              fit: .expand,
+              children: [
+                Builder(
+                  builder: (context) {
+                    final containerAspect = size.width / artHeight;
+                    final heroArtPaths = metadata.heroArtCandidates(containerAspectRatio: containerAspect);
+                    if (heroArtPaths.isEmpty) return const PlaceholderContainer();
 
-              return blurArtwork(
-                _buildHeroNetworkArtwork(
-                  context,
-                  client: client,
-                  artworkPaths: heroArtPaths,
-                  mediaSize: mqSize,
-                  dpr: dpr,
-                  memCacheHeight: memHeight,
+                    return blurArtwork(
+                      CyclingMediaBackdrop(
+                        mediaKey: metadata.globalKey,
+                        imagePaths: metadata.heroRotationPaths(containerAspectRatio: containerAspect),
+                        fallbackImagePaths: heroArtPaths,
+                        client: _getArtworkMediaClient(context),
+                        localArtworkPathResolver: widget.isOffline
+                            ? (path) => _offlineArtworkCandidatePath(context, path)
+                            : null,
+                        allowNetwork: !widget.isOffline,
+                        width: size.width,
+                        height: artHeight,
+                        fallbackColor: Theme.of(context).colorScheme.surfaceContainerHighest,
+                      ),
+                    );
+                  },
                 ),
-              );
-            },
-          ),
-        ),
 
-        // Gradient overlay
-        Positioned(
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: -1, // Extend 1px past to prevent subpixel gap
-          child: Builder(
-            builder: (context) {
-              final bgColor = Theme.of(context).scaffoldBackgroundColor;
-              // Full-height eased scrim. The light global dim (alpha 0.2 at
-              // the very top) lowers the contrast the ramp has to bridge on
-              // bright artwork — without it, any fade to solid compresses
-              // into a visible band above the content stack. The body samples
-              // easeInOut (continuous curvature — hand-picked stops kink at
-              // every boundary); the tail instead decays the remaining
-              // transparency geometrically (~1/8 per sample) because an eased
-              // zero-slope landing leaves a faint artwork glow that pure-black
-              // (OLED) backgrounds expose. Solid bg from 94% so nothing ghosts
-              // at the header/content boundary on any theme.
-              const scrimAlphas = [0.20, 0.234, 0.325, 0.453, 0.60, 0.747, 0.875, 0.985, 0.998, 1.0];
-              const scrimXs = [0.0, 0.125, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875, 0.9375, 1.0];
-              const solidStop = 0.94;
-              return RasterizedGradient(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [
-                    for (final a in scrimAlphas) bgColor.withValues(alpha: a),
-                    bgColor,
-                  ],
-                  stops: [for (final x in scrimXs) solidStop * x, 1.0],
+                // Gradient overlay
+                Builder(
+                  builder: (context) {
+                    final bgColor = Theme.of(context).scaffoldBackgroundColor;
+                    // Full-height eased scrim. The light global dim (alpha 0.2 at
+                    // the very top) lowers the contrast the ramp has to bridge on
+                    // bright artwork — without it, any fade to solid compresses
+                    // into a visible band above the content stack. The body samples
+                    // easeInOut (continuous curvature — hand-picked stops kink at
+                    // every boundary); the tail instead decays the remaining
+                    // transparency geometrically (~1/8 per sample) because an eased
+                    // zero-slope landing leaves a faint artwork glow that pure-black
+                    // (OLED) backgrounds expose. Solid bg from 94% so nothing ghosts
+                    // where the artwork ends, on any theme.
+                    //
+                    // The ramp spans the art box, not the hero, so on wide windows
+                    // it keeps fading past the hero edge and the bottom of the frame
+                    // dissolves behind the overview instead of being cut off.
+                    const scrimAlphas = [0.20, 0.234, 0.325, 0.453, 0.60, 0.747, 0.875, 0.985, 0.998, 1.0];
+                    const scrimXs = [0.0, 0.125, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875, 0.9375, 1.0];
+                    const solidStop = 0.94;
+                    return RasterizedGradient(
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [
+                          for (final a in scrimAlphas) bgColor.withValues(alpha: a),
+                          bgColor,
+                        ],
+                        stops: [for (final x in scrimXs) solidStop * x, 1.0],
+                      ),
+                    );
+                  },
                 ),
-              );
-            },
-          ),
-        ),
-
-        // Content at bottom
-        Positioned(
-          top: 0,
-          bottom: 16,
-          left: 0,
-          right: 0,
-          // bottom: false — the hero is the top sliver, so the bottom safe-area
-          // inset would otherwise push the action row far up off the hero edge.
-          // Left/right stay enabled for the landscape notch.
-          child: SafeArea(
-            top: false,
-            bottom: false,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: _buildHeroHeaderContent(context, metadata),
+              ],
             ),
           ),
         ),
-      ],
+      ),
+    );
+  }
+
+  Widget _buildHeroHeader(BuildContext context, MediaItem metadata) {
+    // bottom: false — the hero is the top sliver, so the bottom safe-area
+    // inset would otherwise push the action row far up off the hero edge.
+    // Left/right stay enabled for the landscape notch.
+    return SafeArea(
+      top: false,
+      bottom: false,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+        child: _buildHeroHeaderContent(context, metadata),
+      ),
     );
   }
 

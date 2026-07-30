@@ -1,9 +1,10 @@
+import '../exceptions/media_server_exceptions.dart';
 import '../media/media_source_info.dart';
 import '../media/media_sort.dart';
 import '../services/api_cache.dart';
 import '../services/playback_initialization_types.dart';
 import '../utils/app_logger.dart';
-import '../utils/media_server_http_client.dart' show AbortController, MediaServerResponse;
+import '../utils/media_server_http_client.dart' show AbortController, MediaServerResponse, throwIfHttpError;
 import '../utils/external_ids.dart';
 import '../utils/watch_state_notifier.dart';
 import 'download_resolution.dart';
@@ -41,27 +42,24 @@ const int defaultHubPreviewLimit = 20;
 /// fit the neutral browsing/playback surface (DVR tuning, match, rich metadata
 /// edit adapters) live on concrete clients or feature modules.
 ///
-/// ## Error contract (write methods)
+/// ## Mutation error and result contracts
 ///
-/// All write methods (`markWatched`, `markUnwatched`, `removeFromContinueWatching`,
-/// `rate`, `createPlaylist`, `addToPlaylist`, `deletePlaylist`,
-/// `movePlaylistItem`, `removeFromPlaylist`, `createCollection`,
-/// `addToCollection`, `removeFromCollection`, `deleteCollection`,
-/// `deleteMediaItem`) follow the same contract:
+/// HTTP status, timeout, connection, decode, and cancellation failures from
+/// the shared transport surface as [MediaServerHttpException]. Calls for an
+/// unsupported advertised capability may throw [UnsupportedError] where the
+/// method documents that boundary.
 ///
-///   - HTTP 4xx/5xx → throw [MediaServerHttpException].
-///   - Network/IO failure → throw the underlying exception.
-///   - Business "not applicable" (e.g. wrong-backend item handed to a
-///     write call) → return `false` without throwing.
-///   - Success → return the created entity / `true`.
+/// Result semantics follow each method's declared family. Completion of a
+/// `Future<void>` mutation is success and carries no business-result value.
+/// Nullable creation methods return `null` only after an accepted request
+/// produced no usable created entity or id; request failures throw. Boolean
+/// mutations return `true` on their accepted success path, and return `false`
+/// only for local preconditions explicitly documented by that method rather
+/// than as a substitute for request failure.
 ///
 /// `fetchItem` returns `null` on a real 404 (item gone) and on a 200 that
 /// can't be parsed; auth/server errors throw rather than silently dropping
 /// to `null`.
-///
-/// Callers that need to differentiate "operation impossible" from "server
-/// error" should `try`/`catch` the result and inspect the exception's
-/// `statusCode`.
 
 /// Outcome of a health probe. Distinguishes "session expired" (token was
 /// rejected) from a generic transport failure, so the manager can route the
@@ -133,8 +131,10 @@ abstract class MediaServerClient {
   /// up-front. Plex returns categories without values (the FiltersBottomSheet
   /// fetches values lazily per category); Jellyfin returns both in a single
   /// `/Items/Filters` call and pre-populates [LibraryFilterResult.cachedValues].
-  /// Backends that have no filter listing return [LibraryFilterResult.empty].
-  Future<LibraryFilterResult> fetchLibraryFiltersWithValues(String libraryId);
+  /// [libraryKind] lets backends use media-appropriate labels for synthetic
+  /// filters. Backends that have no filter listing return
+  /// [LibraryFilterResult.empty].
+  Future<LibraryFilterResult> fetchLibraryFiltersWithValues(String libraryId, {MediaKind? libraryKind});
 
   /// Backend-aware sort options for [libraryId]. Plex hits
   /// `/library/sections/{id}/sorts`; Jellyfin returns a hardcoded list
@@ -159,12 +159,17 @@ abstract class MediaServerClient {
   /// children).
   Future<void> refreshLibraryMetadata(String libraryId);
 
-  /// Fetch a single item by its backend-opaque id. Returns `null` when the
-  /// item no longer exists or the user can't see it.
+  /// Fetch a single item by its backend-opaque id. An online HTTP 404 returns
+  /// `null`; every other HTTP status remains an error. Implementations may use
+  /// cached metadata while explicitly offline or after a classified transient
+  /// transport failure, but must not turn other online failures into stale
+  /// success.
   Future<MediaItem?> fetchItem(String id);
 
   /// Fetch a single item *and* its on-deck episode (the next unwatched /
   /// in-progress episode) in one round-trip when the backend supports it.
+  /// The item follows [fetchItem]'s error contract: an online HTTP 404 returns
+  /// both nullable fields as `null`, while every other HTTP status throws.
   /// Plex bundles both via `/library/metadata/{id}?includeOnDeck=1`;
   /// Jellyfin has no equivalent endpoint and returns `onDeckEpisode: null`,
   /// leaving callers to fetch on-deck separately if they need it.
@@ -227,21 +232,19 @@ abstract class MediaServerClient {
   /// branch if/when one does.
   Future<List<MediaItem>> fetchPlayableDescendants(String parentId);
 
-  /// All episodes of a series across every season, ordered by air date —
-  /// used to build a centred 21-item navigation window when no server-side
-  /// play queue is available. Returns `null` for backends that maintain
-  /// queues server-side (Plex's `/playQueues`); returns the list (possibly
-  /// empty for an empty series) for backends without that capability
-  /// (Jellyfin). Callers distinguish "no client-side queue" from "empty
-  /// series" via the null vs `[]` distinction.
+  /// All episodes of a series across every season in playback order. Used
+  /// to build a local navigation queue for backends without server-side
+  /// queues and as a fallback when a server-side queue could not be created.
+  /// Returns null only when a backend cannot supply a client-side queue;
+  /// an empty list means the series itself was empty.
   Future<List<MediaItem>?> fetchClientSideEpisodeQueue(String seriesId);
 
-  /// Albums credited to the artist [artistId], newest first. Not the same as
-  /// [fetchChildren]: Plex artists *are* folder-parents of their albums
-  /// (`/library/metadata/{id}/children`), but Jellyfin albums link to artists
-  /// only via tags, so it queries
+  /// Albums credited to [artist], newest first. Plex filters album rows in
+  /// the artist's music section so release formats omitted from
+  /// `/library/metadata/{id}/children` remain visible. Jellyfin links albums
+  /// to artists via tags and queries
   /// `/Items?AlbumArtistIds={id}&IncludeItemTypes=MusicAlbum`.
-  Future<List<MediaItem>> fetchArtistAlbums(String artistId);
+  Future<List<MediaItem>> fetchArtistAlbums(MediaItem artist);
 
   /// Tracks of album [albumId] in disc/track order. Plex:
   /// `/library/metadata/{id}/children`; Jellyfin:
@@ -262,14 +265,14 @@ abstract class MediaServerClient {
   /// `/Audio/{id}/Lyrics` (per-line tick offsets when synced); Plex: a
   /// sidecar-lyrics track stream (`streamType 4`) fetched from
   /// `/library/streams/{id}` and parsed from LRC. Synced-ness is per
-  /// [Lyrics.synced]; gated by [ServerCapabilities.lyrics].
+  /// [Lyrics.synced]; per-track absence is the runtime gate.
   Future<Lyrics?> fetchLyrics(MediaItem track);
 
-  /// Free-text search across the user's libraries.
-  Future<List<MediaItem>> searchItems(String query, {int limit = 100});
-
-  /// Recently-added items across all libraries.
-  Future<List<MediaItem>> fetchRecentlyAdded({int limit = 50});
+  /// Free-text search across the user's libraries. [limit] is a per-request
+  /// candidate budget; a backend may supplement omitted media categories and
+  /// return more candidates for cross-server ranking. [abort] cancels every
+  /// backend request owned by this search pass.
+  Future<List<MediaItem>> searchItems(String query, {int limit = 100, AbortController? abort});
 
   /// Items the user has started but not finished. Plex calls this "On Deck"
   /// internally; the neutral name matches the Continue Watching UI surface.
@@ -367,9 +370,11 @@ abstract class MediaServerClient {
   /// per-playlist item ids where the server exposes them.
   Future<LibraryPage<MediaItem>> fetchPlaylistPage(String id, {int? start, int? size, AbortController? abort});
 
-  /// Create a new playlist seeded with [items]. Returns the created
-  /// playlist on success, `null` on failure. Plex builds a metadata URI
-  /// from the item ids; Jellyfin posts `Ids=<comma-joined>`.
+  /// Create a new playlist seeded with [items]. Returns the created playlist
+  /// when it can be recovered from an accepted response, or `null` when that
+  /// response contains no usable created playlist. Request failures throw.
+  /// Plex builds a metadata URI from the item ids; Jellyfin posts
+  /// `Ids=<comma-joined>`.
   Future<MediaPlaylist?> createPlaylist({required String title, required List<MediaItem> items});
 
   /// Append [items] to an existing playlist. Returns `true` on success.
@@ -430,9 +435,10 @@ abstract class MediaServerClient {
   });
 
   /// Create a new collection in [libraryId] seeded with [items]. Returns the
-  /// created collection's id on success, `null` on failure. [itemKind] is
-  /// only used by Plex (it disambiguates the section type — movie/show/
-  /// season/episode); Jellyfin ignores it.
+  /// created collection id when it can be recovered from an accepted response,
+  /// or `null` when that response contains no usable id. Request failures
+  /// throw. [itemKind] is only used by Plex (it disambiguates the section type
+  /// — movie/show/season/episode); Jellyfin ignores it.
   Future<String?> createCollection({
     required String libraryId,
     required String title,
@@ -467,13 +473,23 @@ abstract class MediaServerClient {
   /// When [width]/[height] are provided, the implementation should request
   /// a server-side resize: Plex builds a `/photo/:/transcode` URL; Jellyfin
   /// appends `MaxWidth`/`MaxHeight` to the image endpoint.
-  String thumbnailUrl(String? path, {int? width, int? height});
+  ///
+  /// [cover] picks how the requested box is interpreted. The default sizes the
+  /// image to *cover* the box — every pixel of a poster/backdrop slot is
+  /// filled, at the cost of overshooting on the long axis. Pass `false` for
+  /// artwork drawn with [BoxFit.contain] (clear logos), where the overshoot is
+  /// decoded and thrown away: a 4313×1035 logo asked for at 1200×360 comes back
+  /// 1500×360 covering versus 1200×288 fitting, for ~20-30% more bytes and no
+  /// extra rendered detail. Neither mode crops or changes the aspect ratio.
+  String thumbnailUrl(String? path, {int? width, int? height, bool cover = true});
 
   /// Proxy an absolute external image URL through the server's transcoder
   /// (Plex `/photo/:/transcode?url=...`). Backends without a proxy endpoint
   /// (Jellyfin) should return the URL unchanged. Used for EPG provider art
   /// and other off-server images that benefit from re-encoding.
-  String externalImageUrl(String url, {int? width, int? height});
+  ///
+  /// [cover] carries the same meaning as in [thumbnailUrl].
+  String externalImageUrl(String url, {int? width, int? height, bool cover = true});
 
   /// Headers that must be attached when the player fetches a direct-play
   /// URL from this server. Plex requires `X-Plex-Token` (and identity
@@ -489,15 +505,44 @@ abstract class MediaServerClient {
   Future<ExternalIds> fetchExternalIds(String itemId);
 
   /// Reverse lookup: find a library movie/show matching any of [ids].
-  /// Both backends search by [title] (narrowed by a ±1 [year] window when
-  /// known, with an unfiltered fallback) and verify candidates against
-  /// their exact external ids — Plex against the `Guid` array (its `guid=`
-  /// field filter only matches the primary `plex://` guid), Jellyfin
-  /// against the inline `ProviderIds`. False negatives possible on
-  /// differing titles, false positives never. Returns null when this
-  /// server has no match or [kind] is not movie/show. Used to match
-  /// external catalog items (Explore tab) back to the user's libraries.
-  Future<MediaItem?> findByExternalIds(ExternalIds ids, {required MediaKind kind, String? title, int? year});
+  ///
+  /// Neither backend can filter by external id — Plex's `guid=` matches only
+  /// the primary `plex://` guid (verified on PMS 1.43) and Jellyfin dropped
+  /// `anyProviderIdEquals` (silently ignored on 10.11.10) — so both search by
+  /// title and verify candidates against their exact external ids. Title
+  /// alone never produces a match.
+  ///
+  /// [titles] are tried in order until one yields an id-verified candidate;
+  /// pass the entry's own title first and broader forms after (see
+  /// `titleMatchCandidates`). A sequel entry's own title never matches its
+  /// parent show, which is why more than one is needed. [year] applies a ±1
+  /// window to the first attempt only — for a sequel the catalog year is the
+  /// season's, not the show's.
+  ///
+  /// [plexGuid] is a Plex-only escape hatch: a `plex://show/…` guid the caller
+  /// already holds, which the local server *can* filter on exactly, skipping
+  /// the title search. It is never resolved over the network — only Plex
+  /// Discover catalog items carry one, in their own rating key. Other backends
+  /// ignore it.
+  ///
+  /// [season] gates the result: when the entry maps to season 2+ of a longer
+  /// series, a match is only returned if the server actually has that season.
+  /// Implementations MUST gate only on [ExternalSeasonRef.agreedSeason] — the
+  /// provider a library numbers its seasons by is a server-side setting no
+  /// dataset supplies, so a disagreeing ref is left ungated rather than gated
+  /// on a guess.
+  ///
+  /// Returns null when this server has no match or [kind] is not movie/show.
+  /// Used to match external catalog items (Explore tab) back to the user's
+  /// libraries.
+  Future<MediaItem?> findByExternalIds(
+    ExternalIds ids, {
+    required MediaKind kind,
+    List<String> titles = const [],
+    int? year,
+    String? plexGuid,
+    ExternalSeasonRef? season,
+  });
 
   /// Chapters and intro/credits markers for [itemId]. Plex returns both in one
   /// round trip; Jellyfin combines item-level chapters with best-effort native
@@ -606,11 +651,11 @@ abstract class MediaServerClient {
 
   /// Resolve the video URL, media info, and external subtitle list for
   /// playback. Backends own the per-backend particulars: Plex runs the
-  /// transcode-decision flow when [PlaybackInitializationOptions.qualityPreset]
-  /// is non-original; Jellyfin asks PlaybackInfo for a matching stream when a
-  /// non-original preset is selected. Throws
-  /// [PlaybackException] when the item can't be resolved (no MediaSources,
-  /// no playable URL, transcode decision unavailable).
+  /// transcode-decision flow for non-original quality; Jellyfin negotiates
+  /// both original and non-original playback through PlaybackInfo. Typed
+  /// request, cancellation, and malformed-payload failures propagate. Only an
+  /// applicable successful decision may select a direct-play fallback.
+  /// Unusable successful playback metadata throws [PlaybackException].
   ///
   /// Offline-file substitution is handled centrally in
   /// `PlaybackInitializationService` — backends always produce online
@@ -627,7 +672,11 @@ abstract class MediaServerClient {
   /// any external subtitle tracks that should be saved alongside it.
   ///
   /// [mediaIndex] selects among multiple media versions when an item has them.
-  Future<DownloadResolution> resolveDownload(MediaItem item, {int mediaIndex = 0});
+  ///
+  /// A successful applicable response may contain no URL. Request,
+  /// cancellation, and malformed-payload failures throw rather than returning
+  /// a partial resolution.
+  Future<DownloadResolution> resolveDownload(MediaItem item, {int mediaIndex = 0, String? mediaSourceId});
 
   /// The artwork files the download pipeline should persist for [item] so
   /// the offline UI can render its poster, clear logo, and background art.
@@ -638,8 +687,9 @@ abstract class MediaServerClient {
   /// Resolve a fully-qualified URL the OS-level external player (VLC, Infuse,
   /// MX Player, etc.) can fetch directly. Plex builds this from the chosen
   /// media version's part path; Jellyfin returns its `/Videos/{id}/stream`
-  /// endpoint with `Static=true` so transcoding is bypassed. Returns null
-  /// when the backend can't resolve a playable URL for the item.
+  /// endpoint with `Static=true` so transcoding is bypassed. Returns null only
+  /// when a successful response has no playable URL for the item. Request,
+  /// cancellation, and malformed-payload failures throw.
   ///
   /// Deliberately separate from the in-app playback funnel
   /// (`PlaybackSourceResolver`): external players can't send custom headers,
@@ -712,31 +762,46 @@ abstract interface class SeasonEpisodePagingClient {
 /// shared base class isn't an option, but a `mixin on MediaServerClient` is.
 mixin MediaServerCacheMixin implements MediaServerClient {
   /// Fetch with cache fallback: offline → cached only; online → try network,
-  /// cache the result, fall back to cached on any error.
+  /// cache the result, then fall back to cached data on an accepted error.
+  ///
+  /// When [shouldFallback] is omitted, every error remains eligible for cache
+  /// fallback. A supplied selector narrows that policy; rejected errors are
+  /// rethrown unchanged before the fallback cache is read. Response-parser
+  /// failures can therefore be propagated instead of hidden by stale data.
   ///
   /// Returns `null` when offline mode is on and no cached row exists, or
   /// when both network and cache come up empty.
+  ///
+  /// Pass [cacheScope] when the caller already snapshotted a request context
+  /// (see [fetchWithCacheFirst]); otherwise the live profile is sampled, which
+  /// is only safe when nothing has awaited since the call began.
   Future<T?> fetchWithCacheFallback<T>({
     required String cacheKey,
     required Future<MediaServerResponse> Function() networkCall,
     required T? Function(dynamic cachedData) parseCache,
     required T? Function(MediaServerResponse response) parseResponse,
+    bool Function(Object error)? shouldFallback,
     bool cacheResponse = true,
+    ServerId? cacheScope,
   }) async {
+    final scope = cacheScope ?? ServerId(cacheServerId);
     if (isOfflineMode) {
-      final cached = await cache.get(ServerId(cacheServerId), cacheKey);
+      final cached = await cache.get(scope, cacheKey);
       if (cached != null) return parseCache(cached);
       return null;
     }
     try {
       final response = await networkCall();
+      throwIfHttpError(response);
+      final parsed = parseResponse(response);
       if (cacheResponse) {
-        await _putCacheResponse(cacheKey, response.data);
+        await _putCacheResponse(scope, cacheKey, response.data);
       }
-      return parseResponse(response);
+      return parsed;
     } catch (e) {
+      if (shouldFallback != null && !shouldFallback(e)) rethrow;
       appLogger.w('Network request failed for $cacheKey, trying cache', error: e);
-      final cached = await cache.get(ServerId(cacheServerId), cacheKey);
+      final cached = await cache.get(scope, cacheKey);
       if (cached != null) return parseCache(cached);
       rethrow;
     }
@@ -746,27 +811,34 @@ mixin MediaServerCacheMixin implements MediaServerClient {
   /// only on miss. Use when freshness is non-critical and prior fetches are
   /// likely to have populated the cache (e.g. playback after the detail
   /// screen pre-warmed the row).
+  ///
+  /// [cacheScope] must be captured from the same request context as
+  /// [networkCall]. The cache lookup may yield before a miss is known, so
+  /// sampling a live profile inside [networkCall] can cross profile identities.
   Future<T?> fetchWithCacheFirst<T>({
+    required ServerId cacheScope,
     required String cacheKey,
     required Future<MediaServerResponse> Function() networkCall,
     required T? Function(dynamic cachedData) parseCache,
     required T? Function(MediaServerResponse response) parseResponse,
     bool cacheResponse = true,
   }) async {
-    final cached = await cache.get(ServerId(cacheServerId), cacheKey);
+    final cached = await cache.get(cacheScope, cacheKey);
     if (cached != null) return parseCache(cached);
     if (isOfflineMode) return null;
     final response = await networkCall();
+    throwIfHttpError(response);
+    final parsed = parseResponse(response);
     if (cacheResponse) {
-      await _putCacheResponse(cacheKey, response.data);
+      await _putCacheResponse(cacheScope, cacheKey, response.data);
     }
-    return parseResponse(response);
+    return parsed;
   }
 
-  Future<void> _putCacheResponse(String cacheKey, dynamic data) async {
+  Future<void> _putCacheResponse(ServerId cacheScope, String cacheKey, dynamic data) async {
     try {
       if (data is Map<String, dynamic>) {
-        await cache.put(ServerId(cacheServerId), cacheKey, data);
+        await cache.put(cacheScope, cacheKey, data);
       } else if (data != null) {
         appLogger.w('Unexpected response type for $cacheKey: ${data.runtimeType}');
       }

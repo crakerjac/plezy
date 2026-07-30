@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:plezy/media/media_backend.dart';
 import 'package:plezy/media/media_item.dart';
 import 'package:plezy/media/media_kind.dart';
+import 'package:plezy/media/media_playlist.dart';
 import 'package:plezy/services/settings_service.dart';
 import 'package:plezy/theme/mono_theme.dart';
 import 'package:plezy/utils/layout_constants.dart';
@@ -137,6 +138,122 @@ void main() {
     final base = MediaCardListLayout.basePosterWidth(LibraryDensity.defaultValue);
     final imageBox = find.descendant(of: find.byType(MediaCard), matching: find.byType(ClipRRect)).first;
     expect(tester.getSize(imageBox), Size(base, base));
+  });
+
+  testWidgets('music collection override renders square artwork and requests a square transcode', (tester) async {
+    await tester.pumpWidget(
+      _TestApp(
+        child: MediaCard(
+          item: _item(MediaKind.collection),
+          width: 200,
+          height: 194,
+          forceGridMode: true,
+          isOffline: true,
+          cardShapeOverride: CardShape.square,
+        ),
+      ),
+    );
+
+    final imageBox = find.descendant(of: find.byType(MediaCard), matching: find.byType(ClipRRect)).first;
+    expect(tester.getSize(imageBox), const Size(194, 194));
+    expect(tester.widget<OptimizedMediaImage>(find.byType(OptimizedMediaImage)).imageType, ImageType.square);
+  });
+
+  testWidgets('music playlist override uses square artwork in list mode', (tester) async {
+    const playlist = MediaPlaylist(
+      id: 'playlist_1',
+      backend: MediaBackend.plex,
+      title: 'Music playlist',
+      playlistType: 'audio',
+    );
+
+    await tester.pumpWidget(
+      const _TestApp(
+        child: SizedBox(
+          width: 420,
+          height: 160,
+          child: MediaCard(item: playlist, forceListMode: true, isOffline: true, cardShapeOverride: CardShape.square),
+        ),
+      ),
+    );
+
+    final base = MediaCardListLayout.basePosterWidth(LibraryDensity.defaultValue);
+    final imageBox = find.descendant(of: find.byType(MediaCard), matching: find.byType(ClipRRect)).first;
+    expect(tester.getSize(imageBox), Size(base, base));
+    expect(tester.widget<OptimizedMediaImage>(find.byType(OptimizedMediaImage)).imageType, ImageType.square);
+  });
+
+  testWidgets('track artwork failure falls back to album artwork', (tester) async {
+    const trackArtwork = 'https://media.example/track.jpg';
+    const albumArtwork = 'https://media.example/album.jpg';
+    final item = testMediaItem(
+      id: 'track-with-fallback',
+      backend: MediaBackend.jellyfin,
+      kind: MediaKind.track,
+      title: 'Track',
+      thumbPath: trackArtwork,
+      parentThumbPath: albumArtwork,
+    );
+
+    await tester.pumpWidget(
+      _TestApp(child: MediaCard(item: item, width: 200, height: 194, forceGridMode: true, isOffline: true)),
+    );
+
+    final primaryFinder = find.descendant(of: find.byType(MediaCard), matching: find.byType(OptimizedMediaImage)).first;
+    final primary = tester.widget<OptimizedMediaImage>(primaryFinder);
+    expect(primary.imagePath, trackArtwork);
+    expect(primary.errorWidget, isNotNull);
+
+    final fallback = primary.errorWidget!(tester.element(primaryFinder), trackArtwork, StateError('decode failed'));
+    expect(fallback, isA<OptimizedMediaImage>());
+    expect((fallback as OptimizedMediaImage).imagePath, albumArtwork);
+    expect(fallback.imageType, ImageType.square);
+  });
+
+  testWidgets('unresolved track artwork fallback is not memoized', (tester) async {
+    const trackArtwork = 'https://poster-memo.example/unresolved-track.jpg';
+    const albumArtwork = 'https://poster-memo.example/unresolved-album.jpg';
+    final item = testMediaItem(
+      id: 'track-with-unresolved-artwork',
+      backend: MediaBackend.jellyfin,
+      kind: MediaKind.track,
+      title: 'Track',
+      thumbPath: trackArtwork,
+      parentThumbPath: albumArtwork,
+    );
+
+    Future<void> pumpCard() => tester.pumpWidget(
+      _TestApp(child: MediaCard(item: item, width: 200, height: 194, forceGridMode: true, isOffline: true)),
+    );
+
+    await pumpCard();
+    final primaryFinder = find.descendant(of: find.byType(MediaCard), matching: find.byType(OptimizedMediaImage)).first;
+    final primary = tester.widget<OptimizedMediaImage>(primaryFinder);
+    expect(primary.imagePath, trackArtwork);
+    expect(primary.errorWidget, isNotNull);
+
+    final unresolvedFallback = primary.errorWidget!(
+      tester.element(primaryFinder),
+      trackArtwork,
+      const UnresolvedImageUrl(trackArtwork),
+    );
+    expect(unresolvedFallback, isA<OptimizedMediaImage>());
+    expect((unresolvedFallback as OptimizedMediaImage).imagePath, albumArtwork);
+
+    await pumpCard();
+    final unresolvedRebuild = tester.widget<OptimizedMediaImage>(primaryFinder);
+    expect(unresolvedRebuild.imagePath, trackArtwork);
+
+    final failedFallback = unresolvedRebuild.errorWidget!(
+      tester.element(primaryFinder),
+      trackArtwork,
+      StateError('decode failed'),
+    );
+    expect(failedFallback, isA<OptimizedMediaImage>());
+    expect((failedFallback as OptimizedMediaImage).imagePath, albumArtwork);
+
+    await pumpCard();
+    expect(tester.widget<OptimizedMediaImage>(primaryFinder).imagePath, albumArtwork);
   });
 }
 

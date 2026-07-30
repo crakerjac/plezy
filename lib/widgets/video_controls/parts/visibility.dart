@@ -47,7 +47,12 @@ extension _PlexVideoControlsVisibilityMethods on _PlexVideoControlsState {
   }
 
   /// Controls hide delay: 5s on mobile/TV/keyboard-nav, 3s on desktop with mouse.
+  /// Maestro builds extend the delay because accessibility-tree queries can take
+  /// longer than the production timeout on physical devices.
   Duration get _hideDelay {
+    if (const bool.fromEnvironment('PLEZY_MAESTRO_E2E')) {
+      return const Duration(seconds: 30);
+    }
     final isMobile = (Platform.isIOS || Platform.isAndroid) && !PlatformDetector.isTV();
     if (isMobile || PlatformDetector.isTV() || _videoPlayerNavigationEnabled) {
       return const Duration(seconds: 5);
@@ -67,16 +72,10 @@ extension _PlexVideoControlsVisibilityMethods on _PlexVideoControlsState {
   void _restartHideTimerForCurrentPlaybackState() => widget.chromeController.restartAutoHideForCurrentPlaybackState();
 
   void _handlePointerSignal(PointerSignalEvent event) {
-    if (event is PointerScrollEvent && _keyboardService != null) {
-      _cancelAutoSkipFromUserInteraction();
-      final delta = event.scrollDelta.dy;
-      final volume = widget.player.state.volume;
-      final maxVol = _keyboardService!.maxVolume.toDouble();
-      final newVolume = (volume - delta / 20).clamp(0.0, maxVol);
-      widget.player.setVolume(newVolume);
-      unawaited(SettingsService.getInstance().then((s) => s.write(SettingsService.volume, newVolume)));
-      _showControlsFromPointerActivity();
-    }
+    if (event is! PointerScrollEvent) return;
+    _cancelAutoSkipFromUserInteraction();
+    widget.volumeController.adjust(-event.scrollDelta.dy / 20);
+    _showControlsFromPointerActivity();
   }
 
   /// Show controls in response to pointer activity (mouse/trackpad movement).
@@ -88,10 +87,20 @@ extension _PlexVideoControlsVisibilityMethods on _PlexVideoControlsState {
     widget.chromeController.toggle();
   }
 
+  void _toggleControlsFromSemantics() {
+    if (_showControls) {
+      widget.chromeController.hide();
+      return;
+    }
+    widget.chromeController.show(restartAutoHide: false);
+    widget.chromeController.cancelAutoHide();
+  }
+
   /// Apply preferred orientations for the given lock state. Wired to
   /// [SettingsService.rotationLocked] via [bindEffect] so any change — from
   /// this toggle or from the settings screen — fires the same SystemChrome call.
   void _applyRotationLock(bool locked) {
+    if (PlatformDetector.isAutomotive()) return;
     unawaited(
       SystemChrome.setPreferredOrientations(
         locked ? const [DeviceOrientation.landscapeLeft, DeviceOrientation.landscapeRight] : DeviceOrientation.values,
@@ -209,16 +218,6 @@ extension _PlexVideoControlsVisibilityMethods on _PlexVideoControlsState {
     }
   }
 
-  /// Show controls and focus timeline on LEFT/RIGHT input (TV/desktop)
-  void _showControlsWithTimelineFocus() {
-    widget.chromeController.show();
-
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      _desktopControlsKey.currentState?.requestTimelineFocus();
-    });
-  }
-
   /// Hide controls when navigating up from timeline (keyboard mode)
   /// If skip marker button or Play Next dialog is visible, focus it instead of hiding controls
   void _hideControlsFromKeyboard() {
@@ -253,6 +252,10 @@ extension _PlexVideoControlsVisibilityMethods on _PlexVideoControlsState {
       });
       _reclaimFocusAfterControlsHide();
     } else if (visibilityChanged) {
+      // The timeline is about to take over held-key seeking; commit whatever
+      // the hidden-chrome burst accumulated so it can't rebase from a stale
+      // position once the timeline's own accumulator starts.
+      _flushHiddenDirectionalSeek();
       _setControlsState(() {
         _controlsMounted = true;
         _controlsOpaque = false;

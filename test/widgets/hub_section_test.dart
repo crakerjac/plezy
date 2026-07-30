@@ -3,6 +3,8 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_symbols_icons/symbols.dart';
 import 'package:plezy/focus/input_mode_tracker.dart';
+import 'package:plezy/focus/locked_hub_controller.dart';
+import 'package:plezy/i18n/strings.g.dart';
 import 'package:plezy/media/media_backend.dart';
 import 'package:plezy/media/media_hub.dart';
 import 'package:plezy/media/media_item.dart';
@@ -20,6 +22,7 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   setUp(() async {
+    LocaleSettings.setLocaleSync(AppLocale.en);
     resetSharedPreferencesForTest();
     SettingsService.resetForTesting();
     await SettingsService.getInstance();
@@ -43,6 +46,7 @@ void main() {
       _TestApp(
         child: HubSection(
           hub: _hubWith(item),
+          focusMemory: HubFocusMemory(),
           icon: Symbols.live_tv_rounded,
           onItemTap: (value) => tappedItem = value,
           onItemLongPress: (value) => longPressedItem = value,
@@ -74,6 +78,7 @@ void main() {
           child: HubSection(
             key: hubKey,
             hub: _hubWith(item),
+            focusMemory: HubFocusMemory(),
             icon: Symbols.live_tv_rounded,
             onItemTap: (value) => tappedItem = value,
             onItemLongPress: (value) => longPressedItem = value,
@@ -109,6 +114,7 @@ void main() {
       _TestApp(
         child: HubSection(
           hub: _hubWith(item),
+          focusMemory: HubFocusMemory(),
           icon: Symbols.live_tv_rounded,
           cardSizing: HubCardSizing.grid,
           episodePosterModeOverride: EpisodePosterMode.seriesPoster,
@@ -127,6 +133,93 @@ void main() {
       find.descendant(of: find.byType(HubSection), matching: find.byType(Padding)).first,
     );
     expect(outerPadding.padding.resolve(TextDirection.ltr).bottom, 0);
+  });
+
+  testWidgets('shows a provider result count in the existing hub header only when supplied', (tester) async {
+    final item = testMediaItem(
+      id: 'counted_item',
+      backend: MediaBackend.plex,
+      kind: MediaKind.movie,
+      title: 'Counted Movie',
+    );
+    final hub = MediaHub(id: 'counted_hub', title: 'Popular', type: 'mixed', items: [item], size: 237, more: true);
+
+    await tester.pumpWidget(
+      _TestApp(
+        child: HubSection(hub: hub, focusMemory: HubFocusMemory(), icon: Symbols.movie_rounded),
+      ),
+    );
+    expect(find.text(t.explore.totalResults(n: 237)), findsNothing);
+
+    await tester.pumpWidget(
+      _TestApp(
+        child: HubSection(hub: hub, focusMemory: HubFocusMemory(), icon: Symbols.movie_rounded, totalResults: 237),
+      ),
+    );
+    expect(find.text(t.explore.totalResults(n: 237)), findsOneWidget);
+  });
+
+  testWidgets('restores within one owner but resets for a fresh owner', (tester) async {
+    final items = [
+      for (var index = 0; index < 3; index++)
+        testMediaItem(id: 'item_$index', backend: MediaBackend.plex, kind: MediaKind.movie, title: 'Item $index'),
+    ];
+    MediaHub hub(String id) => MediaHub(id: id, title: id, type: 'movie', items: items, size: items.length);
+
+    final ownerA = HubFocusMemory();
+    final ownerB = HubFocusMemory();
+    String? focusedItemId;
+
+    Future<void> mount({
+      required HubFocusMemory owner,
+      required String hubId,
+      required GlobalKey<HubSectionState> key,
+    }) async {
+      await tester.pumpWidget(
+        _TestApp(
+          child: HubSection(
+            key: key,
+            hub: hub(hubId),
+            focusMemory: owner,
+            icon: Symbols.movie_rounded,
+            onFocusedItemChanged: (item) => focusedItemId = item.id,
+          ),
+        ),
+      );
+    }
+
+    final firstMountKey = GlobalKey<HubSectionState>();
+    await mount(owner: ownerA, hubId: 'detail_episodes', key: firstMountKey);
+    firstMountKey.currentState!.requestFocusAt(2);
+    await tester.pumpAndSettle();
+    expect(focusedItemId, 'item_2');
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
+
+    final remountKey = GlobalKey<HubSectionState>();
+    await mount(owner: ownerA, hubId: 'detail_episodes', key: remountKey);
+    remountKey.currentState!.requestFocusFromMemory();
+    await tester.pumpAndSettle();
+    expect(focusedItemId, 'item_2');
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
+
+    final secondHubKey = GlobalKey<HubSectionState>();
+    await mount(owner: ownerA, hubId: 'detail_extras', key: secondHubKey);
+    secondHubKey.currentState!.requestFocusFromMemory();
+    await tester.pumpAndSettle();
+    expect(focusedItemId, 'item_2');
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
+
+    final freshOwnerKey = GlobalKey<HubSectionState>();
+    await mount(owner: ownerB, hubId: 'detail_episodes', key: freshOwnerKey);
+    freshOwnerKey.currentState!.requestFocusFromMemory();
+    await tester.pumpAndSettle();
+    expect(focusedItemId, 'item_0');
   });
 }
 

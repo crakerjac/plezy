@@ -70,10 +70,10 @@ class TraktClient implements DisposableTrackerClient {
       _request('POST', '/scrobble/stop', body: body.toJson(), allowStatuses: _scrobbleAllowedStatuses);
 
   Future<void> addToHistory(TraktScrobbleRequest item, {String? watchedAt}) =>
-      _request('POST', '/sync/history', body: item.toHistoryAddBody(watchedAt: watchedAt));
+      _request('POST', '/sync/history', body: item.toHistoryBody(watchedAt: watchedAt));
 
   Future<void> removeFromHistory(TraktScrobbleRequest item) =>
-      _request('POST', '/sync/history/remove', body: item.toHistoryRemoveBody());
+      _request('POST', '/sync/history/remove', body: item.toHistoryBody());
 
   Future<void> addRatings(Map<String, dynamic> body) =>
       _request('POST', '/sync/ratings', body: body, allowStatuses: const {200, 201});
@@ -150,15 +150,20 @@ class TraktClient implements DisposableTrackerClient {
     return _decodeMedia(res.body);
   }
 
-  /// Cast credits of a title (`GET /{movies|shows}/{id}/people`), in billing
-  /// order. Crew is not parsed. [id] is a Trakt numeric id or slug.
-  Future<List<TraktCastEntry>> getPeople(TraktCatalogType type, String id) async {
-    final res = await _requestResponse('GET', '/${type.name}/$id/people?$_catalogExtended');
+  /// People for a title (`GET /{movies|shows}/{id}/people`). Show requests
+  /// include `guest_stars`; Trakt documents that this returns every guest star
+  /// with at least one episode and can be a lot of data, so callers must bound
+  /// the cast they retain.
+  Future<TraktPeople> getPeople(TraktCatalogType type, String id) async {
+    final extended = type == TraktCatalogType.shows ? '$_catalogExtended,guest_stars' : _catalogExtended;
+    final res = await _requestResponse('GET', '/${type.name}/$id/people?$extended');
     final decoded = TrackerHttpClient.decodeJson(res.body);
-    if (decoded is! Map) return const [];
-    final cast = decoded['cast'];
-    if (cast is! List) return const [];
-    return [for (final e in cast.whereType<Map<String, dynamic>>()) TraktCastEntry.fromJson(e)];
+    if (decoded is! Map) return const TraktPeople();
+    return TraktPeople(
+      cast: _decodePeopleEntries(decoded['cast']),
+      guestStars: _decodePeopleEntries(decoded['guest_stars']),
+      crew: _decodeCrewEntries(decoded['crew']),
+    );
   }
 
   /// Body shape: `{"movies":[{"ids":{...}}],"shows":[{"ids":{...}}]}`.
@@ -166,6 +171,19 @@ class TraktClient implements DisposableTrackerClient {
       _request('POST', '/sync/watchlist', body: body, allowStatuses: const {200, 201});
 
   Future<void> removeFromWatchlist(Map<String, dynamic> body) => _request('POST', '/sync/watchlist/remove', body: body);
+
+  static List<TraktCastEntry> _decodePeopleEntries(Object? raw) {
+    if (raw is! List) return const [];
+    return [for (final entry in raw.whereType<Map<String, dynamic>>()) TraktCastEntry.fromJson(entry)];
+  }
+
+  static List<TraktCastEntry> _decodeCrewEntries(Object? raw) {
+    if (raw is! Map) return const [];
+    return [
+      for (final department in raw.values.whereType<List>())
+        for (final entry in department.whereType<Map<String, dynamic>>()) TraktCastEntry.fromJson(entry),
+    ];
+  }
 
   static List<TraktCatalogEntry> _decodeEntries(String body) {
     final decoded = TrackerHttpClient.decodeJson(body);
@@ -307,6 +325,8 @@ class TraktClient implements DisposableTrackerClient {
     var res = await _send(method, path, body: body);
 
     if (res.statusCode == 401) {
+      // A failed refresh propagates its TrackerAuthException; MAL's equivalent
+      // path flattens the same failure into TrackerApiException(401).
       await refresh();
       res = await _send(method, path, body: body);
     }
@@ -320,7 +340,7 @@ class TraktClient implements DisposableTrackerClient {
       );
     }
 
-    throw TrackerApiException(service: TrackerService.trakt, statusCode: res.statusCode, body: res.body);
+    throw TrackerApiException(service: TrackerService.trakt, statusCode: res.statusCode);
   }
 
   Future<http.Response> _send(String method, String path, {Map<String, dynamic>? body}) async {

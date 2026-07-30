@@ -4,26 +4,23 @@ part of '../../jellyfin_client.dart';
 /// listings, instant mix, and lyrics. Endpoint conventions follow the
 /// Jellyfin web client's music surface (cross-checked against the Kotlin
 /// SDK), mirroring the style notes at the top of `browse.dart`.
-mixin _JellyfinMusicMethods on MediaServerCacheMixin {
-  JellyfinConnection get connection;
-  FailoverHttpClient get _http;
-  List<MediaItem> _mapItems(Iterable<Map<String, dynamic>> items);
-
-  /// Albums credited to [artistId], newest first. Queries `AlbumArtistIds`
+mixin _JellyfinMusicMethods on _JellyfinClientInternals {
+  /// Albums credited to [artist], newest first. Queries `AlbumArtistIds`
   /// rather than `ParentId` because Jellyfin links albums to artists via
   /// tags — an artist's albums are usually not its folder children.
   @override
-  Future<List<MediaItem>> fetchArtistAlbums(String artistId) async {
+  Future<List<MediaItem>> fetchArtistAlbums(MediaItem artist) async {
     final response = await _http.get(
       '/Items',
       queryParameters: {
         'userId': connection.userId,
-        'AlbumArtistIds': artistId,
+        'AlbumArtistIds': artist.id,
         'IncludeItemTypes': 'MusicAlbum',
         'Recursive': 'true',
         'SortBy': 'PremiereDate,ProductionYear,SortName',
         'SortOrder': 'Descending',
-        'Fields': _browseFields,
+        'Fields': _musicAlbumRowFields,
+        'EnableUserData': 'false',
         ...jellyfinImageQueryParameters,
       },
     );
@@ -45,7 +42,7 @@ mixin _JellyfinMusicMethods on MediaServerCacheMixin {
         'Recursive': 'true',
         'SortBy': 'ParentIndexNumber,IndexNumber,SortName',
         'SortOrder': 'Ascending',
-        'Fields': _browseFields,
+        'Fields': _musicTrackRowFields,
         ...jellyfinImageQueryParameters,
       },
     );

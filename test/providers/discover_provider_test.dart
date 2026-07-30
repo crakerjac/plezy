@@ -121,13 +121,18 @@ class _FakeAggregationService extends DataAggregationService {
 }
 
 class _FakeClient implements MediaServerClient {
+  final String serverIdValue;
+  final String serverNameValue;
+  final List<String> fetchedItemIds = [];
   MediaItem? itemResult;
 
-  @override
-  ServerId get serverId => ServerId('server_1');
+  _FakeClient({this.serverIdValue = 'server_1', this.serverNameValue = 'Server'});
 
   @override
-  String? get serverName => 'Server';
+  ServerId get serverId => ServerId(serverIdValue);
+
+  @override
+  String? get serverName => serverNameValue;
 
   @override
   MediaBackend get backend => MediaBackend.plex;
@@ -136,7 +141,10 @@ class _FakeClient implements MediaServerClient {
   ServerCapabilities get capabilities => ServerCapabilities.plex;
 
   @override
-  Future<MediaItem?> fetchItem(String id, {bool useCache = true}) async => itemResult;
+  Future<MediaItem?> fetchItem(String id, {bool useCache = true}) async {
+    fetchedItemIds.add(id);
+    return itemResult;
+  }
 
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
@@ -146,12 +154,13 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   late _FakeClient client;
+  late MultiServerManager manager;
   late _FakeAggregationService aggregation;
   late MultiServerProvider multiServer;
   late HiddenLibrariesProvider hiddenLibraries;
   late LibrariesProvider libraries;
   late DiscoverProvider provider;
-  late List<List<MediaItem>> shelfSyncs;
+  late List<(String, List<MediaItem>)> shelfSyncs;
   bool isBinding = false;
 
   setUp(() async {
@@ -162,7 +171,7 @@ void main() {
     shelfSyncs = [];
 
     client = _FakeClient();
-    final manager = MultiServerManager()..debugRegisterClientForTesting(client);
+    manager = MultiServerManager()..debugRegisterClientForTesting(client);
     aggregation = _FakeAggregationService(manager);
     multiServer = MultiServerProvider(manager, aggregation);
     hiddenLibraries = HiddenLibrariesProvider();
@@ -171,8 +180,9 @@ void main() {
       multiServer,
       hiddenLibraries,
       libraries,
+      profileId: 'profile-a',
       isProfileBinding: () => isBinding,
-      syncSystemShelf: (items) async => shelfSyncs.add(List<MediaItem>.of(items)),
+      syncSystemShelf: (owner, items) async => shelfSyncs.add((owner, List<MediaItem>.of(items))),
     );
   });
 
@@ -223,7 +233,13 @@ void main() {
   });
 
   test('dispose during an in-flight coalesced load prevents trailing work and commits', () async {
-    final scoped = DiscoverProvider(multiServer, hiddenLibraries, libraries, isProfileBinding: () => isBinding);
+    final scoped = DiscoverProvider(
+      multiServer,
+      hiddenLibraries,
+      libraries,
+      profileId: 'profile-a',
+      isProfileBinding: () => isBinding,
+    );
     final gate = Completer<void>();
     aggregation.onDeckGate = gate.future;
     aggregation.hubGate = gate.future;
@@ -293,6 +309,50 @@ void main() {
     expect(aggregation.hubCalls, hubCallsBefore);
   });
 
+  test('full, background, and delta publication forward the profile owner', () async {
+    aggregation.onDeckResult = () => [_item('full')];
+    aggregation.hubsResult = () => [_hub('hub')];
+    await provider.load();
+    await pumpEventQueue();
+    expect(shelfSyncs, isNotEmpty);
+    expect(shelfSyncs.every((sync) => sync.$1 == 'profile-a'), isTrue);
+
+    shelfSyncs.clear();
+    aggregation.onDeckResult = () => [_item('refresh')];
+    await provider.refreshContinueWatching();
+    await pumpEventQueue();
+    expect(shelfSyncs.map((sync) => sync.$1), ['profile-a']);
+
+    shelfSyncs.clear();
+    aggregation.onDeckSucceededServerIds = {'server_2'};
+    aggregation.hubSucceededServerIds = {'server_2'};
+    aggregation.onDeckResult = () => [_item('delta', serverId: 'server_2')];
+    aggregation.hubsResult = () => [_hub('delta-hub', serverId: 'server_2')];
+    await provider.syncToOnlineServers({'server_1', 'server_2'});
+    await pumpEventQueue();
+    expect(shelfSyncs.map((sync) => sync.$1), ['profile-a']);
+  });
+
+  test('null profile owner never publishes to the system shelf', () async {
+    final calls = <String>[];
+    final ownerless = DiscoverProvider(
+      multiServer,
+      hiddenLibraries,
+      libraries,
+      profileId: null,
+      isProfileBinding: () => isBinding,
+      syncSystemShelf: (owner, items) async => calls.add(owner),
+    );
+    addTearDown(ownerless.dispose);
+    aggregation.onDeckResult = () => [_item('private')];
+    aggregation.hubsResult = () => [_hub('hub')];
+
+    await ownerless.load();
+    await pumpEventQueue();
+
+    expect(calls, isEmpty);
+  });
+
   test('sub-threshold progress patches the row without refetching', () async {
     final playing = _item('ep-1').copyWith(durationMs: 100000, viewOffsetMs: 10000, viewCount: 0);
     aggregation.onDeckResult = () => [playing, for (var i = 2; i <= 21; i++) _item('ep-$i')];
@@ -313,7 +373,8 @@ void main() {
     expect(aggregation.onDeckCalls, onDeckCallsBefore);
     expect(aggregation.hubCalls, hubCallsBefore);
     expect(shelfSyncs, hasLength(1));
-    expect(shelfSyncs.single.first.viewOffsetMs, 30000);
+    expect(shelfSyncs.single.$1, 'profile-a');
+    expect(shelfSyncs.single.$2.first.viewOffsetMs, 30000);
   });
 
   test('watched-threshold progress refreshes continue watching only', () async {
@@ -467,6 +528,7 @@ void main() {
       emptyMultiServer,
       hiddenLibraries,
       libraries,
+      profileId: 'profile-a',
       isProfileBinding: () => isBinding,
     );
     addTearDown(binderProvider.dispose);
@@ -588,18 +650,42 @@ void main() {
     expect(provider.hubs, isEmpty);
   });
 
-  test('updateItem refetches one item and swaps it in place', () async {
-    aggregation.onDeckResult = () => [_item('ep-1')];
+  test('updateItem qualifies same bare ids by source server without fan-out', () async {
+    final serverOneItem = _item('shared-id', serverId: 'server_1').copyWith(title: 'Server One Original');
+    final serverTwoItem = _item('shared-id', serverId: 'server_2').copyWith(title: 'Server Two Original');
+    final serverTwoClient = _FakeClient(serverIdValue: 'server_2', serverNameValue: 'Server Two');
+    manager.debugRegisterClientForTesting(serverTwoClient);
+
+    aggregation.onDeckResult = () => [serverOneItem, serverTwoItem];
     aggregation.hubsResult = () => [
-      _hub('hub-1', items: [_item('movie-1')]),
+      _hub('hub-1', serverId: 'server_1', items: [serverOneItem]),
+      _hub('hub-2', serverId: 'server_2', items: [serverTwoItem]),
     ];
     await provider.load();
+    final onDeckCallsBefore = aggregation.onDeckCalls;
+    final hubCallsBefore = aggregation.hubCalls;
+    final source = provider.hubs
+        .expand((hub) => hub.items)
+        .singleWhere((item) => item.globalKey == serverTwoItem.globalKey);
+    final updated = serverTwoItem.copyWith(title: 'Server Two Refreshed');
+    serverTwoClient.itemResult = updated;
 
-    client.itemResult = _item('movie-1').copyWith(title: 'Updated Title');
-    await provider.updateItem('movie-1');
+    await provider.updateItem(source);
 
-    expect(provider.hubs.single.items.single.title, 'Updated Title');
-    expect(provider.onDeck.single.id, 'ep-1');
+    // The old bare-id aggregation path fetched every server. The source item
+    // must instead select one client and leave both full-list fetch surfaces
+    // untouched.
+    expect(client.fetchedItemIds, isEmpty);
+    expect(serverTwoClient.fetchedItemIds, ['shared-id']);
+    expect(aggregation.onDeckCalls, onDeckCallsBefore);
+    expect(aggregation.hubCalls, hubCallsBefore);
+
+    final onDeckByKey = {for (final item in provider.onDeck) item.globalKey: item};
+    final hubItemsByKey = {for (final item in provider.hubs.expand((hub) => hub.items)) item.globalKey: item};
+    expect(onDeckByKey[serverOneItem.globalKey], same(serverOneItem));
+    expect(onDeckByKey[serverTwoItem.globalKey], same(updated));
+    expect(hubItemsByKey[serverOneItem.globalKey], same(serverOneItem));
+    expect(hubItemsByKey[serverTwoItem.globalKey], same(updated));
   });
 
   test('syncToOnlineServers reloads for mid-session connects only', () async {
@@ -737,7 +823,13 @@ void main() {
 
   test('dispose unregisters the online-servers listener', () {
     final before = multiServer.onlineServersListenerCount;
-    final extra = DiscoverProvider(multiServer, hiddenLibraries, libraries, isProfileBinding: () => isBinding);
+    final extra = DiscoverProvider(
+      multiServer,
+      hiddenLibraries,
+      libraries,
+      profileId: 'profile-a',
+      isProfileBinding: () => isBinding,
+    );
     expect(multiServer.onlineServersListenerCount, before + 1);
 
     extra.dispose();

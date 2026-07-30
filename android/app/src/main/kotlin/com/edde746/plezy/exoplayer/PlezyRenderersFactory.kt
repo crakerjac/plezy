@@ -18,6 +18,7 @@ import androidx.media3.exoplayer.Renderer
 import androidx.media3.exoplayer.analytics.PlayerId
 import androidx.media3.exoplayer.audio.AudioOutput
 import androidx.media3.exoplayer.audio.AudioOutputProvider
+import androidx.media3.exoplayer.audio.AudioRendererEventListener
 import androidx.media3.exoplayer.audio.AudioSink
 import androidx.media3.exoplayer.audio.AudioTrackAudioOutputProvider
 import androidx.media3.exoplayer.audio.DefaultAudioSink
@@ -51,9 +52,20 @@ class PlezyRenderersFactory(context: Context) : DefaultRenderersFactory(context)
    * "No mixing matrix for input channel count". ExoPlayerCore swaps in
    * downmix matrices via [DownmixMatrices] when the setting is enabled.
    */
-  val channelMixProcessor = ChannelMixingAudioProcessor().apply {
-    for (count in 1..12) putChannelMixingMatrix(ChannelMixingMatrix.create(count, count))
+  private val identityChannelMixingMatrices = Array(DownmixMatrices.MAX_MIXING_CHANNELS) { index ->
+    val channelCount = index + 1
+    ChannelMixingMatrix(
+      channelCount,
+      channelCount,
+      DownmixMatrices.identityCoefficients(channelCount)
+    )
   }
+
+  val channelMixProcessor = ChannelMixingAudioProcessor().apply {
+    for (matrix in identityChannelMixingMatrices) putChannelMixingMatrix(matrix)
+  }
+
+  fun identityChannelMixingMatrix(channelCount: Int): ChannelMixingMatrix = identityChannelMixingMatrices[channelCount - 1]
 
   /** Returns whether direct encoded output should be hidden so decoded PCM output can be selected. */
   var shouldBlockDirectAudioOutput: ((Format) -> Boolean)? = null
@@ -75,9 +87,9 @@ class PlezyRenderersFactory(context: Context) : DefaultRenderersFactory(context)
     allowedVideoJoiningTimeMs: Long,
     out: ArrayList<Renderer>
   ) {
-    // Let super build the full list (it also appends extension renderers reflectively,
-    // e.g. the jellyfin ffmpeg artifact's video renderer), then swap the stock
-    // MediaCodecVideoRenderer for the DV-sanitizing variant at the same index.
+    // Let super build the full list (including optional extension renderers),
+    // then swap the stock MediaCodecVideoRenderer for the DV-sanitizing variant
+    // at the same index.
     super.buildVideoRenderers(
       context,
       extensionRendererMode,
@@ -101,6 +113,40 @@ class PlezyRenderersFactory(context: Context) : DefaultRenderersFactory(context)
         .setMaxDroppedFramesToNotify(MAX_DROPPED_VIDEO_FRAME_COUNT_TO_NOTIFY),
       forceSetOutputSurfaceWorkaround,
       videoDiagnosticsLogger
+    )
+  }
+
+  /**
+   * Records which audio renderers the session actually got. Whether the bundled
+   * FFmpeg renderer loaded decides between decoding TrueHD/DTS-HD in ExoPlayer and
+   * bailing to the mpv fallback, and nothing else in an uploaded log distinguishes
+   * the two (#1703).
+   */
+  override fun buildAudioRenderers(
+    context: Context,
+    extensionRendererMode: Int,
+    mediaCodecSelector: MediaCodecSelector,
+    enableDecoderFallback: Boolean,
+    audioSink: AudioSink,
+    eventHandler: Handler,
+    eventListener: AudioRendererEventListener,
+    out: ArrayList<Renderer>
+  ) {
+    val firstAudioIndex = out.size
+    super.buildAudioRenderers(
+      context,
+      extensionRendererMode,
+      mediaCodecSelector,
+      enableDecoderFallback,
+      audioSink,
+      eventHandler,
+      eventListener,
+      out
+    )
+    audioDiagnosticsLogger?.invoke(
+      "info",
+      "audio",
+      "Audio renderers: " + out.subList(firstAudioIndex, out.size).joinToString { it.name }
     )
   }
 

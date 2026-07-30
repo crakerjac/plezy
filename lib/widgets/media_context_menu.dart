@@ -1,6 +1,5 @@
 import 'dart:async';
 import '../media/ids.dart';
-import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:plezy/widgets/app_icon.dart';
 import 'package:material_symbols_icons/symbols.dart';
@@ -18,11 +17,13 @@ import '../metadata_edit/metadata_edit_adapters.dart';
 import '../media/media_version.dart';
 import '../services/plex_client.dart';
 import '../services/media_list_playback_launcher.dart';
+import '../services/jellyfin_sequential_launcher.dart';
 import '../services/music/music_playback_service.dart';
 import '../services/offline_watch_sync_service.dart';
 import '../services/playlist_items_loader.dart';
 import '../services/watch_actions.dart';
 import '../models/transcode_quality_preset.dart';
+import '../utils/content_utils.dart';
 import '../utils/download_version_utils.dart';
 import '../utils/download_utils.dart';
 import '../utils/quality_preset_labels.dart';
@@ -98,7 +99,7 @@ class MediaContextMenu extends StatefulWidget {
   /// Dart has no nominal union type — guarded at runtime via the
   /// [_itemAsMediaItem] / [_itemAsPlaylist] helpers.
   final Object item;
-  final void Function(String itemId)? onRefresh;
+  final void Function(MediaItem source)? onRefresh;
   final VoidCallback? onRemoveFromContinueWatching;
   final VoidCallback? onListRefresh; // For refreshing list after deletion
   final VoidCallback? onTap;
@@ -142,9 +143,9 @@ class MediaContextMenuState extends State<MediaContextMenu> {
 
   bool get isContextMenuOpen => _isContextMenuOpen;
 
-  void _notifyRefresh(String itemId) {
+  void _notifyRefresh(MediaItem source) {
     if (!mounted) return;
-    widget.onRefresh?.call(itemId);
+    widget.onRefresh?.call(source);
   }
 
   void _notifyListRefresh() {
@@ -189,7 +190,7 @@ class MediaContextMenuState extends State<MediaContextMenu> {
     _ => null,
   };
 
-  /// Item identifier for refresh callbacks.
+  /// Item identifier used for playlist and download sync operations.
   String _itemId() => switch (widget.item) {
     MediaItem(:final id) => id,
     MediaPlaylist(:final id) => id,
@@ -233,8 +234,6 @@ class MediaContextMenuState extends State<MediaContextMenu> {
         mediaKind != null &&
         (mediaKind == MediaKind.movie || mediaKind == MediaKind.episode) &&
         mediaItem?.hasActiveProgress == true;
-
-    final useBottomSheet = Platform.isIOS || Platform.isAndroid;
 
     // Check if user has admin privileges. Backend-neutral: Plex uses the
     // server-owned flag (folded with the active Plex Home profile's admin
@@ -297,15 +296,13 @@ class MediaContextMenuState extends State<MediaContextMenu> {
         _MenuAction(value: 'delete', icon: Symbols.delete_rounded, label: t.common.delete, destructive: true),
       );
     } else {
-      // Music (artist/album/track) playback + navigation actions. Play is
-      // always offered — the shared music_navigation helpers surface the
-      // "not supported yet" notice while the stub service is bound. Queue
-      // insertion only exists once a real playback engine is available.
+      // Music (artist/album/track) playback + navigation actions. Queue
+      // insertion only exists where a playback session is bound.
       final isMusicKind = mediaKind != null && mediaKind.isMusic;
       if (isMusicKind) {
         menuActions.add(_MenuAction(value: 'music_play', icon: Symbols.play_arrow_rounded, label: t.common.play));
 
-        final musicAvailable = context.read<MusicPlaybackService?>()?.isAvailable ?? false;
+        final musicAvailable = context.read<MusicPlaybackService?>() != null;
         if (musicAvailable) {
           menuActions.add(
             _MenuAction(value: 'music_play_next', icon: Symbols.playlist_play_rounded, label: t.music.playNext),
@@ -575,43 +572,28 @@ class MediaContextMenuState extends State<MediaContextMenu> {
       menuActions.add(_MenuAction(value: 'extra_$i', icon: entry.icon, label: entry.label));
     }
 
-    String? selected;
-
     final openedFromKeyboard = _openedFromKeyboard;
     _openedFromKeyboard = false;
 
-    if (useBottomSheet) {
-      // Present from the menu's own context: it sits at the trigger widget,
-      // below any screen-level OverlaySheetHost, while callers often pass a
-      // screen context from ABOVE its host (which would skip the host and
-      // fall back to a hostless modal sheet).
-      selected = await OverlaySheetController.showAdaptive<String>(
-        this.context,
-        showDragHandle: true,
-        isScrollControlled: true,
-        builder: (context) => AppMenuSheet<String>(
-          title: _itemDisplayTitle(),
-          entries: _menuEntries(menuActions),
-          focusFirstItem: openedFromKeyboard,
-        ),
-      );
-    } else {
-      Offset position;
-      if (_tapPosition != null) {
-        position = _tapPosition!;
-      } else {
-        final RenderBox? overlay = Overlay.of(context).context.findRenderObject() as RenderBox?;
-        final RenderBox renderBox = context.findRenderObject() as RenderBox;
-        position = renderBox.localToGlobal(Offset.zero, ancestor: overlay);
-      }
-
-      selected = await showAppMenu<String>(
-        context,
-        entries: _menuEntries(menuActions),
-        position: position,
-        focusFirstItem: openedFromKeyboard,
-      );
+    var position = _tapPosition;
+    if (position == null) {
+      final RenderBox? overlay = Overlay.of(context).context.findRenderObject() as RenderBox?;
+      final RenderBox renderBox = context.findRenderObject() as RenderBox;
+      position = renderBox.localToGlobal(Offset.zero, ancestor: overlay);
     }
+
+    // Present from the menu's own context: it sits at the trigger widget,
+    // below any screen-level OverlaySheetHost, while callers often pass a
+    // screen context from ABOVE its host (which would skip the host and
+    // fall back to a hostless modal sheet).
+    final selected = await showAdaptiveAppMenu<String>(
+      this.context,
+      title: _itemDisplayTitle(),
+      entries: _menuEntries(menuActions),
+      position: position,
+      focusFirstItem: openedFromKeyboard,
+      isScrollControlled: true,
+    );
 
     try {
       if (!context.mounted) return;
@@ -656,7 +638,7 @@ class MediaContextMenuState extends State<MediaContextMenu> {
                 context,
                 watched ? t.messages.markedAsWatchedOffline : t.messages.markedAsUnwatchedOffline,
               );
-              _notifyRefresh(item.id);
+              _notifyRefresh(item);
             }
           } else {
             await _executeAction(context, () async {
@@ -676,7 +658,7 @@ class MediaContextMenuState extends State<MediaContextMenu> {
               if (widget.onRemoveFromContinueWatching != null) {
                 widget.onRemoveFromContinueWatching!();
               } else {
-                _notifyRefresh(mediaItem.id);
+                _notifyRefresh(mediaItem);
               }
             }
           } catch (e) {
@@ -711,7 +693,7 @@ class MediaContextMenuState extends State<MediaContextMenu> {
           if (context.mounted) {
             final item = mediaItem!;
             await Navigator.push(context, MaterialPageRoute(builder: (context) => MetadataEditScreen(metadata: item)));
-            _notifyRefresh(item.id);
+            _notifyRefresh(item);
           }
           break;
 
@@ -720,7 +702,7 @@ class MediaContextMenuState extends State<MediaContextMenu> {
           if (context.mounted) {
             final item = mediaItem!;
             await Navigator.push(context, MaterialPageRoute(builder: (context) => PlexMatchScreen(metadata: item)));
-            _notifyRefresh(item.id);
+            _notifyRefresh(item);
           }
           break;
 
@@ -737,13 +719,16 @@ class MediaContextMenuState extends State<MediaContextMenu> {
           await _navigateToRelated(
             context,
             mediaItem!.kind == MediaKind.season ? mediaItem.parentId : mediaItem.grandparentId,
-            (item) {
+            (context, item) async {
               final target = mediaDetailNavigationTargetFor(mediaItem, metadataOverride: item);
-              return mediaDetailRoute(
-                metadata: target.metadata,
-                initialSeasonIndex: target.initialSeasonIndex,
-                initialSeasonId: target.initialSeasonId,
-                initialEpisodeId: target.initialEpisodeId,
+              await Navigator.push(
+                context,
+                mediaDetailRoute(
+                  metadata: target.metadata,
+                  initialSeasonIndex: target.initialSeasonIndex,
+                  initialSeasonId: target.initialSeasonId,
+                  initialEpisodeId: target.initialEpisodeId,
+                ),
               );
             },
             t.messages.errorLoadingSeries,
@@ -828,12 +813,7 @@ class MediaContextMenuState extends State<MediaContextMenu> {
 
         case 'music_album':
           didNavigate = true;
-          await _navigateToRelated(
-            context,
-            mediaItem!.parentId,
-            (item) => MaterialPageRoute(builder: (_) => AlbumDetailScreen(album: item)),
-            t.common.error,
-          );
+          await _navigateToRelated(context, mediaItem!.parentId, navigateToAlbum, t.common.error);
           break;
 
         case 'music_artist':
@@ -841,7 +821,7 @@ class MediaContextMenuState extends State<MediaContextMenu> {
           await _navigateToRelated(
             context,
             mediaItem!.kind == MediaKind.album ? mediaItem.parentId : mediaItem.grandparentId,
-            (item) => MaterialPageRoute(builder: (_) => ArtistDetailScreen(artist: item)),
+            navigateToArtist,
             t.common.error,
           );
           break;
@@ -884,7 +864,7 @@ class MediaContextMenuState extends State<MediaContextMenu> {
       await action();
       if (context.mounted) {
         showSuccessSnackBar(context, successMessage);
-        _notifyRefresh(_itemId());
+        if (_mediaItem case final source?) _notifyRefresh(source);
       }
     } catch (e) {
       if (context.mounted) {
@@ -916,7 +896,7 @@ class MediaContextMenuState extends State<MediaContextMenu> {
       if (!context.mounted) return;
       if (success) {
         showSuccessSnackBar(context, t.matchScreen.unmatchSuccess);
-        _notifyRefresh(item.id);
+        _notifyRefresh(item);
       } else {
         showErrorSnackBar(context, t.matchScreen.unmatchFailed);
       }
@@ -927,23 +907,24 @@ class MediaContextMenuState extends State<MediaContextMenu> {
     }
   }
 
-  /// Navigate to a related item (series or season)
+  /// Fetch and navigate to a related item (series, album, or artist).
   Future<void> _navigateToRelated(
     BuildContext context,
     String? id,
-    Route<Object?> Function(MediaItem) routeBuilder,
+    Future<void> Function(BuildContext context, MediaItem item) navigate,
     String errorPrefix,
   ) async {
     if (id == null) return;
 
     final client = _getMediaClientForItem();
-    final refreshItemId = _itemId();
+    final source = _mediaItem;
+    if (source == null) return;
 
     try {
       final metadata = await client.fetchItem(id);
       if (metadata != null && context.mounted) {
-        await Navigator.push(context, routeBuilder(metadata));
-        _notifyRefresh(refreshItemId);
+        await navigate(context, metadata);
+        _notifyRefresh(source);
       }
     } catch (e) {
       if (context.mounted) {
@@ -1078,14 +1059,11 @@ class MediaContextMenuState extends State<MediaContextMenu> {
       await playTrackWithAlbumContext(context, item);
       return;
     }
-    // Availability gate before the container fetch so the stub costs no
-    // server round-trip.
-    if (!ensureMusicPlaybackAvailable(context)) return;
-    final tracks = await _musicTracksForItem(item);
-    if (!context.mounted) return;
-    await playTracks(
+    // No onError: a failed container fetch falls through to this menu's own
+    // error boundary, which logs it and shows the snackbar.
+    await playFetchedTracks(
       context,
-      tracks: tracks,
+      fetch: () => _musicTracksForItem(item),
       playContext: MusicPlayContext(
         id: item.id,
         title: item.displayTitle,
@@ -1096,10 +1074,17 @@ class MediaContextMenuState extends State<MediaContextMenu> {
 
   Future<void> _handleMusicEnqueue(BuildContext context, {required bool playNext}) async {
     final service = context.read<MusicPlaybackService?>();
-    // Menu entries are hidden on the stub; defensive re-check.
-    if (service == null || !service.isAvailable) return;
-    final tracks = await _musicTracksForItem(_mediaItem!);
-    if (tracks.isEmpty) return;
+    // Menu entries are hidden without a session; defensive re-check.
+    if (service == null) return;
+    final queueSessionRevision = service.queueSessionRevision;
+    List<MediaItem> tracks;
+    try {
+      tracks = await _musicTracksForItem(_mediaItem!);
+    } catch (_) {
+      if (!context.mounted || service.queueSessionRevision != queueSessionRevision) return;
+      rethrow;
+    }
+    if (!context.mounted || service.queueSessionRevision != queueSessionRevision || tracks.isEmpty) return;
     if (playNext) {
       service.addNext(tracks);
     } else {
@@ -1149,53 +1134,25 @@ class MediaContextMenuState extends State<MediaContextMenu> {
 
       if (result == null || !context.mounted) return;
 
-      if (result == '_create_new') {
-        final playlistName = await showTextInputDialog(
-          context,
-          title: t.playlists.create,
-          labelText: t.playlists.playlistName,
-          hintText: t.playlists.enterPlaylistName,
-        );
-
-        if (playlistName == null || playlistName.isEmpty || !context.mounted) {
-          return;
-        }
-
-        appLogger.d('Creating playlist "$playlistName" seeded with item ${item.id}');
-        final newPlaylist = await client.createPlaylist(title: playlistName, items: [item]);
-
-        if (!context.mounted) return;
-
-        if (context.mounted) {
-          if (newPlaylist != null) {
-            appLogger.d('Successfully created playlist: ${newPlaylist.title}');
-            showSuccessSnackBar(context, t.playlists.created);
-            // Trigger refresh of playlists tab
-            LibraryRefreshNotifier().notifyPlaylistsChanged();
-          } else {
-            appLogger.e('Failed to create playlist - API returned null');
-            showErrorSnackBar(context, t.playlists.errorCreating);
-          }
-        }
-      } else {
-        appLogger.d('Adding item ${item.id} to playlist $result');
-        final success = await client.addToPlaylist(playlistId: result, items: [item]);
-
-        if (!context.mounted) return;
-
-        if (context.mounted) {
-          if (success) {
-            appLogger.d('Successfully added item(s) to playlist $result');
-            showSuccessSnackBar(context, t.playlists.itemAdded);
-            // Trigger refresh of playlists tab
-            LibraryRefreshNotifier().notifyPlaylistsChanged();
-            _triggerEagerSyncIfRuleExists(context, client.serverId, result);
-          } else {
-            appLogger.e('Failed to add item(s) to playlist $result - API returned false');
-            showErrorSnackBar(context, t.playlists.errorAdding);
-          }
-        }
-      }
+      await _addItemToContainer<MediaPlaylist>(
+        context,
+        kind: 'playlist',
+        item: item,
+        client: client,
+        result: result,
+        createPrompt: (title: t.playlists.create, label: t.playlists.playlistName, hint: t.playlists.enterPlaylistName),
+        create: (name) => client.createPlaylist(title: name, items: [item]),
+        createdLog: (playlist) => 'Successfully created playlist: ${playlist.title}',
+        eagerSyncId: (_) => null,
+        add: () => client.addToPlaylist(playlistId: result, items: [item]),
+        messages: (
+          created: t.playlists.created,
+          createError: t.playlists.errorCreating,
+          added: t.playlists.itemAdded,
+          addError: t.playlists.errorAdding,
+        ),
+        notifyChanged: () => LibraryRefreshNotifier().notifyPlaylistsChanged(),
+      );
     } catch (e, stackTrace) {
       appLogger.e('Error in add to playlist flow', error: e, stackTrace: stackTrace);
       if (context.mounted) {
@@ -1253,63 +1210,98 @@ class MediaContextMenuState extends State<MediaContextMenu> {
 
       if (result == null || !context.mounted) return;
 
-      if (result == '_create_new') {
-        final collectionName = await showTextInputDialog(
-          context,
+      await _addItemToContainer<String>(
+        context,
+        kind: 'collection',
+        item: item,
+        client: client,
+        result: result,
+        createPrompt: (
           title: t.common.createNew,
-          labelText: t.collections.collectionName,
-          hintText: t.collections.enterCollectionName,
-        );
-
-        if (collectionName == null || collectionName.isEmpty || !context.mounted) {
-          return;
-        }
-
-        appLogger.d('Creating collection "$collectionName" seeded with item ${item.id}');
-        final newCollectionId = await client.createCollection(
-          libraryId: resolvedLibraryId,
-          title: collectionName,
-          items: [item],
-          itemKind: itemKind,
-        );
-
-        if (!context.mounted) return;
-
-        if (context.mounted) {
-          if (newCollectionId != null) {
-            appLogger.d('Successfully created collection with ID: $newCollectionId');
-            showSuccessSnackBar(context, t.collections.created);
-            // Trigger refresh of collections tab
-            LibraryRefreshNotifier().notifyCollectionsChanged();
-            _triggerEagerSyncIfRuleExists(context, client.serverId, newCollectionId);
-          } else {
-            appLogger.e('Failed to create collection - API returned null');
-            showErrorSnackBar(context, t.collections.errorAddingToCollection);
-          }
-        }
-      } else {
-        appLogger.d('Adding item ${item.id} to collection $result');
-        final success = await client.addToCollection(collectionId: result, items: [item]);
-
-        if (!context.mounted) return;
-
-        if (context.mounted) {
-          if (success) {
-            appLogger.d('Successfully added item(s) to collection $result');
-            showSuccessSnackBar(context, t.collections.addedToCollection);
-            // Trigger refresh of collections tab
-            LibraryRefreshNotifier().notifyCollectionsChanged();
-            _triggerEagerSyncIfRuleExists(context, client.serverId, result);
-          } else {
-            appLogger.e('Failed to add item(s) to collection $result - API returned false');
-            showErrorSnackBar(context, t.collections.errorAddingToCollection);
-          }
-        }
-      }
+          label: t.collections.collectionName,
+          hint: t.collections.enterCollectionName,
+        ),
+        create: (name) =>
+            client.createCollection(libraryId: resolvedLibraryId, title: name, items: [item], itemKind: itemKind),
+        createdLog: (id) => 'Successfully created collection with ID: $id',
+        eagerSyncId: (id) => id,
+        add: () => client.addToCollection(collectionId: result, items: [item]),
+        messages: (
+          created: t.collections.created,
+          createError: t.collections.errorAddingToCollection,
+          added: t.collections.addedToCollection,
+          addError: t.collections.errorAddingToCollection,
+        ),
+        notifyChanged: () => LibraryRefreshNotifier().notifyCollectionsChanged(),
+      );
     } catch (e, stackTrace) {
       appLogger.e('Error in add to collection flow', error: e, stackTrace: stackTrace);
       if (context.mounted) {
         showErrorSnackBar(context, '${t.collections.errorAddingToCollection}: ${e.toString()}');
+      }
+    }
+  }
+
+  /// Create-or-add tail shared by the "Add to playlist" and "Add to collection"
+  /// flows. [result] is the picker selection: an existing container id, or the
+  /// `_create_new` sentinel to prompt for a name and create one via [create].
+  /// [eagerSyncId] maps a freshly created container to the id to eager-sync, or
+  /// `null` to skip it.
+  Future<void> _addItemToContainer<T extends Object>(
+    BuildContext context, {
+    required String kind,
+    required MediaItem item,
+    required MediaServerClient client,
+    required String result,
+    required ({String title, String label, String hint}) createPrompt,
+    required Future<T?> Function(String name) create,
+    required String Function(T created) createdLog,
+    required String? Function(T created) eagerSyncId,
+    required Future<bool> Function() add,
+    required ({String created, String createError, String added, String addError}) messages,
+    required VoidCallback notifyChanged,
+  }) async {
+    if (result == '_create_new') {
+      final name = await showTextInputDialog(
+        context,
+        title: createPrompt.title,
+        labelText: createPrompt.label,
+        hintText: createPrompt.hint,
+      );
+
+      if (name == null || name.isEmpty || !context.mounted) return;
+
+      appLogger.d('Creating $kind "$name" seeded with item ${item.id}');
+      final created = await create(name);
+
+      if (!context.mounted) return;
+
+      if (created != null) {
+        appLogger.d(createdLog(created));
+        showSuccessSnackBar(context, messages.created);
+        notifyChanged();
+        final syncId = eagerSyncId(created);
+        if (syncId != null) {
+          _triggerEagerSyncIfRuleExists(context, client.serverId, syncId);
+        }
+      } else {
+        appLogger.e('Failed to create $kind - API returned null');
+        showErrorSnackBar(context, messages.createError);
+      }
+    } else {
+      appLogger.d('Adding item ${item.id} to $kind $result');
+      final success = await add();
+
+      if (!context.mounted) return;
+
+      if (success) {
+        appLogger.d('Successfully added item(s) to $kind $result');
+        showSuccessSnackBar(context, messages.added);
+        notifyChanged();
+        _triggerEagerSyncIfRuleExists(context, client.serverId, result);
+      } else {
+        appLogger.e('Failed to add item(s) to $kind $result - API returned false');
+        showErrorSnackBar(context, messages.addError);
       }
     }
   }
@@ -1325,8 +1317,8 @@ class MediaContextMenuState extends State<MediaContextMenu> {
       builder: (context) => RatingBottomSheet(
         item: item,
         serverClient: client,
-        onServerRatingChanged: (_) => _notifyRefresh(item.id),
-        onServerFavoriteChanged: (_) => _notifyRefresh(item.id),
+        onServerRatingChanged: (_) => _notifyRefresh(item),
+        onServerFavoriteChanged: (_) => _notifyRefresh(item),
       ),
     );
   }
@@ -1395,34 +1387,25 @@ class MediaContextMenuState extends State<MediaContextMenu> {
 
     // Launcher accepts both MediaItem (for collections) and MediaPlaylist.
     final launcher = MediaListPlaybackLauncher.forItem(context, widget.item);
-    await launcher.launchFromCollectionOrPlaylist(item: widget.item, shuffle: shuffle, showLoadingIndicator: false);
+    await launcher.launchFromCollectionOrPlaylist(
+      item: widget.item,
+      shuffle: shuffle,
+      showLoadingIndicator: launcher is JellyfinSequentialLauncher,
+    );
   }
 
   Future<void> _launchAudioPlaylist(BuildContext context, MediaPlaylist playlist, {required bool shuffle}) async {
     // Match PlaylistDetailScreen: fail the availability gate before paying
     // for a full playlist fetch, then hand the tracks to the music session.
-    if (!ensureMusicPlaybackAvailable(context)) return;
-
-    List<MediaItem> tracks;
-    try {
-      tracks = await fetchAllPlaylistItems(_getMediaClientForItem(), playlist.id);
-    } catch (e, st) {
-      appLogger.w('Failed to fetch audio playlist ${playlist.id}', error: e, stackTrace: st);
-      if (context.mounted) {
-        showErrorSnackBar(context, t.messages.errorLoading(error: e.toString()));
-      }
-      return;
-    }
-    if (!context.mounted) return;
-    if (tracks.isEmpty) {
-      showErrorSnackBar(context, t.messages.failedToCreatePlayQueueNoItems);
-      return;
-    }
-
-    await playTracks(
+    await playFetchedTracks(
       context,
-      tracks: tracks,
+      fetch: () => fetchAllPlaylistItems(_getMediaClientForItem(), playlist.id),
       playContext: MusicPlayContext(id: playlist.id, title: playlist.title, kind: MusicPlayContextKind.playlist),
+      onError: (e, st) {
+        appLogger.w('Failed to fetch audio playlist ${playlist.id}', error: e, stackTrace: st);
+        showErrorSnackBar(context, t.messages.errorLoading(error: e.toString()));
+      },
+      onEmpty: () => showErrorSnackBar(context, t.messages.failedToCreatePlayQueueNoItems),
       shuffle: shuffle,
     );
   }
@@ -1510,7 +1493,7 @@ class MediaContextMenuState extends State<MediaContextMenu> {
   }
 
   /// Handle download collection action — opens the same sync/one-time dialog
-  /// as playlists, wired to [showCollectionDownloadOptionsAndQueue].
+  /// as playlists, wired to [showListDownloadOptionsAndQueue].
   Future<void> _handleDownloadCollection(BuildContext context) async {
     final collection = _mediaItem!;
     final downloadProvider = Provider.of<DownloadProvider>(context, listen: false);
@@ -1525,9 +1508,10 @@ class MediaContextMenuState extends State<MediaContextMenu> {
       );
       if (!context.mounted) return;
 
-      final result = await showCollectionDownloadOptionsAndQueue(
+      final result = await showListDownloadOptionsAndQueue(
         context,
-        collectionMetadata: collection,
+        rootMetadata: collection,
+        targetType: ContentTypes.collection,
         items: items,
         client: client,
         downloadProvider: downloadProvider,
@@ -1569,9 +1553,10 @@ class MediaContextMenuState extends State<MediaContextMenu> {
         serverName: playlist.serverName,
       );
 
-      final result = await showPlaylistDownloadOptionsAndQueue(
+      final result = await showListDownloadOptionsAndQueue(
         context,
-        playlistMetadata: playlistMetadata,
+        rootMetadata: playlistMetadata,
+        targetType: ContentTypes.playlist,
         items: items,
         client: client,
         downloadProvider: downloadProvider,
@@ -1644,7 +1629,7 @@ class MediaContextMenuState extends State<MediaContextMenu> {
         // DownloadProvider.deleteDownload now broadcasts the DeletionEvent,
         // so DeletionAware screens (e.g. offline season detail) update without
         // a duplicate notification here.
-        _notifyRefresh(item.id);
+        _notifyRefresh(item);
       }
     } catch (e) {
       appLogger.e('Failed to delete download', error: e);
@@ -1903,12 +1888,13 @@ class _PickerDialogScaffoldState<T> extends State<_PickerDialogScaffold<T>> {
                 FocusableTextField(
                   controller: _filterController,
                   focusNode: _filterFocusNode,
-                  tvKeyboardAutoOpenBehavior: TvKeyboardAutoOpenBehavior.afterFirstFocus,
+                  tvTextInputPresentation: TvTextInputPresentation.flutterOverlay,
+                  tvTextInputAutoOpenBehavior: TvTextInputAutoOpenBehavior.afterFirstFocus,
                   onNavigateDown: _firstItemFocusNode.requestFocus,
                   decoration: pillInputDecoration(
                     context,
                     hintText: widget.searchHint,
-                    prefixIcon: const Icon(Symbols.search_rounded, size: 20),
+                    prefixIcon: const AppIcon(Symbols.search_rounded, size: 20),
                   ),
                   onChanged: _onFilterChanged,
                 ),

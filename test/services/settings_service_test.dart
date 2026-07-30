@@ -1,5 +1,8 @@
+import 'dart:async';
+
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:plezy/i18n/strings.g.dart';
 import 'package:plezy/models/audio_quality_preset.dart';
 import 'package:plezy/models/hotkey_model.dart';
 import 'package:plezy/services/base_shared_preferences_service.dart';
@@ -17,6 +20,7 @@ void main() {
 
   tearDown(() {
     TvDetectionService.debugSetAppleTVOverride(null);
+    TvDetectionService.debugSetAutomotiveOverride(null);
   });
 
   group('SettingsService.parseMpvConfigText', () {
@@ -162,6 +166,32 @@ void main() {
     });
   });
 
+  group('SettingsService app locale', () {
+    test('persists script-specific locales by enum name', () async {
+      var settings = await SettingsService.getInstance();
+
+      await settings.write(SettingsService.appLocale, AppLocale.zhHant);
+      expect(settings.prefs.getString(SettingsService.appLocale.key), 'zhHant');
+
+      BaseSharedPreferencesService.resetForTesting();
+      SettingsService.resetForTesting();
+      settings = await SettingsService.getInstance();
+
+      expect(settings.read(SettingsService.appLocale), AppLocale.zhHant);
+    });
+
+    test('continues to read legacy language-code values', () async {
+      var settings = await SettingsService.getInstance();
+      await settings.prefs.setString(SettingsService.appLocale.key, 'zh');
+
+      BaseSharedPreferencesService.resetForTesting();
+      SettingsService.resetForTesting();
+      settings = await SettingsService.getInstance();
+
+      expect(settings.read(SettingsService.appLocale), AppLocale.zh);
+    });
+  });
+
   group('SettingsService platform gates', () {
     test('audio passthrough stays available on desktop and Apple TV', () {
       expect(PlatformDetector.supportsAudioPassthrough(), isTrue);
@@ -201,6 +231,23 @@ void main() {
 
       expect(settings.read(SettingsService.autoPip), isFalse);
     });
+
+    test('forces auto PiP off on automotive while honoring the stored value elsewhere', () async {
+      final settings = await SettingsService.getInstance();
+      await settings.write(SettingsService.autoPip, true);
+
+      // The pref can only surface a stored true where the host itself supports
+      // PiP. That term is Platform.isAndroid/isIOS/isMacOS, unmockable and false
+      // on the Linux and Windows CI hosts, where the gate pins the pref off no
+      // matter what is stored. pictureInPictureAllowed covers the automotive
+      // veto itself on every host.
+      final hostSupportsPip = PlatformDetector.supportsPictureInPicture();
+      expect(settings.read(SettingsService.autoPip), hostSupportsPip ? isTrue : isFalse);
+
+      TvDetectionService.debugSetAutomotiveOverride(true);
+
+      expect(settings.read(SettingsService.autoPip), isFalse);
+    });
   });
 
   group('SettingsService companion remote prefs', () {
@@ -223,6 +270,40 @@ void main() {
       await settings.resetAllSettings();
 
       expect(settings.read(SettingsService.companionRemoteLastHostAddress), isNull);
+    });
+  });
+
+  group('SettingsService Watch Together relay', () {
+    test('typed writes canonicalize valid bases and reject invalid replacement', () async {
+      final settings = await SettingsService.getInstance();
+
+      await settings.write(SettingsService.customRelayUrl, '  HTTPS://Relay.Example.Test/path///  ');
+      expect(settings.read(SettingsService.customRelayUrl), 'https://relay.example.test/path');
+
+      await expectLater(
+        settings.write(SettingsService.customRelayUrl, 'ws://relay.example.test'),
+        throwsFormatException,
+      );
+      expect(settings.read(SettingsService.customRelayUrl), 'https://relay.example.test/path');
+
+      await settings.write(SettingsService.customRelayUrl, '   ');
+      expect(settings.read(SettingsService.customRelayUrl), isNull);
+    });
+
+    test('startup canonicalizes valid history and removes invalid history', () async {
+      resetSharedPreferencesForTest(
+        initialAsync: {SettingsService.customRelayUrl.key: '  http://Relay.Example.Test:8080/prefix// '},
+      );
+      SettingsService.resetForTesting();
+      var settings = await SettingsService.getInstance();
+      expect(settings.read(SettingsService.customRelayUrl), 'http://relay.example.test:8080/prefix');
+
+      resetSharedPreferencesForTest(
+        initialAsync: {SettingsService.customRelayUrl.key: 'https://relay.example.test/path?wrong=route'},
+      );
+      SettingsService.resetForTesting();
+      settings = await SettingsService.getInstance();
+      expect(settings.read(SettingsService.customRelayUrl), isNull);
     });
   });
 
@@ -276,4 +357,48 @@ void main() {
       expect(settings.isLibraryAllowedForTracker(TrackerService.trakt, 'server:allowed'), isTrue);
     });
   });
+  group('BaseSharedPreferencesService initialization generations', () {
+    test('a reset-raced initialization resolves to the replacement backend', () async {
+      resetSharedPreferencesForTest(initialAsync: const {'generation_marker': 'old'});
+      final firstOnInit = Completer<void>();
+      final firstStarted = Completer<void>();
+      var constructions = 0;
+
+      final raced = BaseSharedPreferencesService.initializeInstance<_GenerationTestPreferences>(() {
+        final construction = constructions++;
+        return _GenerationTestPreferences(
+          construction,
+          onInitStarted: construction == 0 ? firstStarted : null,
+          onInitGate: construction == 0 ? firstOnInit : null,
+        );
+      });
+      await firstStarted.future;
+
+      resetSharedPreferencesForTest(initialAsync: const {'generation_marker': 'new'});
+      final replacement = await BaseSharedPreferencesService.initializeInstance<_GenerationTestPreferences>(
+        () => _GenerationTestPreferences(constructions++),
+      );
+      firstOnInit.complete();
+      final recovered = await raced;
+
+      expect(recovered, same(replacement));
+      expect(recovered.construction, 1);
+      expect(recovered.readString('generation_marker'), 'new');
+      expect(constructions, 2);
+    });
+  });
+}
+
+class _GenerationTestPreferences extends BaseSharedPreferencesService {
+  _GenerationTestPreferences(this.construction, {this.onInitStarted, this.onInitGate});
+
+  final int construction;
+  final Completer<void>? onInitStarted;
+  final Completer<void>? onInitGate;
+
+  @override
+  Future<void> onInit() async {
+    onInitStarted?.complete();
+    await onInitGate?.future;
+  }
 }
