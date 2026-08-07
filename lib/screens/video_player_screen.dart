@@ -43,7 +43,6 @@ import '../services/fullscreen_state_manager.dart';
 import '../services/driver_distraction.dart';
 import '../services/discord_rpc_service.dart';
 import '../services/trackers/tracker_coordinator.dart';
-import '../services/trakt/trakt_scrobble_service.dart';
 import '../services/episode_navigation_service.dart';
 import '../services/apple_tv_remote_touch_service.dart';
 import '../services/media_controls_manager.dart';
@@ -90,6 +89,7 @@ import 'video_player/frame_rate_matcher.dart';
 import 'video_player/live_stream_retry.dart';
 import 'video_player/live_timeline_report.dart';
 import 'video_player/wakelock_controller.dart';
+import 'video_player/playback_failure_action.dart';
 import 'video_player/live_tv_session_args.dart';
 import 'video_player/live_tv_session_state.dart';
 import 'video_player/tv_background_suspend_policy.dart';
@@ -135,17 +135,40 @@ bool shouldAutoStartReloadedMedia({
   required bool startPaused,
 }) => wasPlayingBeforeReload && !watchTogetherOwnsStart && !startPaused;
 
+/// Whether a freshly opened player route starts with its chrome up.
+///
+/// A television starts with the controls down. Auto-hide cannot even arm until
+/// the first frame lands, so chrome raised by the route opening would park the
+/// whole OSD and timebar over the first seconds of picture (#1765). The route
+/// keeps its own loading surface and buffering overlay, the screen focus node
+/// owns back, and the first D-pad press raises the chrome, so a remote loses
+/// nothing. Pointer and touch platforms keep it: the viewer's hand is already
+/// on the surface, and the title and back affordance belong over the spinner.
+bool playerChromeStartsVisible({required bool isTv}) => !isTv;
+
 /// Builds an item-agnostic subtitle preference for an episode replacement.
 ///
 /// Source ids and sidecar URIs belong to the current media item. Only the
 /// committed semantic choice — a [SubtitleIntent] — may cross the item
 /// boundary; native state is a fallback for sessions created before
 /// source-backed selection was recorded.
+///
+/// [sessionPreference] is the screen's last explicit viewer choice and wins
+/// outright: automatic outcomes never overwrite it, so a catalog-gap episode
+/// cannot reset the choice for the rest of the session.
+///
+/// [declinedPreference] is the committed selection's unserved carry: its off
+/// is fallout from a metadata mismatch, not a viewer choice, so it must not
+/// harden into an explicit off on the next item (#1785).
 SubtitlePreference? subtitlePreferenceForItemChange({
   required bool hasCommittedSelection,
   required SubtitleTrack? committedTrack,
   required SubtitleTrack? nativeTrack,
+  SubtitlePreference? declinedPreference,
+  SubtitlePreference? sessionPreference,
 }) {
+  final sessionIntent = SubtitlePreference.demoteToIntent(sessionPreference);
+  if (sessionIntent != null) return sessionIntent;
   SubtitlePreference? normalize(SubtitleTrack? track, {required bool preserveOff}) {
     if (track == null) return null;
     if (track.id == SubtitleTrack.off.id) return preserveOff ? const SubtitlePreference.off() : null;
@@ -158,11 +181,73 @@ SubtitlePreference? subtitlePreferenceForItemChange({
     return normalize(nativeTrack, preserveOff: true);
   }
 
+  final committedIsOff = committedTrack == null || committedTrack.id == SubtitleTrack.off.id;
+  if (declinedPreference != null && committedIsOff) {
+    // Live native state wins — a late native pass may have served the
+    // declined carry — otherwise the declined preference itself keeps
+    // crossing item boundaries until the viewer or a richer catalog
+    // settles it.
+    return normalize(nativeTrack, preserveOff: false) ?? SubtitlePreference.demoteToIntent(declinedPreference);
+  }
+
   if (committedTrack == null) return const SubtitlePreference.off();
 
   final committedPreference = normalize(committedTrack, preserveOff: true);
   if (committedPreference != null) return committedPreference;
   return normalize(nativeTrack, preserveOff: false);
+}
+
+/// Builds the committed [PlaybackSubtitleSelection] for a user's subtitle
+/// pick in one slot, leaving the other slot untouched.
+///
+/// [sourceTrack] and [sidecar] are null when the pick has no source-catalog
+/// identity — items without subtitle rows, or a native track the identity
+/// matcher cannot map. The raw native [track] is committed then (without
+/// source ids), so the session still reflects what is on screen and the next
+/// item boundary demotes it to a semantic intent instead of hardening the
+/// stale previous selection into an explicit off (#1785).
+PlaybackSubtitleSelection subtitleSelectionForUserPick({
+  required PlaybackSubtitleSelection currentSelection,
+  required bool isPrimarySlot,
+  required SubtitleTrack track,
+  MediaSubtitleTrack? sourceTrack,
+  PlaybackSubtitleSidecar? sidecar,
+}) {
+  final resolvedTrack = sourceTrack == null
+      ? track
+      : PlaybackSubtitleResolver.subtitleTrackForSource(sourceTrack, sidecar: sidecar);
+  return PlaybackSubtitleSelection(
+    primaryTrack: isPrimarySlot ? resolvedTrack : currentSelection.primaryTrack,
+    primarySourceStreamId: isPrimarySlot ? sourceTrack?.id : currentSelection.primarySourceStreamId,
+    primarySidecar: isPrimarySlot ? sidecar : currentSelection.primarySidecar,
+    secondaryTrack: isPrimarySlot ? currentSelection.secondaryTrack : resolvedTrack,
+    secondarySourceStreamId: isPrimarySlot ? currentSelection.secondarySourceStreamId : sourceTrack?.id,
+    secondarySidecar: isPrimarySlot ? currentSelection.secondarySidecar : sidecar,
+    // A primary pick is a decision that retires any unresolved carry; a
+    // secondary-only change must not relabel the primary's declined off as
+    // deliberate (that would persist -1 and harden the next boundary).
+    declinedPreference: isPrimarySlot ? null : currentSelection.declinedPreference,
+  );
+}
+
+/// Session-preference form of a source-catalog subtitle choice that had to
+/// go through a reload instead of a local track switch.
+///
+/// The authoritative row — not the reload's outcome — becomes the session
+/// preference: a failed resolution must not turn the viewer's pick into a
+/// carried off. Returns null when the row is absent from [rows] so a stale
+/// id never overwrites the existing session preference.
+SubtitlePreference? sessionPreferenceForSourceSubtitleChoice(
+  PlaybackSourceSubtitleChoice choice,
+  List<MediaSubtitleTrack> rows,
+) {
+  if (choice.isOff) return const SubtitlePreference.off();
+  for (final row in rows) {
+    if (row.id == choice.sourceStreamId) {
+      return SubtitlePreference.track(PlaybackSubtitleResolver.subtitleTrackForSource(row));
+    }
+  }
+  return null;
 }
 
 /// The in-place media-source transitions a [VideoPlayerScreenState] can run.
@@ -251,8 +336,7 @@ _PlaybackOpenTiming _playbackOpenTiming({
 /// change should not silently rewrite the whole series' Plex prefs. The
 /// explicit path for that lives in the metadata-edit UI.
 TrackPreferencePersister _plexTrackPersister(PlexClient? Function() resolve) {
-  return ({required int partId, required String trackType, int? streamID}) async {
-    if (streamID == null) return;
+  return ({required int partId, required String trackType, required int streamID}) async {
     final client = resolve();
     if (client == null) return;
     await (trackType == 'audio'
@@ -368,6 +452,14 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
   AudioTrack? _preferredAudioTrack;
   SubtitlePreference? _preferredSubtitleTrack;
   SubtitlePreference? _preferredSecondarySubtitleTrack;
+
+  /// Last explicit track choices made on this screen. They survive in-place
+  /// reloads but not route replacement. Automatic selections never overwrite
+  /// them, so an episode with a catalog gap cannot reset the viewer's choice
+  /// for the rest of the session (#1785).
+  AudioTrack? _sessionAudioPreference;
+  SubtitlePreference? _sessionSubtitlePreference;
+  SubtitlePreference? _sessionSecondarySubtitlePreference;
   bool _serverSupportsTranscoding = false;
   // Kicked off early in the player initialization attempt for online non-live playback so
   // the metadata fetch (and transcode-decision HTTP, if non-original preset)
@@ -465,6 +557,14 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
   // Screen-level focus node: persists across loading/initialized phases so
   // key events never escape the video player route.
   late final FocusNode _screenFocusNode;
+
+  /// Key for a context below this screen's own [OverlaySheetHost]. The State's
+  /// context sits ABOVE the host, so resolving the controller with `context`
+  /// always misses it and the screen would walk its back pipeline (hide chrome,
+  /// then exit the player) while a sheet is still open (#1741).
+  final GlobalKey _overlayChildKey = GlobalKey();
+
+  BuildContext get _sheetContext => _overlayChildKey.currentContext ?? context;
 
   // VLC-style in-player toast controller (rate changes, backend switch, etc.).
   final PlayerToastController _toastController = PlayerToastController();
@@ -729,7 +829,15 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
   bool _hasFatalPlaybackError = false;
 
   final ValueNotifier<bool> _isExiting = ValueNotifier<bool>(false);
-  final PlayerChromeController _chromeController = PlayerChromeController();
+  final PlayerChromeController _chromeController = PlayerChromeController(
+    initiallyVisible: playerChromeStartsVisible(isTv: PlatformDetector.isTV()),
+  );
+
+  /// Lets startup-policy coverage assert the chrome this route actually opened
+  /// with, rather than a controller the test seeded itself.
+  @visibleForTesting
+  PlayerChromeController get chromeController => _chromeController;
+
   late final PlayerNavigationCoordinator _playerNavigationCoordinator;
 
   @override
@@ -894,7 +1002,14 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
         break;
       case AppLifecycleState.detached:
         _recordLifecycleState('detached');
-        if (widget.isLive) unawaited(_sendStoppedProgressOnce());
+        if (widget.isLive) {
+          unawaited(_sendStoppedProgressOnce());
+        } else {
+          // Last chance for VOD: dispose may never run on a terminate, and the
+          // trackers that own their own watched semantics need the terminal
+          // report.
+          unawaited(TrackerCoordinator.instance.stopPlayback());
+        }
         break;
     }
   }
@@ -1068,6 +1183,7 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
             preferredVersionSignature: widget.preferredVersionSignature,
             qualityPreset: _selectedQualityPreset,
             selectedAudioStreamId: _selectedAudioStreamId,
+            preferredAudioTrack: _preferredAudioTrack,
             preferredSubtitleTrack: _preferredSubtitleTrack,
             sessionIdentifier: _playbackSessionIdentifier,
             transcodeSessionId: _playbackTranscodeSessionId,
@@ -1128,6 +1244,11 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
             }
             await currentPlayer.setProperty('demuxer-max-bytes', '${autoForwardMB * 1024 * 1024}');
             await currentPlayer.setProperty('demuxer-max-back-bytes', '${autoBackMB * 1024 * 1024}');
+            // These tiers size mpv's demuxer. ExoPlayer's LoadControl allocator is a
+            // different consumer — a flat byte cap there collapses to a few seconds of
+            // read-ahead on a 100 Mbps remux — so let the native side derive its own
+            // target on Auto (#1618).
+            await currentPlayer.setProperty('demuxer-max-bytes-auto', 'yes');
           } else {
             // Manual mode: cap back-buffer relative to heap if 1/4 ratio is too high
             final maxBackBytes = min(bufferSizeMB * 1024 * 1024 ~/ 4, autoBackMB * 1024 * 1024);
@@ -1442,7 +1563,7 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
 
   void _handleScreenPlayerNavigation(PlayerNavigationKey navigationKey) {
     if (navigationKey != PlayerNavigationKey.home) {
-      final sheetController = OverlaySheetController.maybeOf(context);
+      final sheetController = OverlaySheetController.maybeOf(_sheetContext);
       if (sheetController?.isOpen ?? false) {
         sheetController!.pop();
         return;
@@ -1581,7 +1702,6 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
     _mediaControlsManager?.dispose();
 
     DiscordRPCService.instance.stopPlayback();
-    TraktScrobbleService.instance.stopPlayback();
     TrackerCoordinator.instance.stopPlayback();
 
     if (_fullscreenListenerAttached) {
@@ -1767,9 +1887,12 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
   }
 
   String? _lastLogError;
-  bool _sawServer500 = false;
 
-  static final RegExp _server500Pattern = RegExp(r'\b(?:HTTP error |Response code: )500\b');
+  /// Statuses in [fatalPlaybackHttpStatuses] the player's own log stream
+  /// reported for this open. Each latches independently: the reconnect path
+  /// deliberately retries a 503 (see `_applyNetworkStreamTuning`), and a
+  /// transient status must never mask the fatal one that follows.
+  final Set<int> _fatalHttpStatuses = <int>{};
 
   // OS Media Controls Integration
 
@@ -1807,7 +1930,12 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
     }
   }
 
-  Future<void> _onAudioTrackChanged(AudioTrack track) async => _trackManager?.onAudioTrackSelectedByUser(track);
+  Future<void> _onAudioTrackChanged(AudioTrack track) async {
+    if (track.id != AudioTrack.auto.id && track.id != AudioTrack.off.id) {
+      _sessionAudioPreference = track;
+    }
+    await _trackManager?.onAudioTrackSelectedByUser(track);
+  }
 
   Future<void> _onSubtitleTrackChanged(SubtitleTrack track, {int? sourceStreamId}) async {
     _rememberNativeSubtitleSelection(track, sourceStreamId: sourceStreamId);
@@ -1832,25 +1960,37 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
     required _SubtitleSelectionSlot slot,
     int? sourceStreamId,
   }) {
-    final session = _playbackSession;
-    if (session == null) return;
-    final currentSelection = session.subtitleSelection;
     if (track.id == SubtitleTrack.off.id) {
+      switch (slot) {
+        case _SubtitleSelectionSlot.primary:
+          _sessionSubtitlePreference = const SubtitlePreference.off();
+        case _SubtitleSelectionSlot.secondary:
+          _sessionSecondarySubtitlePreference = const SubtitlePreference.off();
+      }
+      final session = _playbackSession;
+      if (session == null) return;
+      final currentSelection = session.subtitleSelection;
       _updatePlaybackSessionSubtitleSelection(session, switch (slot) {
         _SubtitleSelectionSlot.primary => const PlaybackSubtitleSelection.off(),
+        // Dropping only the secondary must not relabel the primary's
+        // declined off as deliberate.
         _SubtitleSelectionSlot.secondary => PlaybackSubtitleSelection(
           primaryTrack: currentSelection.primaryTrack,
           primarySourceStreamId: currentSelection.primarySourceStreamId,
           primarySidecar: currentSelection.primarySidecar,
+          declinedPreference: currentSelection.declinedPreference,
         ),
       });
       if (mounted) _setPlayerState(() {});
       return;
     }
 
+    final session = _playbackSession;
+    if (session == null) return;
+    final currentSelection = session.subtitleSelection;
+
     final info = _currentMediaInfo;
     final currentPlayer = player;
-    if (info == null || currentPlayer == null) return;
 
     MediaSubtitleTrack? sourceTrack;
     final currentSourceId = switch (slot) {
@@ -1861,42 +2001,57 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
       _SubtitleSelectionSlot.primary => currentSelection.primarySidecar,
       _SubtitleSelectionSlot.secondary => currentSelection.secondarySidecar,
     };
-    if (sourceStreamId != null) {
-      for (final candidate in info.subtitleTracks) {
-        if (candidate.id == sourceStreamId) {
-          sourceTrack = candidate;
-          break;
+    if (info != null) {
+      if (sourceStreamId != null) {
+        for (final candidate in info.subtitleTracks) {
+          if (candidate.id == sourceStreamId) {
+            sourceTrack = candidate;
+            break;
+          }
+        }
+      } else if (track.isExternal && currentSourceId != null && currentSidecar?.track.uri == track.uri) {
+        for (final candidate in info.subtitleTracks) {
+          if (candidate.id == currentSourceId) {
+            sourceTrack = candidate;
+            break;
+          }
         }
       }
-    } else if (track.isExternal && currentSourceId != null && currentSidecar?.track.uri == track.uri) {
-      for (final candidate in info.subtitleTracks) {
-        if (candidate.id == currentSourceId) {
-          sourceTrack = candidate;
-          break;
-        }
+      if (sourceTrack == null && currentPlayer != null) {
+        sourceTrack = findPlexTrackForMpvSubtitle(
+          track,
+          info.subtitleTracks,
+          allMpvTracks: currentPlayer.state.tracks.subtitle,
+        );
       }
     }
-    sourceTrack ??= findPlexTrackForMpvSubtitle(
-      track,
-      info.subtitleTracks,
-      allMpvTracks: currentPlayer.state.tracks.subtitle,
-    );
-    if (sourceTrack == null) return;
 
-    final sidecar = _sidecarForSourceStreamId(session, sourceTrack.id);
-    final resolvedTrack = PlaybackSubtitleResolver.subtitleTrackForSource(sourceTrack, sidecar: sidecar);
-    final selection = PlaybackSubtitleSelection(
-      primaryTrack: slot == _SubtitleSelectionSlot.primary ? resolvedTrack : currentSelection.primaryTrack,
-      primarySourceStreamId: slot == _SubtitleSelectionSlot.primary
-          ? sourceTrack.id
-          : currentSelection.primarySourceStreamId,
-      primarySidecar: slot == _SubtitleSelectionSlot.primary ? sidecar : currentSelection.primarySidecar,
-      secondaryTrack: slot == _SubtitleSelectionSlot.secondary ? resolvedTrack : currentSelection.secondaryTrack,
-      secondarySourceStreamId: slot == _SubtitleSelectionSlot.secondary
-          ? sourceTrack.id
-          : currentSelection.secondarySourceStreamId,
-      secondarySidecar: slot == _SubtitleSelectionSlot.secondary ? sidecar : currentSelection.secondarySidecar,
+    // No source identity (no catalog, or a native track the identity matcher
+    // cannot map) still commits the raw pick: an uncommitted selection reads
+    // as the session's previous choice — usually the initial off — and the
+    // next episode boundary would harden that into an explicit off while the
+    // viewer visibly watches with subtitles on (#1785). The raw track carries
+    // no source ids, so it demotes to a semantic intent at the boundary.
+    final sidecar = sourceTrack == null ? null : _sidecarForSourceStreamId(session, sourceTrack.id);
+    final selection = subtitleSelectionForUserPick(
+      currentSelection: currentSelection,
+      isPrimarySlot: slot == _SubtitleSelectionSlot.primary,
+      track: track,
+      sourceTrack: sourceTrack,
+      sidecar: sidecar,
     );
+    final resolvedTrack = switch (slot) {
+      _SubtitleSelectionSlot.primary => selection.primaryTrack,
+      _SubtitleSelectionSlot.secondary => selection.secondaryTrack,
+    };
+    if (resolvedTrack != null) {
+      switch (slot) {
+        case _SubtitleSelectionSlot.primary:
+          _sessionSubtitlePreference = SubtitlePreference.track(resolvedTrack);
+        case _SubtitleSelectionSlot.secondary:
+          _sessionSecondarySubtitlePreference = SubtitlePreference.track(resolvedTrack);
+      }
+    }
     _updatePlaybackSessionSubtitleSelection(session, selection);
     if (mounted) _setPlayerState(() {});
   }
@@ -1984,6 +2139,7 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
           _handleScreenPlayerNavigation(PlayerNavigationKey.back);
         },
         child: Builder(
+          key: _overlayChildKey,
           builder: (sheetContext) => _isPlayerInitialized && player != null
               ? _buildVideoPlayer(sheetContext)
               : (_playerInitializationError != null

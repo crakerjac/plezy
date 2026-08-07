@@ -600,6 +600,17 @@ class _DiscoverScreenState extends State<DiscoverScreen>
     unawaited(_discover.load());
   }
 
+  @override
+  void primeRefresh() {
+    // `initState` already fired `load()`. On cold start that pass is still
+    // running when the online-entry hook primes the tab, and asking again only
+    // queues an identical trailing pass — the whole home fan-out twice (#1784).
+    // When nothing is in flight (reconnect-from-offline, or a first pass that
+    // gave up because no server was online yet) a real refresh is still owed.
+    if (_discover.isLoadInFlight) return;
+    fullRefresh();
+  }
+
   /// Whether the loaded hubs span more than one connected server.
   bool _hubsSpanMultipleServers() {
     final serverIds = _hubs.where((hub) => hub.serverId != null).map((hub) => hub.serverId).toSet();
@@ -652,12 +663,13 @@ class _DiscoverScreenState extends State<DiscoverScreen>
         key: _userMenuKey,
         enabled: !_switchingProfile,
         icon: active != null
-            ? ProfileAvatar(profile: active, size: 32)
+            ? ProfileAvatar(profile: active, size: 32, avatarUrl: activeProvider.avatarUrlFor(active.id))
             : const AppIcon(Symbols.account_circle_rounded, fill: 1, size: 32, color: Colors.white),
         tooltip: t.profiles.sectionTitle,
         anchorAlignment: AppMenuAnchorAlignment.end,
         onSelected: (value) => unawaited(_handleUserMenuAction(context, value)),
-        entriesBuilder: (context) => _userMenuItems(context, activeProfile: active, profiles: profiles),
+        entriesBuilder: (context) =>
+            _userMenuItems(context, activeProfile: active, profiles: profiles, activeProvider: activeProvider),
       ),
     );
   }
@@ -666,6 +678,7 @@ class _DiscoverScreenState extends State<DiscoverScreen>
     BuildContext context, {
     required Profile? activeProfile,
     required List<Profile> profiles,
+    required ActiveProfileProvider activeProvider,
   }) {
     final theme = Theme.of(context);
     final switchable = profiles.where((p) => p.id != activeProfile?.id).toList();
@@ -674,7 +687,7 @@ class _DiscoverScreenState extends State<DiscoverScreen>
       for (final p in switchable)
         AppMenuItem<String>(
           value: 'profile:${p.id}',
-          leading: ProfileAvatar(profile: p, size: 24),
+          leading: ProfileAvatar(profile: p, size: 24, avatarUrl: activeProvider.avatarUrlFor(p.id)),
           label: p.displayName,
           trailing: p.isPinProtected
               ? AppIcon(Symbols.lock_rounded, fill: 1, size: 14, color: theme.colorScheme.onSurfaceVariant)

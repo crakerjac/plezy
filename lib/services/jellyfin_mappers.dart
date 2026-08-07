@@ -5,6 +5,7 @@ import '../media/media_item.dart';
 import '../media/media_kind.dart';
 import '../media/media_library.dart';
 import '../media/media_part.dart';
+import '../media/media_rating.dart';
 import '../media/media_role.dart';
 import '../media/media_stream.dart';
 import '../media/media_version.dart';
@@ -127,6 +128,40 @@ class JellyfinImageAbsolutizer {
   }
 }
 
+/// Absolute URL of a Jellyfin user's own profile picture, or `null` when the
+/// user has none (absent [tag]) — returning null keeps us from firing a
+/// request that can only 404.
+///
+/// Unlike item artwork this endpoint carries **no `api_key`**: the user-image
+/// GET has never been authenticated (no `[Authorize]`, and Jellyfin sets no
+/// ASP.NET `FallbackPolicy`) on any release from 10.6 through 12.0-dev.
+/// Leaving the token out keeps it off the image cache key and out of anything
+/// that logs or persists the URL.
+///
+/// The legacy `/Users/{id}/Images/Primary` route is used rather than 10.9's
+/// `/UserImage` because Plezy declares no minimum server version; upstream
+/// still routes the legacy shape and annotates it "Kept for backwards
+/// compatibility". The `{imageType}` segment is bound but ignored server-side
+/// — it always serves the profile image.
+///
+/// [tag] is the server's `PrimaryImageTag`, `MD5(imagePath + lastModified)`,
+/// so the URL changes exactly when the picture does and is a safe immutable
+/// cache key. [maxSize] is honoured up to 10.10 and silently ignored from
+/// 10.11 on, so callers must still bound the decode themselves.
+String? jellyfinUserImageUrl({
+  required String baseUrl,
+  required String userId,
+  required String? tag,
+  int maxSize = 240,
+}) {
+  if (baseUrl.isEmpty || userId.isEmpty || tag == null || tag.isEmpty) return null;
+  final uri = JellyfinImageAbsolutizer.joinUri(
+    baseUrl: baseUrl,
+    urlOrPath: '/Users/${Uri.encodeComponent(userId)}/Images/Primary',
+  );
+  return uri.replace(queryParameters: {'tag': tag, 'maxWidth': '$maxSize', 'maxHeight': '$maxSize'}).toString();
+}
+
 /// Pure mapping functions from Jellyfin's `BaseItemDto` JSON shape into the
 /// neutral [MediaItem] / [MediaLibrary] domain types.
 ///
@@ -236,6 +271,7 @@ class JellyfinMappers {
       addedAt: jellyfinIsoToEpochSeconds(item['DateCreated'] as String?),
       updatedAt: jellyfinIsoToEpochSeconds(item['DateLastSaved'] as String? ?? item['DateModified'] as String?),
       rating: (item['CommunityRating'] as num?)?.toDouble(),
+      ratings: _ratingSources(item, kind),
       isFavorite: _userData(item)?['IsFavorite'] as bool?,
       genres: _stringList(item['Genres']),
       directors: _peopleByType(item['People'], 'Director'),
@@ -366,6 +402,36 @@ class JellyfinMappers {
     if (total == null || unplayed == null) return null;
     if (unplayed >= total) return 0;
     return total - unplayed;
+  }
+
+  /// Jellyfin's two rating slots, community score first.
+  ///
+  /// `BaseItemDto` has no per-source array — the server collapses whatever the
+  /// metadata fetchers found into these two fields, so this is at most two
+  /// entries. Both arrive on every response; neither is gated behind `Fields`.
+  ///
+  /// `CommunityRating` is 0-10 but its provenance is unknowable from the DTO
+  /// (TMDB `vote_average`, IMDb via OMDb, or a local NFO — last writer wins),
+  /// so it stays the generic `audience` source with no brand badge.
+  /// `CriticRating` is the Rotten Tomatoes Tomatometer as a 0-100 percent, so
+  /// it is divided rather than range-sniffed: a Tomatometer of 9 means 9%.
+  static List<MediaRatingSource>? _ratingSources(Map<String, dynamic> item, MediaKind kind) {
+    // Photo items reuse CommunityRating for the EXIF 0-5 star rating.
+    if (kind == MediaKind.photo) return null;
+
+    final ratings = <MediaRatingSource>[];
+    if (_finiteRating(item['CommunityRating']) case final community? when community >= 0 && community <= 10) {
+      ratings.add(MediaRatingSource(source: 'audience', value: community));
+    }
+    if (_finiteRating(item['CriticRating']) case final critic? when critic >= 0 && critic <= 100) {
+      ratings.add(MediaRatingSource(source: 'rottenTomatoesCritic', value: critic / 10));
+    }
+    return ratings.isEmpty ? null : ratings;
+  }
+
+  static double? _finiteRating(Object? value) {
+    final rating = flexibleDouble(value);
+    return rating != null && rating.isFinite ? rating : null;
   }
 
   static String? _firstString(Object? list) {

@@ -3,6 +3,7 @@ import '../media/ids.dart';
 
 import '../media/media_hub.dart';
 import '../media/media_item.dart';
+import '../media/media_item_merge.dart';
 import '../media/media_kind.dart';
 import '../media/media_library.dart';
 import '../media/media_server_client.dart';
@@ -51,6 +52,33 @@ Map<String, int> _searchKindCounts(Iterable<MediaItem> items) {
     counts.update(item.kind.name, (count) => count + 1, ifAbsent: () => 1);
   }
   return counts;
+}
+
+/// Drop items belonging to a hidden library.
+///
+/// Items the backend could not attribute to a library ([MediaItem.libraryGlobalKey]
+/// is null) are kept: Plex search and `/library/shared/all` return shared and
+/// external rows that have no local section, and those are not something the
+/// user hid.
+List<MediaItem> _withoutHiddenLibraries(List<MediaItem> items, Set<String>? hiddenLibraryKeys) {
+  if (hiddenLibraryKeys == null || hiddenLibraryKeys.isEmpty) return items;
+  return items.where((item) {
+    final libraryKey = item.libraryGlobalKey;
+    return libraryKey == null || !hiddenLibraryKeys.contains(libraryKey);
+  }).toList();
+}
+
+/// The server-local library ids [serverId] owns within [hiddenLibraryKeys],
+/// which hold cross-server `serverId:libraryId` global keys. Backends that
+/// cannot attribute a search hit to a library need these to scope the request.
+Set<String> _hiddenLibraryIdsOn(String serverId, Set<String>? hiddenLibraryKeys) {
+  if (hiddenLibraryKeys == null || hiddenLibraryKeys.isEmpty) return const {};
+  final ids = <String>{};
+  for (final key in hiddenLibraryKeys) {
+    final parsed = parseGlobalKey(key);
+    if (parsed != null && parsed.serverId == serverId) ids.add(parsed.ratingKey);
+  }
+  return ids;
 }
 
 /// Cross-server aggregation: fans calls out to every online client and
@@ -171,17 +199,8 @@ class DataAggregationService {
       failureMessage: (serverId) => 'Failed on-deck fetch from $serverId',
       fetch: (_, client) => client.fetchContinueWatching(count: limit),
     );
-    final allOnDeck = fetched.items;
-
     // Filter out items from hidden libraries
-    List<MediaItem> filteredOnDeck = allOnDeck;
-    if (hiddenLibraryKeys != null && hiddenLibraryKeys.isNotEmpty) {
-      filteredOnDeck = allOnDeck.where((item) {
-        if (item.libraryId == null || item.serverId == null) return true;
-        final globalKey = buildGlobalKey(ServerId(item.serverId!), item.libraryId!);
-        return !hiddenLibraryKeys.contains(globalKey);
-      }).toList();
-    }
+    var filteredOnDeck = _withoutHiddenLibraries(fetched.items, hiddenLibraryKeys);
 
     // Sort by most recently viewed, falling back to addedAt for unwatched items.
     // Same key as JellyfinClient's continue-watching merge (MediaItem.recencySortKey)
@@ -387,6 +406,8 @@ class DataAggregationService {
     if (tmdb != null) keys.add('$scope:tmdb:$tmdb');
     final tvdb = externalIds.tvdb;
     if (tvdb != null) keys.add('$scope:tvdb:$tvdb');
+    final anidb = externalIds.anidb;
+    if (anidb != null) keys.add('$scope:anidb:$anidb');
   }
 
   String? _stableMediaGuid(String? guid) {
@@ -434,29 +455,35 @@ class DataAggregationService {
         final serverLibraries = libraries?[serverId];
         final shouldUseGlobalHubs = useGlobalHubs && client.capabilities.richHubs;
         final hubItemLimit = limit ?? defaultHubPreviewLimit;
-        final hubs = shouldUseGlobalHubs
-            ? [
-                ...await client.fetchGlobalHubs(limit: hubItemLimit, includePlaybackHubs: includePlaybackHubs),
-                // Plex's promoted/global hub endpoint never includes music
-                // libraries — append their per-library hubs so music rows
-                // reach home. No-op (zero extra calls) without a visible
-                // music library.
-                ...await _fetchLibraryHubsForClient(
-                  client,
-                  limit: hubItemLimit,
-                  hiddenLibraryKeys: hiddenLibraryKeys,
-                  includePlaybackHubs: includePlaybackHubs,
-                  libraries: serverLibraries ?? const [],
-                  kinds: const {MediaKind.artist},
-                ),
-              ]
-            : await _fetchLibraryHubsForClient(
-                client,
-                limit: hubItemLimit,
-                hiddenLibraryKeys: hiddenLibraryKeys,
-                includePlaybackHubs: includePlaybackHubs,
-                libraries: useGlobalHubs ? serverLibraries : null,
-              );
+        List<MediaHub> hubs;
+        if (shouldUseGlobalHubs) {
+          // Both legs are independent, so start them before awaiting either.
+          // Spreading `...await a, ...await b` into one list literal evaluates
+          // them in order, which serialised the music rows behind the global
+          // hub round trip.
+          final globalFuture = client.fetchGlobalHubs(limit: hubItemLimit, includePlaybackHubs: includePlaybackHubs);
+          // Plex's promoted/global hub endpoint never includes music
+          // libraries — append their per-library hubs so music rows
+          // reach home. No-op (zero extra calls) without a visible
+          // music library.
+          final musicFuture = _fetchLibraryHubsForClient(
+            client,
+            limit: hubItemLimit,
+            hiddenLibraryKeys: hiddenLibraryKeys,
+            includePlaybackHubs: includePlaybackHubs,
+            libraries: serverLibraries ?? const [],
+            kinds: const {MediaKind.artist},
+          );
+          hubs = [...await globalFuture, ...await musicFuture];
+        } else {
+          hubs = await _fetchLibraryHubsForClient(
+            client,
+            limit: hubItemLimit,
+            hiddenLibraryKeys: hiddenLibraryKeys,
+            includePlaybackHubs: includePlaybackHubs,
+            libraries: useGlobalHubs ? serverLibraries : null,
+          );
+        }
         return _postProcessHubs(hubs, serverId: ServerId(serverId), hiddenLibraryKeys: hiddenLibraryKeys);
       },
     );
@@ -487,31 +514,39 @@ class DataAggregationService {
       return true;
     }).toList();
 
+    // Sliding window rather than batches of three separated by a barrier: a
+    // batch waits for its slowest member before the next one starts, so wall
+    // time was the sum of per-batch maxima and one slow library stalled every
+    // library queued behind it (#1784). Starting the next request the moment
+    // any slot frees keeps the same peak concurrency with no head-of-line
+    // blocking. Results are written back by index so hub order stays the
+    // library order regardless of completion order.
     const concurrency = 3;
-    final all = <MediaHub>[];
-    for (var start = 0; start < visible.length; start += concurrency) {
-      final batch = visible.skip(start).take(concurrency);
-      final results = await Future.wait(
-        batch.map((l) async {
-          try {
-            return await client.fetchLibraryHubs(
-              l.id,
-              libraryName: l.title,
-              limit: limit,
-              includePlaybackHubs: includePlaybackHubs,
-              libraryKind: l.kind,
-            );
-          } catch (e, st) {
-            appLogger.e('Failed to fetch library hubs for ${l.globalKey}', error: e, stackTrace: st);
-            return <MediaHub>[];
-          }
-        }),
-      );
-      for (final list in results) {
-        all.addAll(list);
+    final results = List<List<MediaHub>>.filled(visible.length, const []);
+    var next = 0;
+
+    Future<void> worker() async {
+      while (true) {
+        final index = next++;
+        if (index >= visible.length) return;
+        final library = visible[index];
+        try {
+          results[index] = await client.fetchLibraryHubs(
+            library.id,
+            libraryName: library.title,
+            limit: limit,
+            includePlaybackHubs: includePlaybackHubs,
+            libraryKind: library.kind,
+          );
+        } catch (e, st) {
+          appLogger.e('Failed to fetch library hubs for ${library.globalKey}', error: e, stackTrace: st);
+        }
       }
     }
-    return all;
+
+    await Future.wait([for (var i = 0; i < concurrency && i < visible.length; i++) worker()]);
+
+    return [for (final list in results) ...list];
   }
 
   /// Filter hidden-library items and drop empty hubs.
@@ -537,7 +572,16 @@ class DataAggregationService {
 
   /// Search across all online servers (Plex + Jellyfin). Per-server outcomes
   /// distinguish authoritative empty results from failed or cancelled legs.
-  Future<SearchAggregationResult> searchAcrossServers(String query, {int? limit, AbortController? abort}) async {
+  ///
+  /// [hiddenLibraryKeys] excludes results the user has hidden, matching every
+  /// other aggregated surface. Backends whose search rows carry no library id
+  /// cannot be filtered here; they must scope the search server-side instead.
+  Future<SearchAggregationResult> searchAcrossServers(
+    String query, {
+    int? limit,
+    Set<String>? hiddenLibraryKeys,
+    AbortController? abort,
+  }) async {
     if (query.trim().isEmpty) {
       return (
         items: const <MediaItem>[],
@@ -566,7 +610,12 @@ class DataAggregationService {
       failureMessage: (serverId) => 'Search failed on $serverId',
       fetch: (serverId, client) async {
         final stopwatch = Stopwatch()..start();
-        final items = await client.searchItems(query, limit: fetchLimit, abort: abort);
+        final items = await client.searchItems(
+          query,
+          limit: fetchLimit,
+          abort: abort,
+          excludedLibraryIds: _hiddenLibraryIdsOn(serverId, hiddenLibraryKeys),
+        );
         appLogger.i(
           'Search completed on $serverId in ${stopwatch.elapsedMilliseconds}ms: '
           '${items.length} results ${_searchKindCounts(items)}',
@@ -575,7 +624,10 @@ class DataAggregationService {
       },
     );
     abort?.throwIfAborted();
-    final items = rankMediaSearchResults(fetched.items, query, limit: resultLimit);
+    // Before ranking, so hidden results cannot spend the `resultLimit` budget
+    // and silently shrink what the user sees.
+    final visible = _withoutHiddenLibraries(fetched.items, hiddenLibraryKeys);
+    final items = rankMediaSearchResults(visible, query, limit: resultLimit);
 
     appLogger.i(
       'Search aggregation completed: ${items.length} results '
@@ -594,6 +646,15 @@ class DataAggregationService {
   /// Reverse external-id lookup fanned out to every online server (see
   /// [MediaServerClient.findByExternalIds]). One request wave per tap on an
   /// Explore catalog item; per-server failures are logged and skipped.
+  ///
+  /// Every server contributes every copy it holds, not one apiece: the same
+  /// movie routinely sits in a 4K library and an HD library on one server
+  /// (#1754). Results are deduped by global key and ordered best-first with
+  /// [compareLibraryCopies] so the chooser is stable across repeated passes.
+  ///
+  /// Because per-server failures are dropped here, a caller holding earlier
+  /// results must merge rather than replace (see [mergeLibraryCopies]) — a
+  /// degraded wave is not evidence that a copy went away.
   Future<List<MediaItem>> findByExternalIdsAcrossServers(
     ExternalIds ids, {
     required MediaKind kind,
@@ -618,11 +679,11 @@ class DataAggregationService {
         );
       } catch (e, st) {
         appLogger.w('External-id lookup failed on ${entry.key}', error: e, stackTrace: st);
-        return null;
+        return const <MediaItem>[];
       }
     });
 
-    return (await Future.wait(futures)).nonNulls.toList();
+    return mergeLibraryCopies(const [], (await Future.wait(futures)).expand((items) => items));
   }
 
   /// Group libraries by server (internal aggregation helper).

@@ -2,7 +2,9 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:plezy/media/media_backend.dart';
 import 'package:plezy/media/media_kind.dart';
 import 'package:plezy/media/media_source_info.dart';
+import 'package:plezy/models/jellyfin/jellyfin_user_profile.dart';
 import 'package:plezy/mpv/mpv.dart';
+import 'package:plezy/services/jellyfin_media_info_mapper.dart';
 import 'package:plezy/services/playback_initialization_types.dart';
 import 'package:plezy/services/playback_subtitle_resolver.dart';
 import 'package:plezy/services/subtitle_preference.dart';
@@ -238,6 +240,59 @@ void main() {
     expect(result.sidecarsAtOpen, isEmpty);
   });
 
+  group('Jellyfin server subtitle answer', () {
+    // Verbatim shape of a direct-played episode from a real Jellyfin server:
+    // the container flags one row default+forced, and the response carries the
+    // index the server picked for this user (null when it picked none).
+    MediaSourceInfo jellyfinInfo({Object? defaultSubtitleStreamIndex}) => jellyfinMediaSourceToMediaSourceInfo({
+      'Id': 'src-1',
+      'DefaultSubtitleStreamIndex': defaultSubtitleStreamIndex,
+      'MediaStreams': [
+        {'Index': 1, 'Type': 'Audio', 'Language': 'eng', 'IsDefault': true},
+        {'Index': 3, 'Type': 'Subtitle', 'Language': 'eng', 'Codec': 'ass', 'IsDefault': true, 'IsForced': true},
+        {'Index': 4, 'Type': 'Subtitle', 'Language': 'eng', 'Codec': 'ass'},
+      ],
+    });
+
+    JellyfinUserProfile profileWithMode(String mode) => JellyfinUserProfile.fromUserDto({
+      'Configuration': {'SubtitleMode': mode, 'PlayDefaultAudioTrack': true},
+    });
+
+    test('a user who turned subtitles off on the server gets none (#1779)', () {
+      final result = PlaybackSubtitleResolver.resolve(
+        metadata: metadata,
+        mediaInfo: jellyfinInfo(),
+        sidecars: const [],
+        profileSettings: profileWithMode('None'),
+      );
+
+      expect(result.isOff, isTrue);
+    });
+
+    test('the stream the server did pick still plays', () {
+      final result = PlaybackSubtitleResolver.resolve(
+        metadata: metadata,
+        mediaInfo: jellyfinInfo(defaultSubtitleStreamIndex: 3),
+        sidecars: const [],
+        profileSettings: profileWithMode('Default'),
+      );
+
+      expect(result.isOff, isFalse);
+      expect(result.primarySourceStreamId, 3);
+    });
+
+    test('an off persisted through progress reports plays nothing', () {
+      final result = PlaybackSubtitleResolver.resolve(
+        metadata: metadata,
+        mediaInfo: jellyfinInfo(defaultSubtitleStreamIndex: -1),
+        sidecars: const [],
+        profileSettings: profileWithMode('Default'),
+      );
+
+      expect(result.isOff, isTrue);
+    });
+  });
+
   test('retains each source metadata row for a shared preloaded container', () {
     final result = PlaybackSubtitleResolver.resolve(
       metadata: metadata,
@@ -417,7 +472,10 @@ void main() {
           _sourceSubtitle(7, language: 'fra', usesExternalDelivery: true),
           _sourceSubtitle(8, language: 'fra', title: 'FR Forced', usesExternalDelivery: true),
         ]),
-        sidecars: [_sidecar(7, language: 'fra'), _sidecar(8, language: 'fra')],
+        sidecars: [
+          _sidecar(7, language: 'fra'),
+          _sidecar(8, language: 'fra'),
+        ],
         preferredSubtitleTrack: forcedIntent,
       );
 
@@ -432,7 +490,10 @@ void main() {
           _sourceSubtitle(7, language: 'fra', usesExternalDelivery: true),
           _sourceSubtitle(8, language: 'fra', forced: true, usesExternalDelivery: true),
         ]),
-        sidecars: [_sidecar(7, language: 'fra'), _sidecar(8, language: 'fra')],
+        sidecars: [
+          _sidecar(7, language: 'fra'),
+          _sidecar(8, language: 'fra'),
+        ],
         preferredSubtitleTrack: forcedIntent,
       );
 
@@ -446,7 +507,10 @@ void main() {
           _sourceSubtitle(7, language: 'fra', selected: true, usesExternalDelivery: true),
           _sourceSubtitle(9, language: 'eng', usesExternalDelivery: true),
         ]),
-        sidecars: [_sidecar(7, language: 'fra'), _sidecar(9)],
+        sidecars: [
+          _sidecar(7, language: 'fra'),
+          _sidecar(9),
+        ],
         preferredSubtitleTrack: forcedIntent,
       );
 
@@ -471,7 +535,10 @@ void main() {
           _sourceSubtitle(8, language: 'fra', title: 'FR Forced', usesExternalDelivery: true),
           _sourceSubtitle(9, language: 'eng', selected: true, usesExternalDelivery: true),
         ]),
-        sidecars: [_sidecar(8, language: 'fra'), _sidecar(9)],
+        sidecars: [
+          _sidecar(8, language: 'fra'),
+          _sidecar(9),
+        ],
         preferredSubtitleTrack: const SubtitlePreference.intent(
           SubtitleIntent(language: 'fra', forced: false, title: 'French', codec: 'srt', isExternal: true),
         ),
@@ -479,6 +546,169 @@ void main() {
 
       expect(result.primarySourceStreamId, 9);
     });
+  });
+
+  group('issue #1785 declined-carry surfacing', () {
+    const swedishIntent = SubtitlePreference.intent(
+      SubtitleIntent(language: 'swe', forced: false, title: 'Swedish', codec: 'srt'),
+    );
+
+    MediaSubtitleTrack untaggedRow(int id, {String? title, String codec = 'srt'}) =>
+        MediaSubtitleTrack(id: id, title: title, codec: codec, selected: false, forced: false);
+
+    test('an untagged catalog row with the matching title still serves the carry', () {
+      final result = PlaybackSubtitleResolver.resolve(
+        metadata: metadata,
+        mediaInfo: _mediaInfo([untaggedRow(3, title: 'English'), untaggedRow(4, title: 'Swedish')]),
+        sidecars: const [],
+        preferredSubtitleTrack: swedishIntent,
+        preserveSourceIdentity: false,
+      );
+
+      expect(result.primarySourceStreamId, 4);
+      expect(result.declinedPreference, isNull);
+    });
+
+    test('a carry no row can serve is kept as declined, not converted to off', () {
+      final result = PlaybackSubtitleResolver.resolve(
+        metadata: metadata,
+        mediaInfo: _mediaInfo([_sourceSubtitle(3, language: 'eng')]),
+        sidecars: const [],
+        preferredSubtitleTrack: swedishIntent,
+        preserveSourceIdentity: false,
+      );
+
+      expect(result.isOff, isTrue);
+      expect(result.declinedPreference, swedishIntent);
+    });
+
+    test('an explicit off carry is a decision, never a decline', () {
+      final result = PlaybackSubtitleResolver.resolve(
+        metadata: metadata,
+        mediaInfo: _mediaInfo([_sourceSubtitle(3, language: 'eng')]),
+        sidecars: const [],
+        preferredSubtitleTrack: const SubtitlePreference.off(),
+        preserveSourceIdentity: false,
+      );
+
+      expect(result.isOff, isTrue);
+      expect(result.declinedPreference, isNull);
+    });
+
+    test('a ladder off with no carry at all is a decision, never a decline', () {
+      final result = PlaybackSubtitleResolver.resolve(
+        metadata: metadata,
+        mediaInfo: _mediaInfo([_sourceSubtitle(3, language: 'eng')]),
+        sidecars: const [],
+      );
+
+      expect(result.isOff, isTrue);
+      expect(result.declinedPreference, isNull);
+    });
+
+    test('same-language rows are told apart by their titles across episodes (#1785)', () {
+      // Real-world shape (Madoka Magica on Plex): both rows English ASS with
+      // the bare displayTitle "English"; only Title separates the full
+      // dialogue track from the signs/songs track.
+      MediaSubtitleTrack row(int id, String title, {bool selected = false}) => MediaSubtitleTrack(
+        id: id,
+        language: 'English',
+        languageCode: 'eng',
+        title: title,
+        displayTitle: 'English',
+        codec: 'ass',
+        selected: selected,
+        forced: false,
+      );
+
+      // E1: the viewer picks the signs track and the session commits it. The
+      // committed track must keep the discriminating row title, not the
+      // language-only display title.
+      final committed = PlaybackSubtitleResolver.subtitleTrackForSource(row(53164, 'Signs/OP/ED'));
+      expect(committed.title, 'Signs/OP/ED');
+
+      // Episode boundary demotes the committed reference to its intent.
+      final carried = SubtitlePreference.demoteToIntent(SubtitlePreference.track(committed));
+
+      // E2: same pair; the dialogue row sorts first AND is server-selected —
+      // the carried signs choice must still win over both.
+      final result = PlaybackSubtitleResolver.resolve(
+        metadata: metadata,
+        mediaInfo: _mediaInfo([row(53193, 'Styled Subtitles', selected: true), row(53194, 'Signs/OP/ED')]),
+        sidecars: const [],
+        preferredSubtitleTrack: carried,
+        preserveSourceIdentity: false,
+      );
+
+      expect(result.primarySourceStreamId, 53194);
+      expect(result.declinedPreference, isNull);
+    });
+
+    test('a Jellyfin signs pick beats the server per-episode default on the next episode (#1785)', () {
+      // Verbatim shape from a live Jellyfin server (Attack on Titan): both
+      // rows English ASS, discriminated by Title, and the server names the
+      // full-dialogue row (DefaultSubtitleStreamIndex 3) on every episode.
+      MediaSourceInfo episodeInfo() => jellyfinMediaSourceToMediaSourceInfo({
+        'Id': 'src-1',
+        'DefaultSubtitleStreamIndex': 3,
+        'MediaStreams': [
+          {'Index': 1, 'Type': 'Audio', 'Language': 'jpn', 'IsDefault': true},
+          {
+            'Index': 3,
+            'Type': 'Subtitle',
+            'Language': 'eng',
+            'Codec': 'ass',
+            'Title': 'Full Subtitles',
+            'DisplayTitle': 'Full Subtitles - English - Default - ASS',
+            'IsDefault': true,
+          },
+          {
+            'Index': 4,
+            'Type': 'Subtitle',
+            'Language': 'eng',
+            'Codec': 'ass',
+            'Title': 'Signs & Songs',
+            'DisplayTitle': 'Signs & Songs - English - ASS',
+          },
+        ],
+      });
+
+      final e1 = episodeInfo();
+      final picked = e1.subtitleTracks.firstWhere((row) => row.id == 4);
+      final committed = PlaybackSubtitleResolver.subtitleTrackForSource(picked);
+      expect(committed.title, 'Signs & Songs');
+
+      final carried = SubtitlePreference.demoteToIntent(SubtitlePreference.track(committed));
+      final result = PlaybackSubtitleResolver.resolve(
+        metadata: metadata,
+        mediaInfo: episodeInfo(),
+        sidecars: const [],
+        preferredSubtitleTrack: carried,
+        preserveSourceIdentity: false,
+      );
+
+      expect(result.primarySourceStreamId, 4);
+      expect(result.declinedPreference, isNull);
+    });
+  });
+
+  test('audio source descriptor keeps the discriminating row title', () {
+    // Server display titles collapse to the bare language; a commentary or
+    // alternate mix is only identifiable by the row's own title.
+    final row = MediaAudioTrack(
+      id: 7,
+      languageCode: 'eng',
+      title: 'Commentary',
+      displayTitle: 'English',
+      codec: 'ac3',
+      channels: 6,
+      selected: false,
+    );
+    final track = PlaybackSubtitleResolver.audioTrackForSource(row);
+    expect(track.id, 'source:7');
+    expect(track.title, 'Commentary');
+    expect(track.language, 'eng');
+    expect(track.channels, 6);
   });
 
   test('selected embedded subtitle keeps sidecars out of the open', () {

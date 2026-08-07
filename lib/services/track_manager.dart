@@ -18,7 +18,7 @@ import '../utils/track_label_builder.dart';
 /// stream indexes) or lack server-side stream selection leave this null.
 /// [trackType] is `'audio'` or `'subtitle'`.
 typedef TrackPreferencePersister =
-    Future<void> Function({required int partId, required String trackType, int? streamID});
+    Future<void> Function({required int partId, required String trackType, required int streamID});
 
 /// Manages track (audio + subtitle) lifecycle: external subtitle loading,
 /// automatic track selection, server preference sync, and cycling.
@@ -385,10 +385,12 @@ class TrackManager {
 
   // ── Track cycling (remote/keyboard shortcuts) ──────────────────────
 
-  /// Cycle to the next subtitle track and save the preference.
-  void cycleSubtitleTrack() {
+  /// Cycle to the next subtitle track, save the preference, and return the
+  /// track now playing so the caller can record it as the committed choice.
+  /// Returns null when there was nothing to cycle.
+  SubtitleTrack? cycleSubtitleTrack() {
     final tracks = player.state.tracks.subtitle.where((t) => t.id != 'auto').toList();
-    if (tracks.isEmpty) return;
+    if (tracks.isEmpty) return null;
 
     final current = player.state.track.subtitle;
     final currentIndex = tracks.indexWhere((t) => t.id == current?.id);
@@ -403,6 +405,7 @@ class TrackManager {
           : 'Subtitles: ${TrackLabelBuilder.subtitleLabel(title: next.title, language: next.language, codec: next.codec, forced: next.isForced, index: nextIndex).joined}';
       showMessage?.call(label, duration: const Duration(seconds: 1));
     }
+    return next;
   }
 
   /// Cycle to the next audio track and save the preference.
@@ -530,7 +533,15 @@ class TrackManager {
   }
 
   /// Save the stream selection for the current part to the server.
+  ///
+  /// A null [streamID] means no server stream could be identified for the
+  /// chosen track. There is no local fallback store, so the choice is simply
+  /// lost — say so instead of reporting a save that never happened.
   Future<void> _saveTrackPreferences({required int partId, required String trackType, int? streamID}) async {
+    if (streamID == null) {
+      appLogger.w('Not saving $trackType stream selection: no server stream matched the selected track');
+      return;
+    }
     try {
       if (!isActive()) return;
       final persist = persistTrackPreference;

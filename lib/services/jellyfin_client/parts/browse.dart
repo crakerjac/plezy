@@ -2,23 +2,21 @@ part of '../../jellyfin_client.dart';
 
 String _segment(String value) => Uri.encodeComponent(value);
 
-/// Transport policy for a hub surface: bounded transient retries, no
-/// endpoint failover. See `_getItemsResponse`.
-typedef _HubRetryPolicy = ({String operation, List<Duration> attemptTimeouts});
+/// Transport policy for a hub surface: one whole-request deadline, retries
+/// only on immediate connection errors, no endpoint failover. See
+/// `_getItemsResponse` and [retryTransientMediaServerCall].
+typedef _HubRetryPolicy = ({String operation, Duration deadline});
 
-const _HubRetryPolicy _homeHubRetry = (
-  operation: 'Jellyfin home hubs',
-  attemptTimeouts: MediaServerTimeouts.homeHubAttemptTimeouts,
-);
+const _HubRetryPolicy _homeHubRetry = (operation: 'Jellyfin home hubs', deadline: MediaServerTimeouts.homeHubDeadline);
 
 const _HubRetryPolicy _libraryHubRetry = (
   operation: 'Jellyfin library hubs',
-  attemptTimeouts: MediaServerTimeouts.libraryHubAttemptTimeouts,
+  deadline: MediaServerTimeouts.libraryHubDeadline,
 );
 
 const _HubRetryPolicy _continueWatchingRetry = (
   operation: 'Jellyfin continue watching',
-  attemptTimeouts: MediaServerTimeouts.homeHubAttemptTimeouts,
+  deadline: MediaServerTimeouts.homeHubDeadline,
 );
 
 List<Map<String, dynamic>> _itemsArray(Object? data) {
@@ -58,20 +56,56 @@ LibraryPage<T> _pagedItems<T>(
 /// list calls; we ask for the minimum extras needed to drive the
 /// MediaItem mapper:
 ///  - `RecursiveItemCount`/`ChildCount` for series leaf count
-///  - `UserData` is included in defaults but pinned for safety
-///  - `PremiereDate` for sort-by-release-date and episode metadata
 ///  - `OriginalTitle`/`SortName` for sort + alphabetised display
 ///  - `Overview` so list rows can show their description
 ///
 /// Heavier fields (`MediaSources`, `People`, `Genres`, `Tags`, `Studios`,
 /// `Taglines`, `ProviderIds`, `Chapters`) stay in [_detailFields] — together
 /// they added seconds to large-library pages on small home servers.
-const _browseFields = 'RecursiveItemCount,ChildCount,UserData,PremiereDate,OriginalTitle,SortName,Overview';
+///
+/// `UserData` and `PremiereDate` are deliberately absent: neither is a member
+/// of Jellyfin's `ItemFields` enum, so the server's
+/// `CommaDelimitedCollectionModelBinder` drops them element-by-element and
+/// they never did anything. `UserData` is governed by `EnableUserData`
+/// (default true) and `dto.PremiereDate` is set unconditionally.
+const _browseFields = 'RecursiveItemCount,ChildCount,OriginalTitle,SortName,Overview';
+
+/// Field set for the home / per-library hub rows (Recently Added, Continue
+/// Watching, Next Up). Poster cards render artwork, title, year and the
+/// watch badge; only `Overview` needs asking for, to feed the mobile hero
+/// (`discover_screen`) and the TV spotlight blurb.
+///
+/// Crucially this drops `RecursiveItemCount`/`ChildCount`. `/Items/Latest`
+/// groups a TV library by series, so those rows are Series FOLDER dtos and
+/// each count field costs a per-row DB query server-side
+/// (`Folder.GetRecursiveChildCount` / `Folder.GetChildCount`) — the same cost
+/// already documented on [_folderBrowseFields] and [_musicAlbumRowFields],
+/// which the home rows never got (#1784).
+///
+/// Watch state survives intact: Jellyfin computes `UserData.Played` from
+/// `UnplayedItemCount` when `RecursiveItemCount` is absent
+/// (`Folder.FillUserDataDtoValues`), and [MediaItem.unwatchedCount] falls back
+/// to `UserData.UnplayedItemCount`. Only the season progress bar needs real
+/// leaf totals, and seasons never appear on a hub row.
+const _hubRowFields = 'Overview';
+
+/// How far back `/Shows/NextUp` looks for a series to resume, mirroring
+/// Jellyfin web's `maxDaysForNextUp` default. Without it the server's
+/// `GetNextUpSeriesKeys` scan is unbounded over every series the user has ever
+/// played an episode of.
+const _nextUpDateCutoffDays = 365;
+
+String _nextUpDateCutoff() =>
+    DateTime.now().toUtc().subtract(const Duration(days: _nextUpDateCutoffDays)).toIso8601String();
 
 /// Existing episode-row requests can show Plex-style quality labels when the
 /// response includes `MediaSources`. Keep this off broad library/search/latest
 /// queries because it is the heaviest item field Jellyfin returns.
 const _episodeRowFields = '$_browseFields,MediaSources';
+
+/// Media types global search surfaces. Episodes are included so a user can
+/// find a single episode by name.
+const _searchItemTypes = 'Movie,Series,Episode,MusicAlbum,Audio';
 
 /// Folder-tree field set for MEDIA children. The tree renders
 /// title/thumb/watch state plus default dto fields (year, runtime, ratings);
@@ -197,9 +231,51 @@ mixin _JellyfinBrowseMethods on _JellyfinClientInternals {
   // endpoints. We mirror that exactly so requests hash the same way against
   // proxy rules and rate limiters as a stock Jellyfin app.
 
+  /// Views as of the last load, reused by scoped search.
+  ///
+  /// Scoped search runs on every debounced keystroke and `/Views` sits
+  /// serially in front of its per-library legs, so re-fetching it each pass is
+  /// pure added latency. `LibrariesProvider` loads libraries before the content
+  /// tabs refresh (main_screen `_primeOnlineServices` awaits `loadLibraries()`),
+  /// so this is already warm by the time the user can type, and every later
+  /// load replaces it — search can never be working from a staler library list
+  /// than the one on screen. Dies with the client, like Plex's
+  /// `_providerLibraries`.
+  List<MediaLibrary>? _loadedLibraryViews;
+
+  /// In-flight `/Views` request, shared by concurrent callers.
+  ///
+  /// At cold start `LibrariesProvider.loadLibraries()` and
+  /// `DataAggregationService.getHubsFromAllServers` both ask for libraries at
+  /// the same time, and the hub fan-out sits *serially* behind its copy. Two
+  /// identical uncached round trips is a full RTT of pure cold-start latency on
+  /// a remote server (#1784). Plex has never paid it — its library list comes
+  /// from the `/media/providers` response cached at client creation.
+  ///
+  /// Single-flight only: once the request settles the next caller re-fetches,
+  /// so a library added server-side still shows up on the next refresh.
+  Future<List<MediaLibrary>>? _inFlightLibraries;
+
   @override
-  Future<List<MediaLibrary>> fetchLibraries() async {
-    final response = await _http.get('/Users/${_segment(connection.userId)}/Views');
+  Future<List<MediaLibrary>> fetchLibraries() {
+    final inFlight = _inFlightLibraries;
+    if (inFlight != null) return inFlight;
+
+    final request = _fetchLibraries().then((libraries) {
+      _loadedLibraryViews = libraries;
+      return libraries;
+    });
+    _inFlightLibraries = request;
+    return request.whenComplete(() {
+      if (identical(_inFlightLibraries, request)) _inFlightLibraries = null;
+    });
+  }
+
+  /// [abort] tears the view fetch down with the pass that owns it — a
+  /// superseded search must not leave `/Views` running.
+  Future<List<MediaLibrary>> _fetchLibraries({AbortController? abort}) async {
+    final response = await _http.get('/Users/${_segment(connection.userId)}/Views', abort: abort);
+    abort?.throwIfAborted();
     throwIfHttpError(response);
     final items = _itemsArray(response.data);
     // Jellyfin surfaces the user's collection (BoxSet) and playlist roots as
@@ -536,12 +612,23 @@ mixin _JellyfinBrowseMethods on _JellyfinClientInternals {
   /// (`enableResumable=true`, `disableFirstEpisode=false`) match Plex
   /// OnDeck semantics: returns the resume episode when one exists, or S1E1
   /// when the user hasn't started. Movies and other kinds short-circuit.
+  ///
+  /// The chain stays sequential — firing both together measured no better,
+  /// because the requests contend rather than overlap (`/Shows/NextUp` went
+  /// from 380ms alone to 1395ms beside the detail fetch) and a movie would pay
+  /// for a request it can never use. Instead the item is handed to
+  /// [onItemReady] the moment it lands, so the caller can paint without
+  /// waiting for the on-deck round trip (#1784).
   @override
-  Future<({MediaItem? item, MediaItem? onDeckEpisode})> fetchItemWithOnDeck(String id) async {
+  Future<({MediaItem? item, MediaItem? onDeckEpisode})> fetchItemWithOnDeck(
+    String id, {
+    void Function(MediaItem item)? onItemReady,
+  }) async {
     final item = await fetchItem(id);
     if (item == null || item.kind != MediaKind.show) {
       return (item: item, onDeckEpisode: null);
     }
+    onItemReady?.call(item);
     final nextUp = await _safeFetchItemsArray('/Shows/NextUp', {
       'seriesId': id,
       'userId': connection.userId,
@@ -553,8 +640,33 @@ mixin _JellyfinBrowseMethods on _JellyfinClientInternals {
     return (item: item, onDeckEpisode: onDeckEpisode);
   }
 
+  /// In-flight `fetchItem` requests, keyed by item id.
+  ///
+  /// Opening a detail screen issues two identical full-detail GETs for the
+  /// same id at the same time — `_loadFullMetadata` and, from
+  /// `_initWatchlistState`, `fetchExternalIds` — and playback start adds three
+  /// more. Each one makes the server rebuild the whole dto (People, Chapters
+  /// and MediaSources are a DB query apiece, Trickplay several), so the
+  /// duplicates are expensive on both ends (#1784).
+  ///
+  /// Single-flight only: once a request settles the next caller re-fetches, so
+  /// nothing here can serve a stale item.
+  final Map<String, Future<MediaItem?>> _inFlightItems = {};
+
   @override
-  Future<MediaItem?> fetchItem(String id) async {
+  Future<MediaItem?> fetchItem(String id) {
+    final existing = _inFlightItems[id];
+    if (existing != null) return existing;
+
+    late final Future<MediaItem?> request;
+    request = _fetchItemOnce(id).whenComplete(() {
+      if (identical(_inFlightItems[id], request)) _inFlightItems.remove(id);
+    });
+    _inFlightItems[id] = request;
+    return request;
+  }
+
+  Future<MediaItem?> _fetchItemOnce(String id) async {
     final endpoint = '/Users/${_segment(connection.userId)}/Items/${_segment(id)}';
     // Contract:
     //   - 200 with parseable Map → MediaItem
@@ -1084,25 +1196,85 @@ mixin _JellyfinBrowseMethods on _JellyfinClientInternals {
   }
 
   @override
-  Future<List<MediaItem>> searchItems(String query, {int limit = 100, AbortController? abort}) async {
-    // Artists come from the dedicated /Artists endpoint: `/Items?SearchTerm=`
-    // only matches folder-derived MusicArtist rows (under folder names), so
-    // tag-only artists would never appear in search. The artists leg is
-    // best-effort — a music-endpoint hiccup shouldn't sink video search.
+  Future<List<MediaItem>> searchItems(
+    String query, {
+    int limit = 100,
+    AbortController? abort,
+    Set<String> excludedLibraryIds = const {},
+  }) async {
+    if (excludedLibraryIds.isEmpty) return _searchEverywhere(query, limit: limit, abort: abort);
+
+    // Jellyfin search rows cannot be attributed to a library after the fact:
+    // there is no library field, and `ParentId` (which this request does not
+    // even ask for) resolves to a season or physical folder, never the owning
+    // CollectionFolder. A hidden library can therefore only be excluded by
+    // scoping the request, one per visible library.
+    var libraries = _loadedLibraryViews;
+    if (libraries == null) {
+      libraries = await _fetchLibraries(abort: abort);
+      // `??=`, not `=`: an explicit library load that started later can finish
+      // first, and this older response must not clobber its newer views.
+      _loadedLibraryViews ??= libraries;
+    }
+    abort?.throwIfAborted();
+    final visible = [
+      for (final library in libraries)
+        if (!excludedLibraryIds.contains(library.id)) library,
+    ];
+    // Nothing hidden actually belongs to this server — keep the single query.
+    if (visible.length == libraries.length) return _searchEverywhere(query, limit: limit, abort: abort);
+    if (visible.isEmpty) return const [];
+
+    // Each leg keeps the full candidate budget. Splitting it would cap a
+    // library that holds every match (two visible libraries, 100 matches in
+    // one, would return 50), and the caller's pre-ranking budget guarantee is
+    // worth more than the payload saved.
+    const concurrency = 3;
+    // Legs can overlap: `/Artists` resolves parentId to an *ancestor* filter,
+    // so an artist with tracks in two visible music libraries comes back from
+    // both. Ranking does not deduplicate, so the first hit wins here — the
+    // same merge the Plex search does across its supplemental legs.
+    final deduplicated = <String, MediaItem>{};
+    for (var start = 0; start < visible.length; start += concurrency) {
+      abort?.throwIfAborted();
+      final batch = visible.skip(start).take(concurrency);
+      final results = await Future.wait([
+        for (final library in batch) _searchLibrary(library, query, limit: limit, abort: abort),
+      ]);
+      for (final items in results) {
+        for (final item in items) {
+          deduplicated.putIfAbsent(item.id, () => item);
+        }
+      }
+    }
+    return deduplicated.values.toList();
+  }
+
+  /// Unscoped search: one request across every library the user can see.
+  ///
+  /// Artists come from the dedicated /Artists endpoint: `/Items?SearchTerm=`
+  /// only matches folder-derived MusicArtist rows (under folder names), so
+  /// tag-only artists would never appear in search. The artists leg is
+  /// best-effort — a music-endpoint hiccup shouldn't sink video search.
+  Future<List<MediaItem>> _searchEverywhere(String query, {required int limit, AbortController? abort}) async {
     final results = await Future.wait([
       _fetchItemsArray('/Items', {
         'userId': connection.userId,
         'SearchTerm': query,
         'Recursive': 'true',
         'Limit': limit.toString(),
-        'IncludeItemTypes': 'Movie,Series,Episode,MusicAlbum,Audio',
+        'IncludeItemTypes': _searchItemTypes,
         'Fields': _browseFields,
+        // Search ranks and trims client-side and never reads the total, which
+        // the server pays for separately on a broad term.
+        'EnableTotalRecordCount': 'false',
         ...jellyfinImageQueryParameters,
       }, abort: abort),
       _safeFetchItemsArray('/Artists', {
         'userId': connection.userId,
         'searchTerm': query,
         'Limit': limit.toString(),
+        'EnableTotalRecordCount': 'false',
         ...jellyfinImageQueryParameters,
       }, abort: abort),
     ]);
@@ -1110,17 +1282,94 @@ mixin _JellyfinBrowseMethods on _JellyfinClientInternals {
     return _mapItems([...results.first, ...results[1]]);
   }
 
+  /// Search a single library. Results are stamped with it, which is the only
+  /// way a Jellyfin search hit ever learns which library it came from.
+  Future<List<MediaItem>> _searchLibrary(
+    MediaLibrary library,
+    String query, {
+    required int limit,
+    AbortController? abort,
+  }) async {
+    // MusicAlbum is a folder DTO: requesting UserData or count fields makes
+    // small servers compute recursive unplayed/count data per album (#1552).
+    // Keep albums and Audio leaves on separate requests so albums can disable
+    // UserData while tracks retain their cheap direct play-state lookup.
+    final itemFutures = library.kind == MediaKind.artist
+        ? <Future<List<Map<String, dynamic>>>>[
+            _fetchItemsArray('/Items', {
+              'userId': connection.userId,
+              'SearchTerm': query,
+              'Recursive': 'true',
+              'Limit': limit.toString(),
+              'IncludeItemTypes': 'MusicAlbum',
+              'ParentId': library.id,
+              'Fields': _musicAlbumRowFields,
+              'EnableUserData': 'false',
+              'EnableTotalRecordCount': 'false',
+              ...jellyfinImageQueryParameters,
+            }, abort: abort),
+            _fetchItemsArray('/Items', {
+              'userId': connection.userId,
+              'SearchTerm': query,
+              'Recursive': 'true',
+              'Limit': limit.toString(),
+              'IncludeItemTypes': 'Audio',
+              'ParentId': library.id,
+              'Fields': _musicTrackRowFields,
+              'EnableTotalRecordCount': 'false',
+              ...jellyfinImageQueryParameters,
+            }, abort: abort),
+          ]
+        : <Future<List<Map<String, dynamic>>>>[
+            _fetchItemsArray('/Items', {
+              'userId': connection.userId,
+              'SearchTerm': query,
+              'Recursive': 'true',
+              'Limit': limit.toString(),
+              'IncludeItemTypes': _searchItemTypes,
+              'ParentId': library.id,
+              'Fields': _browseFields,
+              'EnableTotalRecordCount': 'false',
+              ...jellyfinImageQueryParameters,
+            }, abort: abort),
+          ];
+    // `/Artists` takes parentId and resolves it to an ancestor filter, but
+    // only a music library can contain any — asking elsewhere just buys an
+    // empty response.
+    final artistsFuture = library.kind == MediaKind.artist
+        ? _safeFetchItemsArray('/Artists', {
+            'userId': connection.userId,
+            'searchTerm': query,
+            'Limit': limit.toString(),
+            'parentId': library.id,
+            'EnableTotalRecordCount': 'false',
+            ...jellyfinImageQueryParameters,
+          }, abort: abort)
+        : Future<List<Map<String, dynamic>>>.value(const []);
+
+    final results = await Future.wait([...itemFutures, artistsFuture]);
+    abort?.throwIfAborted();
+    return [
+      for (final item in _mapItems([for (final result in results) ...result]))
+        item.copyWith(libraryId: library.id, libraryTitle: library.title),
+    ];
+  }
+
   /// Jellyfin removed `anyProviderIdEquals` (silently ignored on 10.11.10, so
   /// it returns the unfiltered page), leaving a title search verified against
   /// each candidate's inline `ProviderIds`. [plexGuid] is a Plex-only hint and
   /// has no meaning in Jellyfin's provider-id model, so it is ignored.
+  ///
+  /// Every id-verified candidate of the first matching title is returned, not
+  /// just the first: one movie can sit in both a 4K library and an HD library
+  /// as two separate items, and the caller shows the user each copy (#1754).
   ///
   /// Jellyfin cannot report season ordering to a non-admin: on 10.11.10,
   /// `/Library/VirtualFolders` returns 403 and Series items omit
   /// `DisplayOrder`. Resolve against an unknown provider rather than guessing
   /// from `ProviderIds`, so only seasons on which TVDB and TMDB agree are gated.
   @override
-  Future<MediaItem?> findByExternalIds(
+  Future<List<MediaItem>> findByExternalIds(
     ExternalIds ids, {
     required MediaKind kind,
     List<String> titles = const [],
@@ -1133,7 +1382,7 @@ mixin _JellyfinBrowseMethods on _JellyfinClientInternals {
       MediaKind.show => 'Series',
       _ => null,
     };
-    if (itemType == null || !ids.hasAny || titles.isEmpty) return null;
+    if (itemType == null || !ids.hasAny || titles.isEmpty) return const [];
 
     final seasonIndex = season?.agreedSeason;
     final shouldGateSeason = kind == MediaKind.show && seasonIndex != null && seasonIndex > 1;
@@ -1155,20 +1404,34 @@ mixin _JellyfinBrowseMethods on _JellyfinClientInternals {
         'years': ?years,
         ...jellyfinImageQueryParameters,
       });
-      final match = ExternalIds.jellyfinCandidateMatching(candidates, ids);
-      if (match == null) continue;
-      final item = _mapItems([match]).firstOrNull;
-      if (item == null) continue;
+      final matches = _mapItems(ExternalIds.jellyfinCandidatesMatching(candidates, ids));
+      if (matches.isEmpty) continue;
 
-      if (shouldGateSeason) {
-        final children = await fetchChildren(item.id);
-        if (!children.any((child) => child.kind == MediaKind.season && child.index == seasonIndex)) {
-          return null;
-        }
-      }
-      return _withLibraryFromAncestors(item);
+      final kept = shouldGateSeason ? await _keepMatchesWithSeason(matches, seasonIndex) : matches;
+      // A title that verified but has no season-gated survivor is a definitive
+      // "this server has the show, just not that season"; broader title forms
+      // would only reach other shows.
+      if (kept.isEmpty) return const [];
+      return Future.wait([for (final item in kept) _withLibraryFromAncestors(item)]);
     }
-    return null;
+    return const [];
+  }
+
+  /// Keep only the series that actually have [seasonIndex]. One
+  /// `fetchChildren` per candidate, issued concurrently because the match list
+  /// is deliberately never truncated (see
+  /// [MediaServerClient.findByExternalIds]).
+  Future<List<MediaItem>> _keepMatchesWithSeason(List<MediaItem> items, int seasonIndex) async {
+    final kept = await Future.wait([
+      for (final item in items)
+        fetchChildren(
+          item.id,
+        ).then((children) => children.any((child) => child.kind == MediaKind.season && child.index == seasonIndex)),
+    ]);
+    return [
+      for (var index = 0; index < items.length; index++)
+        if (kept[index]) items[index],
+    ];
   }
 
   /// Best-effort library stamp for items found outside a library context
@@ -1238,7 +1501,7 @@ mixin _JellyfinBrowseMethods on _JellyfinClientInternals {
       _fetchItemsArray('/UserItems/Resume', {
         'userId': connection.userId,
         'Limit': ?count?.toString(),
-        'Fields': _browseFields,
+        'Fields': _hubRowFields,
         'MediaTypes': 'Video',
         'Recursive': 'true',
         'EnableTotalRecordCount': 'false',
@@ -1247,8 +1510,9 @@ mixin _JellyfinBrowseMethods on _JellyfinClientInternals {
       _safeFetchItemsArray('/Shows/NextUp', {
         'userId': connection.userId,
         'Limit': ?count?.toString(),
-        'Fields': _browseFields,
+        'Fields': _hubRowFields,
         'EnableResumable': 'false',
+        'NextUpDateCutoff': _nextUpDateCutoff(),
         'EnableTotalRecordCount': 'false',
         ...jellyfinImageQueryParameters,
       }, retry: _continueWatchingRetry),
@@ -1343,7 +1607,7 @@ mixin _JellyfinBrowseMethods on _JellyfinClientInternals {
     final latestFuture = _safeFetchItemsArray('/Users/${_segment(connection.userId)}/Items/Latest', {
       'Limit': limit.toString(),
       'ParentId': ?parentId,
-      'Fields': _browseFields,
+      'Fields': _hubRowFields,
       'IncludeItemTypes': ?latestItemTypes,
       ...jellyfinImageQueryParameters,
     }, retry: retry);
@@ -1371,7 +1635,7 @@ mixin _JellyfinBrowseMethods on _JellyfinClientInternals {
         'userId': connection.userId,
         'ParentId': ?parentId,
         'Limit': limit.toString(),
-        'Fields': _browseFields,
+        'Fields': _hubRowFields,
         'MediaTypes': 'Video',
         'Recursive': 'true',
         'EnableTotalRecordCount': 'false',
@@ -1382,8 +1646,9 @@ mixin _JellyfinBrowseMethods on _JellyfinClientInternals {
               'userId': connection.userId,
               'ParentId': ?parentId,
               'Limit': limit.toString(),
-              'Fields': _browseFields,
+              'Fields': _hubRowFields,
               'EnableResumable': 'false',
+              'NextUpDateCutoff': _nextUpDateCutoff(),
               'EnableTotalRecordCount': 'false',
               ...jellyfinImageQueryParameters,
             }, retry: retry)
@@ -1525,7 +1790,7 @@ mixin _JellyfinBrowseMethods on _JellyfinClientInternals {
             'IncludeItemTypes': 'Movie,Series,Episode,Video,MusicVideo,Photo',
             'SortBy': 'DateCreated,SortName,ProductionYear',
             'SortOrder': 'Descending,Descending,Descending',
-            'Fields': _browseFields,
+            'Fields': _hubRowFields,
             ...jellyfinImageQueryParameters,
           },
           offset: offset,
@@ -1556,7 +1821,7 @@ mixin _JellyfinBrowseMethods on _JellyfinClientInternals {
             'userId': connection.userId,
             'StartIndex': offset.toString(),
             'Limit': effectiveLimit,
-            'Fields': _browseFields,
+            'Fields': _hubRowFields,
             'Recursive': 'true',
             'EnableTotalRecordCount': 'true',
             if (parentId != null) 'ParentId': parentId else 'MediaTypes': 'Video',
@@ -1573,9 +1838,10 @@ mixin _JellyfinBrowseMethods on _JellyfinClientInternals {
             'userId': connection.userId,
             'StartIndex': offset.toString(),
             'Limit': effectiveLimit,
-            'Fields': _browseFields,
+            'Fields': _hubRowFields,
             'ParentId': ?parentId,
             'EnableResumable': 'false',
+            'NextUpDateCutoff': _nextUpDateCutoff(),
             'EnableTotalRecordCount': 'true',
             ...jellyfinImageQueryParameters,
           },
@@ -1860,14 +2126,13 @@ mixin _JellyfinBrowseMethods on _JellyfinClientInternals {
   }
 
   /// GET [path], optionally under a hub-surface transport policy ([retry]):
-  /// bounded transient retries with per-attempt timeouts and **no endpoint
-  /// failover** — a slow hub row must not move the whole client off an
-  /// otherwise working endpoint (same policy as Plex's three hub fetches;
-  /// see [retryTransientMediaServerCall] / [FailoverHttpClient]).
+  /// one whole-request deadline, retries only on immediate connection errors,
+  /// and **no endpoint failover** — a slow hub row must not move the whole
+  /// client off an otherwise working endpoint (same policy as Plex's three hub
+  /// fetches; see [retryTransientMediaServerCall] / [FailoverHttpClient]).
   ///
   /// [timeout] and [allowEndpointFailover] configure the un-retried path only; a
-  /// [retry] policy carries its own per-attempt timeouts and always disables
-  /// failover.
+  /// [retry] policy carries its own deadline and always disables failover.
   Future<MediaServerResponse> _getItemsResponse(
     String path,
     Map<String, dynamic> queryParameters,
@@ -1888,7 +2153,7 @@ mixin _JellyfinBrowseMethods on _JellyfinClientInternals {
     abort?.throwIfAborted();
     return retryTransientMediaServerCall(
       operation: retry.operation,
-      attemptTimeouts: retry.attemptTimeouts,
+      deadline: retry.deadline,
       call: (timeout, attemptAbort) => _http.get(
         path,
         queryParameters: queryParameters,

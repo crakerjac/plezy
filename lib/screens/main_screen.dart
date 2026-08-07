@@ -520,7 +520,7 @@ class _MainScreenState extends State<MainScreen>
     }
 
     if (!mounted) return;
-    _fullRefreshContentTabs();
+    _primeContentTabs();
   }
 
   /// Single-shot "resume queued downloads once any client is online" rule,
@@ -927,6 +927,19 @@ class _MainScreenState extends State<MainScreen>
 
   @override
   void onWindowClose() {
+    unawaited(_exitOnWindowClose());
+  }
+
+  /// `setPreventClose(true)` hands the window's close button to us, so the app
+  /// has to shut itself down. A bare `exit(0)` killed the process before the
+  /// app-level teardown could run — including the terminal playback report that
+  /// trackers owning their own watched semantics depend on.
+  Future<void> _exitOnWindowClose() async {
+    try {
+      await AppExitService.requestGracefulExit().timeout(const Duration(seconds: 5));
+    } catch (e, st) {
+      appLogger.w('Graceful window close failed; exiting immediately', error: e, stackTrace: st);
+    }
     exit(0);
   }
 
@@ -1621,14 +1634,25 @@ class _MainScreenState extends State<MainScreen>
     if (_screenKeys[tab]?.currentState case final T state) fn(state);
   }
 
-  /// Full-refresh the primary content tabs. Shared by the online-entry hook
-  /// ([_primeOnlineServices]) and the profile-switch invalidation
-  /// ([_invalidateAllScreens]), which refresh the same set.
+  /// Full-refresh the primary content tabs. Used by the profile-switch
+  /// invalidation ([_invalidateAllScreens]), which must refetch everything for
+  /// the new identity.
   void _fullRefreshContentTabs() {
-    for (final tab in const [NavigationTabId.discover, NavigationTabId.libraries, NavigationTabId.search]) {
+    for (final tab in _contentTabs) {
       _onScreen<FullRefreshable>(tab, (screen) => screen.fullRefresh());
     }
   }
+
+  /// Online-entry variant used by [_primeOnlineServices] on cold start and on
+  /// reconnect-from-offline. Screens that already started their own load skip
+  /// it; see [FullRefreshable.primeRefresh].
+  void _primeContentTabs() {
+    for (final tab in _contentTabs) {
+      _onScreen<FullRefreshable>(tab, (screen) => screen.primeRefresh());
+    }
+  }
+
+  static const _contentTabs = [NavigationTabId.discover, NavigationTabId.libraries, NavigationTabId.search];
 
   Widget _buildBottomNavigationBar(BuildContext context, {required bool hideLabels}) {
     final tabs = _getBottomNavigationTabs(context);

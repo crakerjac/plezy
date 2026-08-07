@@ -129,9 +129,11 @@ mixin _JellyfinPlaybackMethods on _JellyfinClientInternals {
   /// Jellyfin playback URL resolution.
   ///
   /// Always POSTs `/Items/{id}/PlaybackInfo` so Jellyfin can resolve external
-  /// audio/subtitle streams server-side. Uses the returned `TranscodingUrl` or
-  /// `DirectStreamUrl` when present, otherwise falls back to a static direct
-  /// stream URL (`/Videos/{id}/stream?Static=true&api_key=...`).
+  /// audio/subtitle streams server-side. Uses the returned `TranscodingUrl`
+  /// when the caller asked for a capped quality; otherwise — and on any
+  /// DirectPlay decision — builds the static direct stream URL
+  /// (`/Videos/{id}/stream?Static=true&api_key=...`) itself, because Jellyfin
+  /// never returns a direct-play URL of its own.
   ///
   /// The returned `MediaSourceInfo` is what the player uses for track-picker
   /// labels and auto-track selection by language.
@@ -174,7 +176,11 @@ mixin _JellyfinPlaybackMethods on _JellyfinClientInternals {
     final preset = options.qualityPreset;
     final audioPreset = options.audioQualityPreset ?? AudioQualityPreset.original;
     final wantsOriginal = isTrack ? audioPreset.isOriginal : preset.isOriginal;
-    final requestedAudioStreamId = _validJellyfinAudioStreamId(options.selectedAudioStreamId, mediaInfo);
+    final requestedAudioStreamId = options.selectedAudioStreamId == null
+        ? options.preferredAudioTrack == null
+              ? null
+              : findSourceAudioTrackForIntent(options.preferredAudioTrack!, mediaInfo.audioTracks)?.id
+        : _validJellyfinAudioStreamId(options.selectedAudioStreamId, mediaInfo);
     final requestedSubtitleStreamId = _validJellyfinSubtitleStreamId(options.preferredSubtitleTrack, mediaInfo);
     final int? maxStreamingBitrate = wantsOriginal
         ? null
@@ -226,34 +232,19 @@ mixin _JellyfinPlaybackMethods on _JellyfinClientInternals {
         );
       }
 
-      final negotiatedPlaySessionId = negotiation!['PlaySessionId'];
-      void capturePlaySessionId(String urlOrPath) {
-        playSessionId = Uri.tryParse(urlOrPath)?.queryParameters['PlaySessionId'];
-        if ((playSessionId == null || playSessionId!.isEmpty) && negotiatedPlaySessionId is String) {
-          playSessionId = negotiatedPlaySessionId;
-        }
-      }
-
       final transcodingUrl = chosenSource['TranscodingUrl'];
-      final directStreamUrl = chosenSource['DirectStreamUrl'];
       if (!wantsOriginal && transcodingUrl is String && transcodingUrl.isNotEmpty) {
         // TranscodingUrl is server-relative and already encodes container,
         // codecs, MediaSourceId, and PlaySessionId; we just append the
         // api_key for auth.
-        capturePlaySessionId(transcodingUrl);
+        final urlSessionId = Uri.tryParse(transcodingUrl)?.queryParameters['PlaySessionId'];
+        final negotiatedSessionId = negotiation!['PlaySessionId'];
+        playSessionId = urlSessionId != null && urlSessionId.isNotEmpty
+            ? urlSessionId
+            : (negotiatedSessionId is String ? negotiatedSessionId : null);
         videoUrl = _withApiKey(transcodingUrl);
         playMethod = 'Transcode';
         isTranscoding = true;
-        includeExternalSubtitleDelivery = true;
-      } else if (directStreamUrl is String && directStreamUrl.isNotEmpty) {
-        capturePlaySessionId(directStreamUrl);
-        videoUrl = _withApiKey(directStreamUrl);
-        playMethod = 'DirectStream';
-        // DirectStream remuxes the selected streams into a new container.
-        // Subtitle streams marked for external delivery are not present in
-        // that container, so expose their server URLs as sidecars just as we
-        // do for transcoded playback. True DirectPlay keeps using the
-        // embedded native tracks and does not incur a sidecar fetch.
         includeExternalSubtitleDelivery = true;
       } else if (!wantsOriginal) {
         fallbackReason = TranscodeFallbackReason.directPlayOnly;
@@ -273,7 +264,11 @@ mixin _JellyfinPlaybackMethods on _JellyfinClientInternals {
             includeExternalDelivery: includeExternalSubtitleDelivery,
           );
     mediaInfo = _withSidecarBackedSubtitleIdentity(mediaInfo, subtitleSidecars);
-    final pinnedSourceId = bundle.pinnedSourceIdForItem(metadata.id);
+    // Jellyfin's streaming endpoint resolves a blank MediaSourceId to its own
+    // first sorted source, which for an item with alternate versions is a
+    // different file. Pin the source the negotiation actually settled on, as
+    // every official client does.
+    final pinnedSourceId = _normalizedSourceId(effectiveSourceId);
     videoUrl ??= isTrack
         ? buildAudioDirectStreamUrl(metadata.id, container: effectiveContainer, mediaSourceId: pinnedSourceId)
         : buildDirectStreamUrl(metadata.id, container: effectiveContainer, mediaSourceId: pinnedSourceId);
@@ -291,6 +286,14 @@ mixin _JellyfinPlaybackMethods on _JellyfinClientInternals {
       playMethod: playMethod,
       selectedMediaIndex: bundle.selectedSourceIndex,
     );
+  }
+
+  /// Source ids ride into `MediaSourceId=`, where Jellyfin compares them
+  /// ordinally and, on a miss, parses them as a GUID. Only ever forward a
+  /// non-empty id the server itself gave us; a blank one must stay absent.
+  static String? _normalizedSourceId(String? sourceId) {
+    final id = sourceId?.trim();
+    return id == null || id.isEmpty ? null : id;
   }
 
   int? _validJellyfinAudioStreamId(int? explicit, MediaSourceInfo mediaInfo) {

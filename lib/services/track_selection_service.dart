@@ -347,48 +347,155 @@ MediaSubtitleTrack? findPlexTrackForMpvSubtitle(
 ///
 /// Identity matching ([findPlexTrackForMpvSubtitle]) answers "which row IS
 /// this track"; this answers "which row of a DIFFERENT item serves the same
-/// intent". Language and effective forced-ness are hard requirements: the
-/// intent's class is preserved or the match declines, so the selection ladder
-/// can fall back to the server's own per-item choice (#1716/#1717).
+/// intent". Effective forced-ness is a hard requirement, and so is language
+/// when both sides declare one: the intent's class is preserved or the match
+/// declines, so the selection ladder can fall back to the server's own
+/// per-item choice (#1716/#1717).
+///
+/// When language metadata is missing on either side, a unique real title
+/// match may vouch for the row instead (#1785) — untagged tracks whose only
+/// signal is a title like "Swedish" are common, and declining them turned the
+/// viewer's subtitles off on every episode advance. Codec/external parity is
+/// never sufficient evidence on its own (an arbitrary untagged row would
+/// reintroduce the #1716 wrong-track class); technical parity only breaks
+/// ties the stronger tiers left, and any tie still standing at the top
+/// declines rather than guesses — in every band, so two indistinguishable
+/// same-language rows never latch by catalog order.
 MediaSubtitleTrack? findSourceTrackForIntent(SubtitleIntent intent, List<MediaSubtitleTrack> sourceTracks) {
-  MediaSubtitleTrack? bestMatch;
-  var bestScore = -1;
-  for (final row in sourceTracks) {
-    if (!_languagesMatch(intent.language, row.languageCode ?? row.language)) continue;
-    if (row.effectiveForced != intent.forced) continue;
-
-    var score = 0;
-    if (_subtitleCodecsMatch(intent.codec, row.codec)) score += 5;
-    score += _titleScore(intent.title, row.title, row.displayTitle);
-    if (intent.isExternal == row.isExternal) score += 1;
-    if (score > bestScore) {
-      bestScore = score;
-      bestMatch = row;
-    }
-  }
-  return bestMatch;
+  return _findTrackByEvidenceBands(
+    sourceTracks,
+    intentLanguage: intent.language,
+    isSelectable: (_) => true,
+    classMatches: (row) => row.effectiveForced == intent.forced,
+    language: (row) => row.languageCode ?? row.language,
+    titleScore: (row) => _titleScore(intent.title, row.title, row.displayTitle),
+    codecMatches: (row) => _subtitleCodecsMatch(intent.codec, row.codec),
+    extraScore: (row) => intent.isExternal == row.isExternal ? 1 : 0,
+  );
 }
 
 /// Native-track twin of [findSourceTrackForIntent], for catalogs the source
 /// side cannot describe (legacy offline sidecars) and late-arriving tracks.
 SubtitleTrack? findNativeTrackForIntent(SubtitleIntent intent, List<SubtitleTrack> tracks) {
-  SubtitleTrack? bestMatch;
-  var bestScore = -1;
-  for (final track in tracks) {
-    if (track.id == SubtitleTrack.auto.id || track.id == SubtitleTrack.off.id) continue;
-    if (!_languagesMatch(intent.language, track.language)) continue;
-    if (track.effectiveForced != intent.forced) continue;
+  return _findTrackByEvidenceBands(
+    tracks,
+    intentLanguage: intent.language,
+    isSelectable: (track) => track.id != SubtitleTrack.auto.id && track.id != SubtitleTrack.off.id,
+    classMatches: (track) => track.effectiveForced == intent.forced,
+    language: (track) => track.language,
+    titleScore: (track) => _titleScore(intent.title, track.title, null),
+    codecMatches: (track) => _subtitleCodecsMatch(intent.codec, track.codec),
+    extraScore: (track) => intent.isExternal == track.isExternal ? 1 : 0,
+  );
+}
 
-    var score = 0;
-    if (_subtitleCodecsMatch(intent.codec, track.codec)) score += 5;
-    score += _titleScore(intent.title, track.title, null);
-    if (intent.isExternal == track.isExternal) score += 1;
-    if (score > bestScore) {
-      bestScore = score;
-      bestMatch = track;
+/// Audio twin of [findSourceTrackForIntent]: the source-catalog row that
+/// serves a cross-item audio carry. [carried] is a semantic vehicle — its id
+/// belongs to another item; language, title, codec, and channels are the
+/// signal. Audio has no forced-class gate; channel-count parity replaces the
+/// external-parity tiebreaker.
+MediaAudioTrack? findSourceAudioTrackForIntent(AudioTrack carried, List<MediaAudioTrack> rows) {
+  return _findTrackByEvidenceBands(
+    rows,
+    intentLanguage: carried.language,
+    isSelectable: (_) => true,
+    classMatches: (_) => true,
+    language: (row) => row.languageCode ?? row.language,
+    titleScore: (row) => _titleScore(carried.title, row.title, row.displayTitle),
+    codecMatches: (row) => _audioCodecsMatch(carried.codec, row.codec),
+    extraScore: (row) => carried.channels != null && carried.channels == row.channels ? 1 : 0,
+  );
+}
+
+/// Native twin of [findSourceAudioTrackForIntent].
+AudioTrack? findNativeAudioTrackForIntent(AudioTrack carried, List<AudioTrack> tracks) {
+  return _findTrackByEvidenceBands(
+    tracks,
+    intentLanguage: carried.language,
+    isSelectable: (track) => track.id != AudioTrack.auto.id && track.id != AudioTrack.off.id,
+    classMatches: (_) => true,
+    language: (track) => track.language,
+    titleScore: (track) => _titleScore(carried.title, track.title, null),
+    codecMatches: (track) => _audioCodecsMatch(carried.codec, track.codec),
+    extraScore: (track) => carried.channels != null && carried.channels == track.channels ? 1 : 0,
+  );
+}
+
+/// Sentinel id for a cross-item audio carry. Native player ids ('1', '2', …)
+/// and Jellyfin `source:<Index>` ids are reused per item, so a carried track
+/// with its original id can identity-match a DIFFERENT track that happens to
+/// sit at the same position on the next episode — bypassing the evidence
+/// bands and their ambiguity decline.
+const String carriedAudioTrackId = 'carried';
+
+/// Strips item-bound identity from an audio carry so only its semantics may
+/// speak — the audio twin of [SubtitlePreference.demoteToIntent]. Same-item
+/// reloads keep the original track and its identity fast path.
+AudioTrack itemAgnosticAudioCarry(AudioTrack track) => track.copyWith(id: carriedAudioTrackId);
+
+/// Shared evidence matcher behind the cross-item intent matchers.
+///
+/// Candidates are compared lexicographically, strongest evidence first:
+/// declared-language parity, then the semantic title/role match, then
+/// technical parity (codec, then channels/external). Each tier only breaks
+/// ties left by the tiers above it — a codec that changed between episodes
+/// can never outvote the title that names the viewer's track, and language
+/// parity always outranks a title coincidence. A tie left standing at the
+/// top means the catalog cannot say which row the viewer meant: the match
+/// declines and the ladder falls to the server's own per-item choice.
+T? _findTrackByEvidenceBands<T extends Object>(
+  List<T> candidates, {
+  required String? intentLanguage,
+  required bool Function(T) isSelectable,
+  required bool Function(T) classMatches,
+  required String? Function(T) language,
+  required int Function(T) titleScore,
+  required bool Function(T) codecMatches,
+  required int Function(T) extraScore,
+}) {
+  T? bestMatch;
+  List<int>? bestKey;
+  var bestIsAmbiguous = false;
+  for (final candidate in candidates) {
+    if (!isSelectable(candidate)) continue;
+    if (!classMatches(candidate)) continue;
+
+    final candidateLanguage = language(candidate);
+    final candidateTitleScore = titleScore(candidate);
+    final hasLanguageParity = intentLanguage != null && candidateLanguage != null;
+    if (hasLanguageParity) {
+      // A declared language on both sides stays authoritative: a
+      // contradiction declines no matter what the title says.
+      if (!_languagesMatch(intentLanguage, candidateLanguage)) continue;
+    } else if (candidateTitleScore < 3) {
+      // Language evidence is missing on at least one side; only a real
+      // title match may serve the intent then.
+      continue;
+    }
+    final key = [
+      hasLanguageParity ? 1 : 0,
+      candidateTitleScore,
+      codecMatches(candidate) ? 1 : 0,
+      extraScore(candidate),
+    ];
+    final comparison = bestKey == null ? 1 : _compareEvidenceKeys(key, bestKey);
+    if (comparison > 0) {
+      bestKey = key;
+      bestMatch = candidate;
+      bestIsAmbiguous = false;
+    } else if (comparison == 0) {
+      bestIsAmbiguous = true;
     }
   }
+  if (bestIsAmbiguous) return null;
   return bestMatch;
+}
+
+int _compareEvidenceKeys(List<int> a, List<int> b) {
+  for (var i = 0; i < a.length; i++) {
+    if (a[i] != b[i]) return a[i].compareTo(b[i]);
+  }
+  return 0;
 }
 
 /// Find the MPV audio track that matches a Plex audio track
@@ -663,10 +770,6 @@ class TrackSelectionService {
     return null;
   }
 
-  AudioTrack? findBestAudioMatch(List<AudioTrack> availableTracks, AudioTrack preferred) {
-    return findBestTrackMatch<AudioTrack>(availableTracks, preferred, (t) => t.id, (t) => t.title, (t) => t.language);
-  }
-
   AudioTrack? findAudioTrackByProfile(List<AudioTrack> availableTracks, MediaServerUserProfile profile) {
     if (availableTracks.isEmpty || !profile.autoSelectAudio) return null;
 
@@ -894,12 +997,29 @@ class TrackSelectionService {
 
     AudioTrack? trackToSelect;
 
-    // Priority 1: Try to match preferred track from navigation
+    // Priority 1: the carried preference. Full identity first (a same-item
+    // reload passing back the identical track), then the cross-item evidence
+    // bands — bridged language parity or a unique title match with
+    // codec/channel tiebreaks. This replaces the old first-match language
+    // tier, which latched onto an arbitrary same-language (or same-untagged)
+    // row and lost the viewer's commentary/dub distinction across episodes.
     if (preferredAudioTrack != null) {
-      trackToSelect = findBestAudioMatch(availableTracks, preferredAudioTrack);
+      trackToSelect =
+          availableTracks
+              .where(
+                (track) =>
+                    track.id != AudioTrack.auto.id &&
+                    track.id != AudioTrack.off.id &&
+                    track.id == preferredAudioTrack.id &&
+                    track.title == preferredAudioTrack.title &&
+                    track.language == preferredAudioTrack.language,
+              )
+              .firstOrNull ??
+          findNativeAudioTrackForIntent(preferredAudioTrack, availableTracks);
       if (trackToSelect != null) {
         return TrackSelectionResult(trackToSelect, TrackSelectionPriority.navigation);
       }
+      appLogger.d('Audio carry declined: ${preferredAudioTrack.language}/${preferredAudioTrack.title}');
     }
 
     // Priority 2: Check server-selected track from media info

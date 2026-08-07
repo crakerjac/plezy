@@ -362,6 +362,56 @@ void main() {
         );
       }
     });
+
+    test('surrenders bare Backspace to a focused text editor', () {
+      final event = _navigationKeyDown(LogicalKeyboardKey.backspace, ui.KeyEventDeviceType.keyboard);
+
+      expect(
+        classifyPlayerNavigationKey(event, isAppleTV: false, hasModifiers: false, textEditingActive: true),
+        PlayerNavigationKey.none,
+      );
+      expect(
+        classifyPlayerNavigationKey(event, isAppleTV: false, hasModifiers: false, textEditingActive: false),
+        PlayerNavigationKey.back,
+      );
+    });
+
+    test('surrenders bare Home to a focused text editor but never browser Home', () {
+      expect(
+        classifyPlayerNavigationKey(
+          _navigationKeyDown(LogicalKeyboardKey.home, ui.KeyEventDeviceType.keyboard),
+          isAppleTV: false,
+          hasModifiers: false,
+          textEditingActive: true,
+        ),
+        PlayerNavigationKey.none,
+      );
+      // browserHome has no caret role, so an editor never takes it.
+      expect(
+        classifyPlayerNavigationKey(
+          _navigationKeyDown(LogicalKeyboardKey.browserHome, ui.KeyEventDeviceType.keyboard),
+          isAppleTV: false,
+          hasModifiers: false,
+          textEditingActive: true,
+        ),
+        PlayerNavigationKey.home,
+      );
+    });
+
+    test('keeps simulated remote Home navigating while a text editor has focus', () {
+      for (final deviceType in [ui.KeyEventDeviceType.directionalPad, ui.KeyEventDeviceType.gamepad]) {
+        expect(
+          classifyPlayerNavigationKey(
+            _navigationKeyDown(LogicalKeyboardKey.home, deviceType),
+            isAppleTV: false,
+            hasModifiers: false,
+            textEditingActive: true,
+          ),
+          PlayerNavigationKey.home,
+          reason: 'a synthesized remote press has no caret to move',
+        );
+      }
+    });
   });
 
   group('handlePlayerNavigationKeyAction', () {
@@ -571,6 +621,18 @@ void main() {
 
       expect(chromeController.controlsVisible, isTrue);
       expect(exits, 1);
+    });
+
+    testWidgets('Back exits on the first press when the route opened with no chrome', (tester) async {
+      final chromeController = PlayerChromeController(initiallyVisible: false);
+      addTearDown(chromeController.dispose);
+      var exits = 0;
+      final coordinator = coordinatorFor(chromeController, exitPlayer: () => exits++);
+      await pumpNavigationFocus(tester, coordinator);
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.gameButtonB);
+
+      expect(exits, 1, reason: 'a TV start has no chrome to hide, so back belongs to the route (#1765)');
     });
 
     testWidgets('physical Escape outside fullscreen hides presented chrome without exiting', (tester) async {

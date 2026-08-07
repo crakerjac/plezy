@@ -45,6 +45,14 @@ class PlaybackSubtitleSelection {
   final PlaybackSubtitleSidecar? secondarySidecar;
   final List<PlaybackSubtitleSidecar> preloadedSidecars;
 
+  /// The primary preference the resolver could not serve when this selection
+  /// is off. Distinguishes "the carried choice declined and the ladder fell
+  /// through" from a deliberate off (#1785): the open flow hands the declined
+  /// preference back to the track manager so late-arriving native tracks may
+  /// still serve it, and progress reports must not persist the fallout as an
+  /// explicit server-side off. A user or server decision leaves this null.
+  final SubtitlePreference? declinedPreference;
+
   const PlaybackSubtitleSelection({
     required this.primaryTrack,
     this.primarySourceStreamId,
@@ -53,9 +61,10 @@ class PlaybackSubtitleSelection {
     this.secondarySourceStreamId,
     this.secondarySidecar,
     this.preloadedSidecars = const [],
+    this.declinedPreference,
   });
 
-  const PlaybackSubtitleSelection.off({this.preloadedSidecars = const []})
+  const PlaybackSubtitleSelection.off({this.preloadedSidecars = const [], this.declinedPreference})
     : primaryTrack = SubtitleTrack.off,
       primarySourceStreamId = null,
       primarySidecar = null,
@@ -93,7 +102,10 @@ class PlaybackSubtitleResolver {
     required bool preserveSourceIdentity,
   }) {
     SubtitlePreference resolveIntent(SubtitleIntentPreference preference) {
-      final row = findSourceTrackForIntent(preference.intent, mediaInfo?.subtitleTracks ?? const <MediaSubtitleTrack>[]);
+      final row = findSourceTrackForIntent(
+        preference.intent,
+        mediaInfo?.subtitleTracks ?? const <MediaSubtitleTrack>[],
+      );
       if (row != null) {
         for (final candidate in candidates) {
           if (candidate.sourceStreamId == row.id) return SubtitlePreference.track(candidate.track);
@@ -189,13 +201,25 @@ class PlaybackSubtitleResolver {
     );
     final primaryResult = service.selectSubtitleTrack(availableTracks, primaryPreference, selectedAudio);
     final primary = primaryResult?.track;
+    // A non-off preference that still lands on off (or resolves to a track
+    // this catalog cannot back) was declined, not chosen — keep it on the
+    // selection so the open flow can retry it against native tracks (#1785).
+    final declinedPreference = primaryPreference != null && primaryPreference is! SubtitleOffPreference
+        ? primaryPreference
+        : null;
     if (primary == null || primary.id == SubtitleTrack.off.id) {
-      return PlaybackSubtitleSelection.off(preloadedSidecars: preloadedSidecars);
+      return PlaybackSubtitleSelection.off(
+        preloadedSidecars: preloadedSidecars,
+        declinedPreference: declinedPreference,
+      );
     }
 
     final primaryCandidate = candidates.where((candidate) => candidate.track.id == primary.id).firstOrNull;
     if (primaryCandidate == null) {
-      return PlaybackSubtitleSelection.off(preloadedSidecars: preloadedSidecars);
+      return PlaybackSubtitleSelection.off(
+        preloadedSidecars: preloadedSidecars,
+        declinedPreference: declinedPreference,
+      );
     }
 
     _SubtitleCandidate? secondaryCandidate;
@@ -239,7 +263,11 @@ class PlaybackSubtitleResolver {
     final playable = sidecar?.track;
     return SubtitleTrack(
       id: 'source:${sourceTrack.id}',
-      title: playable?.title ?? sourceTrack.displayTitle ?? sourceTrack.title ?? sourceTrack.language,
+      // The row's own title first: server display titles collapse to the bare
+      // language ("English") and are identical across same-language rows, so
+      // a carried intent built from them cannot tell a Signs/Songs track from
+      // the full dialogue track on the next episode (#1785).
+      title: sourceTrack.title ?? playable?.title ?? sourceTrack.displayTitle ?? sourceTrack.language,
       language: playable?.language ?? sourceTrack.languageCode ?? sourceTrack.language,
       codec: playable?.codec ?? sourceTrack.codec,
       isDefault: sourceTrack.selected,
@@ -301,18 +329,23 @@ class PlaybackSubtitleResolver {
     return choices[(normalizedCurrentIndex + advances) % choices.length];
   }
 
+  /// Stable semantic descriptor for a source audio row — the audio twin of
+  /// [subtitleTrackForSource]. The row's own title comes first: server
+  /// display titles collapse to the bare language and cannot tell a
+  /// commentary or alternate mix from the main track on another item.
+  static AudioTrack audioTrackForSource(MediaAudioTrack track) {
+    return AudioTrack(
+      id: 'source:${track.id}',
+      title: track.title ?? track.displayTitle ?? track.language,
+      language: track.languageCode ?? track.language,
+      codec: track.codec,
+      channels: track.channels,
+      isDefault: track.selected,
+    );
+  }
+
   static List<AudioTrack> _audioTracksForSource(MediaSourceInfo? mediaInfo) {
-    return [
-      for (final track in mediaInfo?.audioTracks ?? const <MediaAudioTrack>[])
-        AudioTrack(
-          id: 'source:${track.id}',
-          title: track.displayTitle ?? track.title ?? track.language,
-          language: track.languageCode ?? track.language,
-          codec: track.codec,
-          channels: track.channels,
-          isDefault: track.selected,
-        ),
-    ];
+    return [for (final track in mediaInfo?.audioTracks ?? const <MediaAudioTrack>[]) audioTrackForSource(track)];
   }
 }
 

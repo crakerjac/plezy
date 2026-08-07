@@ -8,6 +8,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
+import 'package:material_symbols_icons/symbols.dart';
 import 'package:plezy/connection/connection.dart';
 import 'package:plezy/database/app_database.dart';
 import 'package:plezy/i18n/strings.g.dart';
@@ -15,6 +16,7 @@ import 'package:plezy/navigation/profile_navigation_scope.dart';
 import 'package:plezy/media/ids.dart';
 import 'package:plezy/media/library_query.dart';
 import 'package:plezy/media/media_backend.dart';
+import 'package:plezy/media/media_file_info.dart';
 import 'package:plezy/media/media_item.dart';
 import 'package:plezy/media/media_kind.dart';
 import 'package:plezy/media/media_playlist.dart';
@@ -27,6 +29,7 @@ import 'package:plezy/profiles/profile.dart';
 import 'package:plezy/profiles/active_profile_provider.dart';
 import 'package:plezy/providers/download_provider.dart';
 import 'package:plezy/providers/multi_server_provider.dart';
+import 'package:plezy/providers/offline_mode_provider.dart';
 import 'package:plezy/providers/playback_state_provider.dart';
 import 'package:plezy/screens/music/album_detail_screen.dart';
 import 'package:plezy/screens/music/artist_detail_screen.dart';
@@ -40,12 +43,15 @@ import 'package:plezy/services/plex_api_cache.dart';
 import 'package:plezy/services/settings_service.dart';
 import 'package:plezy/theme/mono_theme.dart';
 import 'package:plezy/utils/media_server_http_client.dart';
+import 'package:plezy/utils/media_server_timeouts.dart';
 import 'package:plezy/utils/platform_detector.dart';
+import 'package:plezy/widgets/file_info_bottom_sheet.dart';
 import 'package:plezy/widgets/media_context_menu.dart';
 import 'package:provider/provider.dart';
 import '../test_helpers/backend_client_fixtures.dart';
 import '../test_helpers/media_items.dart';
 import '../test_helpers/multi_server_fixtures.dart';
+import '../test_helpers/http_fixtures.dart';
 import '../test_helpers/prefs.dart';
 import '../test_helpers/profile_stack.dart';
 import '../test_helpers/stub_music_playback_service.dart';
@@ -83,6 +89,173 @@ void main() {
         isAdminActionAllowedForMediaItem(isOwnerOrAdmin: true, itemBackend: MediaBackend.plex, activeProfile: profile),
         isTrue,
       );
+    });
+  });
+
+  group('isMediaDeletionAllowed', () {
+    test('Jellyfin follows the server answer, not the admin bit', () {
+      // Jellyfin's own check (`BaseItem.IsAuthorizedToDelete`) never consults
+      // `IsAdministrator` for library items, and only the first user created on
+      // a server gets `EnableContentDeletion` for free.
+      expect(
+        isMediaDeletionAllowed(
+          itemBackend: MediaBackend.jellyfin,
+          resolvedItemPermission: false,
+          isAdminActionAllowed: true,
+        ),
+        isFalse,
+      );
+      expect(
+        isMediaDeletionAllowed(
+          itemBackend: MediaBackend.jellyfin,
+          resolvedItemPermission: true,
+          isAdminActionAllowed: false,
+        ),
+        isTrue,
+      );
+    });
+
+    test('Jellyfin fails closed when the permission is unknown', () {
+      expect(
+        isMediaDeletionAllowed(
+          itemBackend: MediaBackend.jellyfin,
+          resolvedItemPermission: null,
+          isAdminActionAllowed: true,
+        ),
+        isFalse,
+      );
+    });
+
+    test('Plex keeps its account-level gate', () {
+      expect(
+        isMediaDeletionAllowed(
+          itemBackend: MediaBackend.plex,
+          resolvedItemPermission: null,
+          isAdminActionAllowed: true,
+        ),
+        isTrue,
+      );
+      expect(
+        isMediaDeletionAllowed(
+          itemBackend: MediaBackend.plex,
+          resolvedItemPermission: null,
+          isAdminActionAllowed: false,
+        ),
+        isFalse,
+      );
+    });
+
+    test('an item with no backend marker is never deletable', () {
+      expect(
+        isMediaDeletionAllowed(itemBackend: null, resolvedItemPermission: true, isAdminActionAllowed: true),
+        isFalse,
+      );
+    });
+  });
+
+  group('MediaContextMenu delete gate', () {
+    testWidgets('hides delete for an administrator the server refuses (issue #1749)', (tester) async {
+      final menuKey = await _pumpJellyfinMovieMenu(
+        tester,
+        isAdministrator: true,
+        handler: (_) async => _canDeleteResponse('movie-1', false),
+      );
+
+      await _openMenu(tester, menuKey);
+
+      expect(find.text(t.mediaMenu.deleteFromServer), findsNothing);
+    });
+
+    testWidgets('shows delete for a non-admin the server permits', (tester) async {
+      final requests = <Uri>[];
+      final menuKey = await _pumpJellyfinMovieMenu(
+        tester,
+        isAdministrator: false,
+        requests: requests,
+        handler: (_) async => _canDeleteResponse('movie-1', true),
+      );
+
+      await _openMenu(tester, menuKey);
+
+      expect(find.text(t.mediaMenu.deleteFromServer), findsOneWidget);
+      final probes = requests.where((uri) => uri.queryParameters['Fields'] == 'CanDelete').toList();
+      expect(probes, hasLength(1));
+      expect(probes.single.queryParameters['ids'], 'movie-1');
+    });
+
+    testWidgets('shows delete for a library-granted user inside the grant', (tester) async {
+      final menuKey = await _pumpJellyfinMovieMenu(
+        tester,
+        isAdministrator: false,
+        itemId: 'movie-in-grant',
+        handler: _libraryGrantedToOneMovie,
+      );
+
+      await _openMenu(tester, menuKey);
+
+      expect(find.text(t.mediaMenu.deleteFromServer), findsOneWidget);
+    });
+
+    testWidgets('hides delete for a library-granted user outside the grant', (tester) async {
+      final menuKey = await _pumpJellyfinMovieMenu(
+        tester,
+        isAdministrator: false,
+        itemId: 'movie-outside-grant',
+        handler: _libraryGrantedToOneMovie,
+      );
+
+      await _openMenu(tester, menuKey);
+
+      expect(find.text(t.mediaMenu.deleteFromServer), findsNothing);
+    });
+
+    testWidgets('hides delete when the permission probe fails', (tester) async {
+      final menuKey = await _pumpJellyfinMovieMenu(
+        tester,
+        isAdministrator: true,
+        handler: (_) async => http.Response('boom', 500),
+      );
+
+      await _openMenu(tester, menuKey);
+
+      expect(find.text(t.mediaMenu.deleteFromServer), findsNothing);
+      expect(tester.takeException(), isNull);
+      // The menu itself still opened; only the destructive entry is missing.
+      expect(find.text(t.mediaMenu.fileInfo), findsOneWidget);
+    });
+
+    testWidgets('hides delete without probing while the item server is offline', (tester) async {
+      final requests = <Uri>[];
+      final menuKey = await _pumpJellyfinMovieMenu(
+        tester,
+        isAdministrator: true,
+        serverOnline: false,
+        requests: requests,
+        handler: (_) async => _canDeleteResponse('movie-1', true),
+      );
+
+      await _openMenu(tester, menuKey);
+
+      expect(find.text(t.mediaMenu.deleteFromServer), findsNothing);
+      expect(requests.where((uri) => uri.queryParameters['Fields'] == 'CanDelete'), isEmpty);
+    });
+
+    testWidgets('still opens the menu, without delete, when the probe hangs', (tester) async {
+      final menuKey = await _pumpJellyfinMovieMenu(
+        tester,
+        isAdministrator: true,
+        handler: (_) => Completer<http.Response>().future,
+      );
+
+      menuKey.currentState!.showContextMenu(tester.element(find.text('delete target')));
+      await tester.pump();
+      expect(find.text(t.mediaMenu.fileInfo), findsNothing, reason: 'the menu waits for the permission answer');
+
+      await tester.pump(MediaServerTimeouts.jellyfinDeletePermission + const Duration(milliseconds: 1));
+      await tester.pumpAndSettle();
+
+      expect(find.text(t.mediaMenu.fileInfo), findsOneWidget);
+      expect(find.text(t.mediaMenu.deleteFromServer), findsNothing);
     });
   });
 
@@ -384,6 +557,42 @@ void main() {
       expect(find.text('picker target'), findsOneWidget);
     });
 
+    testWidgets('the music menu gives Instant Mix an icon it shares with no sibling row', (tester) async {
+      final track = testMediaItem(
+        id: 'track-1',
+        backend: MediaBackend.jellyfin,
+        kind: MediaKind.track,
+        title: 'Track',
+        parentId: 'album-1',
+        parentTitle: 'Album',
+        grandparentId: 'artist-1',
+        grandparentTitle: 'Artist',
+        serverId: 'srv-1',
+      );
+      final harness = await _pumpSiblingMusicMenu(tester, item: track, relatedItems: const []);
+
+      harness.menuKey.currentState!.showContextMenu(tester.element(find.text('mini-player menu target')));
+      await tester.pumpAndSettle();
+
+      expect(find.text(t.music.instantMix), findsOneWidget);
+      expect(find.byIcon(Symbols.wand_stars_rounded), findsOneWidget);
+
+      // #1629: the fader glyph reads as an equalizer, and the neighbouring
+      // rows must stay tellable apart at a glance on a TV.
+      expect(find.byIcon(Symbols.instant_mix_rounded), findsNothing);
+      expect(find.byIcon(Symbols.tune_rounded), findsNothing);
+      final musicIcons = tester
+          .widgetList<Icon>(find.byType(Icon))
+          .map((icon) => icon.icon)
+          .whereType<IconData>()
+          .toList();
+      expect(
+        musicIcons.where((icon) => icon == Symbols.wand_stars_rounded),
+        hasLength(1),
+        reason: 'Instant Mix must not reuse the glyph of Play, Play next, Add to queue, or Go to artist',
+      );
+    });
+
     testWidgets('track album action uses the profile navigator from the sibling menu overlay', (tester) async {
       final track = testMediaItem(
         id: 'track-1',
@@ -522,6 +731,69 @@ void main() {
       expect(harness.music.playedTracks, [newerTrack]);
       expect(tester.takeException(), isNull);
     });
+
+    testWidgets('track file info fetches the tapped track and renders its audio-only sheet', (tester) async {
+      const trackPath = '/music/Boards of Canada/Geogaddi/01 Ready Lets Go.flac';
+      final track = testMediaItem(
+        id: 'track-1',
+        backend: MediaBackend.jellyfin,
+        kind: MediaKind.track,
+        title: 'Ready Lets Go',
+        parentId: 'album-1',
+        parentTitle: 'Geogaddi',
+        grandparentId: 'artist-1',
+        grandparentTitle: 'Boards of Canada',
+        serverId: 'srv-1',
+      );
+      final harness = await _pumpSiblingMusicMenu(tester, item: track, relatedItems: const []);
+      harness.client.fileInfo = const MediaFileInfo(
+        versions: [
+          MediaFileVersion(
+            container: 'flac',
+            parts: [
+              MediaFilePart(
+                filePath: trackPath,
+                fileSize: 35651584,
+                streams: [MediaStreamDetails(kind: MediaStreamKind.audio, ordinal: 1, codec: 'flac', channels: 2)],
+              ),
+            ],
+          ),
+        ],
+      );
+
+      await _selectSiblingMusicMenuAction(tester, harness, t.mediaMenu.fileInfo);
+
+      expect(harness.client.fileInfoRequests, [same(track)]);
+      expect(find.byType(FileInfoBottomSheet), findsOneWidget);
+      expect(find.text('Ready Lets Go'), findsOneWidget);
+      expect(find.text(trackPath), findsOneWidget);
+      expect(find.text(t.fileInfo.audio), findsOneWidget);
+      expect(find.text(t.fileInfo.video), findsNothing);
+      // The loading dialog must be gone and no error snackbar raised.
+      expect(find.byType(CircularProgressIndicator), findsNothing);
+      expect(find.byType(SnackBar), findsNothing);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('album menu omits file info because containers carry no media sources', (tester) async {
+      final album = testMediaItem(
+        id: 'album-1',
+        backend: MediaBackend.jellyfin,
+        kind: MediaKind.album,
+        title: 'Geogaddi',
+        parentId: 'artist-1',
+        parentTitle: 'Boards of Canada',
+        serverId: 'srv-1',
+      );
+      final harness = await _pumpSiblingMusicMenu(tester, item: album, relatedItems: const []);
+
+      harness.menuKey.currentState!.showContextMenu(tester.element(find.text('mini-player menu target')));
+      await tester.pumpAndSettle();
+
+      expect(find.text(t.music.playNext), findsOneWidget);
+      expect(find.text(t.mediaMenu.fileInfo), findsNothing);
+      expect(harness.client.fileInfoRequests, isEmpty);
+    });
   });
 }
 
@@ -610,6 +882,89 @@ Future<GlobalKey<MediaContextMenuState>> _pumpPlexMovieMenu(
     ),
   );
   return menuKey;
+}
+
+/// Jellyfin answer for the per-item delete-permission probe.
+http.Response _canDeleteResponse(String id, bool canDelete) => jsonResponse({
+  'Items': [
+    {'Id': id, 'CanDelete': canDelete},
+  ],
+});
+
+/// A user holding `EnableContentDeletionFromFolders` for one library only: the
+/// server answers per item, which is the only way that grant reaches a client.
+Future<http.Response> _libraryGrantedToOneMovie(http.Request request) async {
+  final id = request.url.queryParameters['ids'] ?? '';
+  return _canDeleteResponse(id, id == 'movie-in-grant');
+}
+
+Future<GlobalKey<MediaContextMenuState>> _pumpJellyfinMovieMenu(
+  WidgetTester tester, {
+  required bool isAdministrator,
+  required Future<http.Response> Function(http.Request request) handler,
+  String itemId = 'movie-1',
+  bool serverOnline = true,
+  List<Uri>? requests,
+}) async {
+  LocaleSettings.setLocaleSync(AppLocale.en);
+  TvDetectionService.debugSetAppleTVOverride(true);
+  addTearDown(() => TvDetectionService.debugSetAppleTVOverride(null));
+
+  final client = JellyfinClient.forTesting(
+    connection: testJellyfinConnection(isAdministrator: isAdministrator),
+    httpClient: MockClient((request) async {
+      requests?.add(request.url);
+      return handler(request);
+    }),
+  );
+  final manager = MultiServerManager()..debugRegisterJellyfinClientForTesting(client, online: serverOnline);
+  final multiServerProvider = testMultiServerProvider(manager);
+  final offlineMode = OfflineModeProvider(manager);
+  final stack = await ProfileStack.create(withStorage: false);
+  addTearDown(() async {
+    await stack.dispose();
+    offlineMode.dispose();
+    multiServerProvider.dispose();
+    manager.dispose();
+  });
+
+  final menuKey = GlobalKey<MediaContextMenuState>();
+  final item = testMediaItem(
+    id: itemId,
+    backend: MediaBackend.jellyfin,
+    kind: MediaKind.movie,
+    title: 'Movie',
+    serverId: 'srv-1',
+  );
+  await tester.pumpWidget(
+    TranslationProvider(
+      child: MultiProvider(
+        providers: [
+          ChangeNotifierProvider<MultiServerProvider>.value(value: multiServerProvider),
+          ChangeNotifierProvider<ActiveProfileProvider>.value(value: stack.active),
+          ChangeNotifierProvider<OfflineModeProvider>.value(value: offlineMode),
+        ],
+        child: MaterialApp(
+          theme: monoTheme(dark: true),
+          home: Scaffold(
+            body: Center(
+              child: MediaContextMenu(
+                key: menuKey,
+                item: item,
+                child: const SizedBox(width: 120, height: 80, child: Text('delete target')),
+              ),
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
+  return menuKey;
+}
+
+Future<void> _openMenu(WidgetTester tester, GlobalKey<MediaContextMenuState> menuKey) async {
+  menuKey.currentState!.showContextMenu(tester.element(find.text('delete target')));
+  await tester.pumpAndSettle();
 }
 
 Future<void> _openPlaylistPicker(WidgetTester tester, GlobalKey<MediaContextMenuState> menuKey) async {
@@ -723,6 +1078,17 @@ class _RelatedMusicClient implements MediaServerClient {
 
   @override
   Future<List<MediaItem>> fetchArtistAlbums(MediaItem artist) async => const [];
+
+  /// Items the menu asked file info for, in call order — the track menu must
+  /// resolve the client for the tapped item, not for whatever is playing.
+  final List<MediaItem> fileInfoRequests = [];
+  MediaFileInfo? fileInfo;
+
+  @override
+  Future<MediaFileInfo?> getFileInfo(MediaItem item) async {
+    fileInfoRequests.add(item);
+    return fileInfo;
+  }
 
   @override
   void close() {}

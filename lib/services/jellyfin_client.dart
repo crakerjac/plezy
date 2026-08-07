@@ -39,6 +39,7 @@ import '../utils/app_logger.dart';
 import '../utils/device_identity.dart';
 import '../utils/failover_http_client.dart';
 import '../utils/media_server_retry.dart';
+import '../utils/future_extensions.dart';
 import '../utils/media_server_timeouts.dart';
 import '../utils/log_redaction_manager.dart';
 import '../utils/external_ids.dart';
@@ -111,7 +112,12 @@ class JellyfinClient
         _JellyfinLiveTvMethods,
         _JellyfinImageDownloadMethods,
         _JellyfinMetadataEditMethods
-    implements MediaServerClient, SeasonEpisodePagingClient, ScopedMediaServerClient, GracefullyCloseable {
+    implements
+        MediaServerClient,
+        SeasonEpisodePagingClient,
+        MediaDeletionPermissionClient,
+        ScopedMediaServerClient,
+        GracefullyCloseable {
   JellyfinClient._({required this._connection, required this._http, FavoriteChannelsRepository? favoritesRepository})
     : _favoritesRepository = favoritesRepository ?? const SharedPreferencesFavoriteChannelsRepository();
 
@@ -171,6 +177,11 @@ class JellyfinClient
       baseUrl: connection.baseUrl,
       defaultHeaders: headers,
       logLabel: 'Jellyfin',
+      // Same pool tuning Plex uses: the home fan-out issues several concurrent
+      // requests per pass, and the untuned dart:io default drops idle
+      // connections after 15s — a fresh TLS handshake per request on a
+      // high-RTT/CDN link.
+      usePlexApiClient: true,
       prioritizedEndpoints: connection.baseUrls,
       onEndpointSwitch: (newBaseUrl, {required persist}) => client._handleEndpointSwitch(newBaseUrl, persist: persist),
       onAllEndpointsExhausted: onAllEndpointsExhausted,
@@ -311,9 +322,10 @@ class JellyfinClient
   /// real call to 401.
   ///
   /// Side-effect: when the response body carries a fresh
-  /// `Policy.IsAdministrator` that differs from the cached one, refresh the
-  /// connection so admin-gated UI catches the server-side change without
-  /// requiring re-auth (see [onConnectionUpdated]).
+  /// `Policy.IsAdministrator` or primary profile-picture tag that differs
+  /// from the cached value, refresh the connection so admin-gated UI and
+  /// profile avatars catch server-side changes without requiring re-auth
+  /// (see [onConnectionUpdated]).
   ///
   /// 401/403 surfaces as [HealthStatus.authError] so the manager can
   /// distinguish a revoked token from a generic transport failure.
@@ -326,17 +338,24 @@ class JellyfinClient
         final data = response.data;
         if (data is Map<String, dynamic>) {
           final policy = data['Policy'];
-          if (policy is Map<String, dynamic>) {
-            final fresh = policy['IsAdministrator'] as bool?;
-            if (fresh != null && fresh != _connection.isAdministrator) {
-              _connection = _connection.copyWith(isAdministrator: fresh);
-              final listener = onConnectionUpdated;
-              if (listener != null) {
-                try {
-                  await Future.sync(() => listener(_connection));
-                } catch (e, st) {
-                  appLogger.w('Failed to handle Jellyfin connection update', error: e, stackTrace: st);
-                }
+          final freshIsAdministrator = policy is Map<String, dynamic> ? policy['IsAdministrator'] as bool? : null;
+          final freshPrimaryImageTag = JellyfinConnection.readPrimaryImageTag(data);
+          final isAdministratorChanged =
+              freshIsAdministrator != null && freshIsAdministrator != _connection.isAdministrator;
+          final primaryImageTagChanged = freshPrimaryImageTag != _connection.primaryImageTag;
+
+          if (isAdministratorChanged || primaryImageTagChanged) {
+            _connection = _connection.copyWith(
+              isAdministrator: freshIsAdministrator,
+              primaryImageTag: freshPrimaryImageTag,
+              clearPrimaryImageTag: primaryImageTagChanged && freshPrimaryImageTag == null,
+            );
+            final listener = onConnectionUpdated;
+            if (listener != null) {
+              try {
+                await Future.sync(() => listener(_connection));
+              } catch (e, st) {
+                appLogger.w('Failed to handle Jellyfin connection update', error: e, stackTrace: st);
               }
             }
           }

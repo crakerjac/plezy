@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:plezy/media/ids.dart';
 
@@ -11,6 +12,8 @@ import 'package:plezy/exceptions/media_server_exceptions.dart';
 import 'package:plezy/media/media_backend.dart';
 import 'package:plezy/media/media_kind.dart';
 import 'package:plezy/media/media_library.dart';
+import 'package:plezy/media/media_hub.dart';
+import 'package:plezy/media/server_capabilities.dart';
 import 'package:plezy/media/media_server_client.dart';
 import 'package:plezy/media/media_item.dart';
 import 'package:plezy/models/plex/plex_config.dart';
@@ -54,6 +57,7 @@ class _LibrariesClient implements MediaServerClient {
   final List<MediaLibrary> libraries;
   final Object? searchError;
   final List<MediaItem> searchResults;
+  Set<String>? lastExcludedLibraryIds;
 
   @override
   Future<List<MediaLibrary>> fetchLibraries() async {
@@ -62,10 +66,69 @@ class _LibrariesClient implements MediaServerClient {
   }
 
   @override
-  Future<List<MediaItem>> searchItems(String query, {int limit = 100, AbortController? abort}) async {
+  Future<List<MediaItem>> searchItems(
+    String query, {
+    int limit = 100,
+    AbortController? abort,
+    Set<String> excludedLibraryIds = const {},
+  }) async {
+    lastExcludedLibraryIds = excludedLibraryIds;
     abort?.throwIfAborted();
     if (searchError != null) throw searchError!;
     return searchResults;
+  }
+
+  @override
+  void close() {}
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
+/// Per-library hub client whose fetches are held open individually, so a test
+/// can observe exactly when the fan-out starts each library.
+class _GatedHubsClient implements MediaServerClient {
+  _GatedHubsClient(this.libraries);
+
+  final List<MediaLibrary> libraries;
+  final started = <String>[];
+  final _gates = <String, Completer<List<MediaHub>>>{};
+
+  void complete(String libraryId) {
+    _gates[libraryId]!.complete([
+      MediaHub(
+        id: '$libraryId.recent',
+        title: libraryId,
+        type: 'mixed',
+        items: const [],
+        size: 0,
+        libraryId: libraryId,
+      ),
+    ]);
+  }
+
+  @override
+  ServerId get serverId => ServerId('server-1');
+
+  @override
+  String get serverName => 'Server';
+
+  @override
+  ServerCapabilities get capabilities => ServerCapabilities.jellyfin;
+
+  @override
+  Future<List<MediaLibrary>> fetchLibraries() async => libraries;
+
+  @override
+  Future<List<MediaHub>> fetchLibraryHubs(
+    String libraryId, {
+    String? libraryName,
+    int limit = defaultHubPreviewLimit,
+    bool includePlaybackHubs = true,
+    MediaKind? libraryKind,
+  }) {
+    started.add(libraryId);
+    return (_gates[libraryId] = Completer<List<MediaHub>>()).future;
   }
 
   @override
@@ -104,6 +167,43 @@ void main() {
       final result = await service.getMediaLibrariesFromAllServers();
       expect(result.libraries, isEmpty);
       expect(result.succeededServerIds, isEmpty);
+    });
+    test('per-library hub fan-out refills a free slot instead of waiting for the batch', () async {
+      // Old shape: batches of three separated by `Future.wait`, so the 4th
+      // library could not start until ALL of the first three had answered and
+      // one slow row stalled every row queued behind it (#1784). A sliding
+      // window keeps the same peak concurrency with no head-of-line blocking.
+      final client = _GatedHubsClient([
+        for (var i = 1; i <= 4; i++)
+          MediaLibrary(
+            id: 'lib-$i',
+            backend: MediaBackend.jellyfin,
+            title: 'Library $i',
+            kind: MediaKind.movie,
+            serverId: ServerId('server-1'),
+          ),
+      ]);
+      manager.debugRegisterClientForTesting(client);
+
+      final pending = service.getHubsFromAllServers(useGlobalHubs: false, includePlaybackHubs: false);
+      await pumpEventQueue();
+
+      expect(client.started, ['lib-1', 'lib-2', 'lib-3'], reason: 'concurrency stays at 3');
+
+      // Free exactly one slot. The 4th library must take it immediately, while
+      // its two batch-mates are still in flight.
+      client.complete('lib-1');
+      await pumpEventQueue();
+
+      expect(client.started, ['lib-1', 'lib-2', 'lib-3', 'lib-4']);
+
+      // Finish out of order — hub order must still follow library order.
+      client.complete('lib-4');
+      client.complete('lib-3');
+      client.complete('lib-2');
+
+      final result = await pending;
+      expect(result.hubs.map((hub) => hub.libraryId), ['lib-1', 'lib-2', 'lib-3', 'lib-4']);
     });
 
     test('searchAcrossServers and getOnDeckFromAllServers return empty when no clients', () async {
@@ -176,6 +276,93 @@ void main() {
       expect(result.succeededServerIds, {'ok'});
       expect(result.cancelledServerIds, {'cancelled'});
       expect(result.failedServerIds, {'failed'});
+    });
+
+    test('searchAcrossServers drops hidden-library results and keeps unattributed ones', () async {
+      final visible = testMediaItem(
+        id: 'visible-1',
+        backend: MediaBackend.plex,
+        kind: MediaKind.movie,
+        title: 'Target',
+        serverId: 'plex',
+        libraryId: '1',
+      );
+      final hidden = testMediaItem(
+        id: 'hidden-1',
+        backend: MediaBackend.plex,
+        kind: MediaKind.movie,
+        title: 'Target',
+        serverId: 'plex',
+        libraryId: '2',
+      );
+      // Plex search asks for external media, and shared rows carry no local
+      // section. The user cannot have hidden a library that isn't theirs, so
+      // an unattributed row must survive the filter.
+      final unattributed = testMediaItem(
+        id: 'shared-1',
+        backend: MediaBackend.plex,
+        kind: MediaKind.movie,
+        title: 'Target',
+        serverId: 'plex',
+      );
+      manager.debugRegisterClientForTesting(
+        _LibrariesClient(ServerId('plex'), searchResults: [visible, hidden, unattributed]),
+      );
+
+      final result = await service.searchAcrossServers('Target', hiddenLibraryKeys: {'plex:2'});
+
+      expect(result.items.map((item) => item.id), unorderedEquals(['visible-1', 'shared-1']));
+      expect(result.succeededServerIds, {'plex'});
+    });
+
+    test('hidden-library results are dropped before the ranking limit is spent', () async {
+      // The hidden row is the exact-title match, so it outranks the visible
+      // one. Filtering after ranking would let it consume the single slot and
+      // return nothing at all.
+      final hidden = testMediaItem(
+        id: 'hidden-1',
+        backend: MediaBackend.plex,
+        kind: MediaKind.movie,
+        title: 'Target',
+        serverId: 'plex',
+        libraryId: '2',
+      );
+      final visible = testMediaItem(
+        id: 'visible-1',
+        backend: MediaBackend.plex,
+        kind: MediaKind.movie,
+        title: 'Target Sequel',
+        serverId: 'plex',
+        libraryId: '1',
+      );
+      manager.debugRegisterClientForTesting(_LibrariesClient(ServerId('plex'), searchResults: [hidden, visible]));
+
+      final result = await service.searchAcrossServers('Target', limit: 1, hiddenLibraryKeys: {'plex:2'});
+
+      expect(result.items.map((item) => item.id), ['visible-1']);
+    });
+
+    test('each server is told only about its own hidden libraries', () async {
+      // Global keys are cross-server; a backend that scopes its search needs
+      // the bare library ids it actually owns, and none of its neighbour's.
+      final alpha = _LibrariesClient(ServerId('alpha'));
+      final beta = _LibrariesClient(ServerId('beta'));
+      manager.debugRegisterClientForTesting(alpha);
+      manager.debugRegisterClientForTesting(beta);
+
+      await service.searchAcrossServers('Target', hiddenLibraryKeys: {'alpha:1', 'alpha:9', 'beta:1'});
+
+      expect(alpha.lastExcludedLibraryIds, {'1', '9'});
+      expect(beta.lastExcludedLibraryIds, {'1'});
+    });
+
+    test('no hidden libraries passes an empty exclusion set', () async {
+      final client = _LibrariesClient(ServerId('alpha'));
+      manager.debugRegisterClientForTesting(client);
+
+      await service.searchAcrossServers('Target');
+
+      expect(client.lastExcludedLibraryIds, isEmpty);
     });
 
     test('searchAcrossServers overfetches and ranks before trimming across backends', () async {
@@ -850,17 +1037,20 @@ void main() {
         reason: 'the home screen excludes playback-derived music rows',
       );
       // Music Latest returns album FOLDER dtos — count/user-data fields would
-      // each cost a recursive per-album COUNT query (#1552); video libraries
-      // keep the full browse fields (series leaf counts).
+      // each cost a recursive per-album COUNT query (#1552).
       final musicLatest = captured.singleWhere(
         (uri) => uri.path == '/Users/user-1/Items/Latest' && uri.queryParameters['ParentId'] == 'music',
       );
       expect(musicLatest.queryParameters['Fields'], 'PremiereDate,OriginalTitle,SortName');
       expect(musicLatest.queryParameters['EnableUserData'], 'false');
+      // Video Latest rows carry the same risk: `/Items/Latest` groups a TV
+      // library by series, so the rows are Series FOLDER dtos and the count
+      // fields cost a per-row COUNT each (#1784). Watch state survives via
+      // UserData.UnplayedItemCount, so the hub row set asks for neither.
       final movieLatest = captured.singleWhere(
         (uri) => uri.path == '/Users/user-1/Items/Latest' && uri.queryParameters['ParentId'] == 'movies',
       );
-      expect(movieLatest.queryParameters['Fields'], contains('RecursiveItemCount'));
+      expect(movieLatest.queryParameters['Fields'], 'Overview');
       expect(movieLatest.queryParameters.containsKey('EnableUserData'), isFalse);
     });
 

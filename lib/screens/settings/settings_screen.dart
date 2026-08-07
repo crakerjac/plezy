@@ -43,6 +43,7 @@ import '../../widgets/overlay_sheet.dart';
 import '../../widgets/setting_tile.dart';
 import '../../widgets/settings_builder.dart';
 import '../../widgets/settings_section.dart';
+import '../../widgets/system_bottom_inset.dart';
 import '../../profiles/active_profile_provider.dart';
 import '../../profiles/profile.dart';
 import '../../watch_together/services/watch_together_relay_endpoint.dart';
@@ -203,7 +204,7 @@ class _SettingsScreenState extends State<SettingsScreen> with FocusableTab, Moun
 
                 _buildAdvancedSection(),
 
-                if (UpdateService.isUpdateCheckEnabled) ...[_buildUpdateSection()],
+                if (UpdateService.isUpdateCheckAvailable) ...[_buildUpdateSection()],
 
                 // Hidden on Android TV / tvOS (no document picker); desktop in
                 // force-TV mode keeps it — FilePickerService works there.
@@ -224,6 +225,7 @@ class _SettingsScreenState extends State<SettingsScreen> with FocusableTab, Moun
                 const SizedBox(height: 24),
               ]),
             ),
+            const SliverSystemBottomInset(),
           ],
         ),
       ),

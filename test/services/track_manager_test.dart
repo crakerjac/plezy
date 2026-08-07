@@ -194,7 +194,7 @@ Future<void> _drainAsync() async {
   }
 }
 
-Future<void> _noopPersister({required int partId, required String trackType, int? streamID}) async {}
+Future<void> _noopPersister({required int partId, required String trackType, required int streamID}) async {}
 
 void main() {
   // The constructor doesn't touch prefs, but [dispose] / [applyTrackSelection]
@@ -1362,7 +1362,7 @@ void main() {
       final mgr = _make(player: player);
       addTearDown(mgr.dispose);
 
-      mgr.cycleSubtitleTrack();
+      expect(mgr.cycleSubtitleTrack(), isNull);
       expect(player.selectedSubtitle, isEmpty);
     });
 
@@ -1371,8 +1371,31 @@ void main() {
       final mgr = _make(player: player);
       addTearDown(mgr.dispose);
 
-      mgr.cycleSubtitleTrack();
+      expect(mgr.cycleSubtitleTrack(), isNull);
       expect(player.selectedSubtitle, isEmpty);
+    });
+
+    test('reports the track it moved to so the caller can commit the choice', () async {
+      await SettingsService.getInstance();
+      // The screen records the committed subtitle, and episode navigation
+      // carries that record to the next item. A cycle the screen cannot see
+      // would be undone by the next episode (#1779).
+      final player = _FakePlayer(
+        tracks: const Tracks(
+          subtitle: [
+            SubtitleTrack.off,
+            SubtitleTrack(id: '1', language: 'eng'),
+          ],
+        ),
+        track: const TrackSelection(
+          subtitle: SubtitleTrack(id: '1', language: 'eng'),
+        ),
+      );
+      final mgr = _make(player: player);
+      addTearDown(mgr.dispose);
+
+      expect(mgr.cycleSubtitleTrack()?.id, SubtitleTrack.off.id);
+      expect(player.selectedSubtitle.map((track) => track.id), [SubtitleTrack.off.id]);
     });
   });
 
@@ -1515,7 +1538,7 @@ void main() {
       final mgr = _make(
         player: player,
         mediaInfo: info(),
-        persister: ({required int partId, required String trackType, int? streamID}) async {
+        persister: ({required int partId, required String trackType, required int streamID}) async {
           captured = streamID;
         },
       );
@@ -1535,7 +1558,7 @@ void main() {
       final mgr = _make(
         player: player,
         mediaInfo: info(),
-        persister: ({required int partId, required String trackType, int? streamID}) async {
+        persister: ({required int partId, required String trackType, required int streamID}) async {
           captured = streamID;
         },
       );
@@ -1552,7 +1575,7 @@ void main() {
       final mgr = _make(
         player: player,
         mediaInfo: info(),
-        persister: ({required int partId, required String trackType, int? streamID}) async {
+        persister: ({required int partId, required String trackType, required int streamID}) async {
           captured = streamID;
         },
       );
@@ -1560,6 +1583,33 @@ void main() {
 
       await mgr.onSubtitleTrackChanged(const SubtitleTrack(id: 'native-without-metadata'), sourceStreamId: 32);
       expect(captured, 32);
+    });
+
+    test('does not persist anything when the track maps to no server stream', () async {
+      // #1713: an unmappable native track used to reach the persister with a
+      // null streamID, which short-circuited before the request while the
+      // manager still reported a successful save. Nothing is stored locally,
+      // so a silent no-op loses the choice on the next start.
+      await SettingsService.getInstance();
+      const unknown = SubtitleTrack(id: '2_9', language: 'jpn', codec: 'ass');
+      final player = _FakePlayer(tracks: const Tracks(subtitle: [...playerSubs, unknown]));
+      var persistCalls = 0;
+      final mgr = _make(
+        player: player,
+        mediaInfo: info(),
+        persister: ({required int partId, required String trackType, required int streamID}) async {
+          persistCalls++;
+        },
+      );
+      addTearDown(mgr.dispose);
+
+      await mgr.onSubtitleTrackChanged(unknown);
+      expect(persistCalls, 0);
+
+      // Same manager and fixture: a mappable track still persists, so the
+      // assertion above is about the unmatched track, not a disabled path.
+      await mgr.onSubtitleTrackChanged(playerSubs[0]);
+      expect(persistCalls, 1);
     });
   });
 
