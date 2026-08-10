@@ -72,7 +72,6 @@ extension _VideoPlayerBuildMethods on VideoPlayerScreenState {
       _currentMediaInfo?.subtitleTracks ?? const <MediaSubtitleTrack>[],
       isTranscoding: _isTranscoding,
       sidecarSourceIds: sidecarSourceIds,
-      supportsEmbeddedTranscodeSelection: _currentMetadata.backend == MediaBackend.plex,
     );
   }
 
@@ -80,23 +79,6 @@ extension _VideoPlayerBuildMethods on VideoPlayerScreenState {
     return const Scaffold(
       backgroundColor: Colors.black,
       body: Center(child: PlayerLoadingIndicator()),
-    );
-  }
-
-  Widget _buildPlayerInitializationSurface() {
-    final bootstrapPlayer = _bootstrapPlayer;
-    if (bootstrapPlayer == null) return _buildLoadingSpinner();
-
-    // Linux creates the texture before its EGL/mpv render bootstrap can be
-    // proven. Mount the provisional surface so Flutter drives one texture
-    // copy, while retaining the black loading cover until playback itself
-    // reports its first frame.
-    return Stack(
-      fit: StackFit.expand,
-      children: [
-        Video(player: bootstrapPlayer, hasFirstFrame: _hasFirstFrame),
-        const Center(child: PlayerLoadingIndicator()),
-      ],
     );
   }
 
@@ -258,7 +240,11 @@ extension _VideoPlayerBuildMethods on VideoPlayerScreenState {
                     if (widget.isLive) {
                       onNext = _hasNextChannel ? () => _switchLiveChannel(1) : null;
                     } else {
-                      onNext = (_nextEpisode != null && authority.canNavigateMediaItems) ? _playNext : null;
+                      // _playNext no-ops while a navigation is in flight; matching that here
+                      // keeps the control from looking live while it does nothing.
+                      onNext = (_nextEpisode != null && !_isLoadingNext && authority.canNavigateMediaItems)
+                          ? _playNext
+                          : null;
                     }
 
                     VoidCallback? onPrevious;

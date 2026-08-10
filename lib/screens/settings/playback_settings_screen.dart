@@ -18,7 +18,6 @@ import '../../widgets/setting_tile.dart';
 import '../../widgets/settings_builder.dart';
 import '../../widgets/settings_page.dart';
 import '../../widgets/settings_section.dart';
-import 'atmos_diagnostics_screen.dart';
 import 'external_player_screen.dart';
 import 'mpv_config_screen.dart';
 import 'settings_utils.dart';
@@ -88,9 +87,9 @@ class _PlaybackSettingsScreenState extends State<PlaybackSettingsScreen> {
                 _audioDownmixTile(),
                 if (downmixOn) _downmixCenterBoostTile(),
                 if (downmixOn) _downmixNormalizeTile(),
-                if (PlatformDetector.isAppleTV()) _atmosDiagnosticsTile(),
                 if (exoActive) _dvConversionModeTile(),
                 _bufferSizeTile(),
+                if (exoActive) _playbackBufferTile(),
                 _defaultQualityTile(),
                 _musicQualityTile(),
               ],
@@ -368,13 +367,6 @@ class _PlaybackSettingsScreenState extends State<PlaybackSettingsScreen> {
     subtitle: t.settings.audioDownmixNormalizeDescription,
   );
 
-  Widget _atmosDiagnosticsTile() => SettingNavigationTile(
-    icon: Symbols.spatial_audio_rounded,
-    title: t.settings.atmosDiagnostics,
-    subtitle: t.settings.atmosDiagnosticsDescription,
-    destinationBuilder: (_) => const AtmosDiagnosticsScreen(),
-  );
-
   // Visibility for this and the three tiles below is decided by the hoisted
   // SettingsBuilder in build().
   Widget _displaySwitchDelayTile() => SettingNumberTile(
@@ -432,6 +424,22 @@ class _PlaybackSettingsScreenState extends State<PlaybackSettingsScreen> {
       },
     );
   }
+
+  Widget _playbackBufferTile() => SettingSelectionTile<PlaybackBufferTier>(
+    pref: SettingsService.playbackBufferTier,
+    icon: Symbols.hourglass_top_rounded,
+    title: t.settings.playbackBuffer,
+    subtitleBuilder: (tier) => '${_playbackBufferLabel(tier)} · ${t.settings.playbackBufferDescription}',
+    options: PlaybackBufferTier.values
+        .map((tier) => DialogOption(value: tier, title: _playbackBufferLabel(tier)))
+        .toList(),
+  );
+
+  String _playbackBufferLabel(PlaybackBufferTier tier) => switch (tier) {
+    PlaybackBufferTier.auto => t.settings.playbackBufferAuto,
+    PlaybackBufferTier.large => t.settings.playbackBufferLarge,
+    PlaybackBufferTier.extraLarge => t.settings.playbackBufferExtraLarge,
+  };
 
   Widget _defaultQualityTile() => SettingSelectionTile<TranscodeQualityPreset>(
     pref: SettingsService.defaultQualityPreset,

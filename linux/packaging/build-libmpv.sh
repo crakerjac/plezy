@@ -18,6 +18,23 @@ print(value)
 PY
 }
 
+# For keys that are genuinely optional, where absence means "not offered"
+# rather than a broken manifest. Pinned values never come through here: a
+# missing checksum or commit has to stay fatal.
+manifest_optional() {
+  python3 - "$NATIVE_INPUTS_MANIFEST" "$1" "$2" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as source:
+    manifest = json.load(source)
+value = manifest["inputs"][sys.argv[2]].get(sys.argv[3], "")
+if not isinstance(value, str):
+    raise SystemExit(f"invalid manifest value: {sys.argv[2]}.{sys.argv[3]}")
+print(value)
+PY
+}
+
 FFMPEG_VERSION="$(manifest_value ffmpeg version)"
 FFMPEG_URL="$(manifest_value ffmpeg url)"
 FFMPEG_SHA256="$(manifest_value ffmpeg sha256)"
@@ -27,6 +44,7 @@ SHADERC_REF="$(manifest_value shaderc ref)"
 SHADERC_COMMIT="$(manifest_value shaderc commit)"
 LIBPLACEBO_VERSION="$(manifest_value libplacebo version)"
 LIBPLACEBO_URL="$(manifest_value libplacebo url)"
+LIBPLACEBO_MIRROR="$(manifest_optional libplacebo mirror)"
 LIBPLACEBO_REF="$(manifest_value libplacebo ref)"
 LIBPLACEBO_COMMIT="$(manifest_value libplacebo commit)"
 MPV_VERSION="$(manifest_value mpv version)"
@@ -55,11 +73,18 @@ download_verified() {
 
   mkdir -p "$(dirname "$destination")"
   temporary="$(mktemp "${destination}.tmp.XXXXXX")"
+  # Retries cover the transfer only. A checksum mismatch below is never retried:
+  # that is a tampered or moved artefact, not a flaky connection, and trying
+  # again would only turn a loud failure into an intermittent one.
   if ! curl \
     --fail \
     --location \
     --silent \
     --show-error \
+    --retry 3 \
+    --retry-connrefused \
+    --retry-delay 5 \
+    --connect-timeout 30 \
     --proto '=https,file' \
     --tlsv1.2 \
     --output "$temporary" \
@@ -85,23 +110,44 @@ checkout_verified_ref() {
   local ref="$2"
   local expected_commit="$3"
   local destination="$4"
+  local mirror="${5:-}"
   local actual_commit
+  local source
+  local attempt
 
   if [[ ! "$expected_commit" =~ ^[0-9a-f]{40}$ ]]; then
     echo "Invalid Git commit pin for $url at $ref" >&2
     return 1
   fi
 
+  # Retries and the mirror cover the transfer, never the verification. The commit
+  # pin below is checked identically whichever source answered, so a mirror can
+  # only supply the same tree or fail - it cannot substitute another one.
+  #
+  # This exists because code.videolan.org, the only source fetched over git,
+  # refused connections for well over two minutes at a time across several CI
+  # runs and took every build with it.
   rm -rf "$destination"
-  if ! git clone --quiet --depth 1 --branch "$ref" --no-checkout \
-    "$url" "$destination"; then
-    rm -rf "$destination"
+  for source in "$url" ${mirror:+"$mirror"}; do
+    for attempt in 1 2 3; do
+      if git clone --quiet --depth 1 --branch "$ref" --no-checkout \
+        "$source" "$destination"; then
+        break 2
+      fi
+      rm -rf "$destination"
+      # No point pausing before giving up on this source.
+      if [ "$attempt" -lt 3 ]; then sleep $((attempt * 5)); fi
+    done
+    echo "Could not clone $source at $ref after 3 attempts" >&2
+  done
+  if [ ! -d "$destination" ]; then
+    echo "No source produced $ref for $url" >&2
     return 1
   fi
 
   actual_commit="$(git -C "$destination" rev-parse 'HEAD^{commit}')"
   if [ "$actual_commit" != "$expected_commit" ]; then
-    echo "Git ref mismatch for $url at $ref" >&2
+    echo "Git ref mismatch for $ref" >&2
     echo "Expected: $expected_commit" >&2
     echo "Actual:   $actual_commit" >&2
     rm -rf "$destination"
@@ -162,7 +208,7 @@ main() {
     --enable-filter=aformat,aresample,format,null,scale \
     --enable-gnutls \
     --enable-vaapi \
-    --enable-vdpau \
+    --disable-vdpau \
     --disable-debug \
     --disable-stripping
 
@@ -201,7 +247,7 @@ main() {
   echo "==> Building libplacebo $LIBPLACEBO_VERSION (static)..."
   checkout_verified_ref \
     "$LIBPLACEBO_URL" "$LIBPLACEBO_REF" "$LIBPLACEBO_COMMIT" \
-    "$srcdir/libplacebo-v${LIBPLACEBO_VERSION}"
+    "$srcdir/libplacebo-v${LIBPLACEBO_VERSION}" "$LIBPLACEBO_MIRROR"
   cd "libplacebo-v${LIBPLACEBO_VERSION}"
   git submodule update --init --recursive
 
@@ -226,6 +272,10 @@ main() {
   tar -xzf "$srcdir/mpv.tar.gz"
   cd "mpv-${MPV_VERSION}"
 
+  # The runner's only video path is a Wayland subsurface, and it hands mpv
+  # MPV_RENDER_PARAM_WL_DISPLAY so VAAPI can find the device instead of falling
+  # back to software decoding. A libmpv built without Wayland cannot use that.
+  # VDPAU goes with X11 - it has no Wayland backend at all.
   meson setup build \
     --prefix="$prefix" \
     -Dlibmpv=true \
@@ -240,12 +290,12 @@ main() {
     -Dd3d11=disabled \
     -Dgl=enabled \
     -Dvaapi=enabled \
-    -Dvdpau=enabled \
     -Dalsa=enabled \
     -Dpulse=enabled \
     -Dpipewire=enabled \
-    -Dwayland=disabled \
-    -Dx11=enabled
+    -Dvdpau=disabled \
+    -Dwayland=enabled \
+    -Dx11=disabled
 
   ninja -C build -j"$jobs"
   ninja -C build install

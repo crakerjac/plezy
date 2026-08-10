@@ -38,6 +38,7 @@ import 'services/macos_window_service.dart';
 import 'services/native_window_service.dart';
 import 'services/fullscreen_state_manager.dart';
 import 'services/settings_service.dart';
+import 'widgets/settings_builder.dart';
 import 'utils/platform_detector.dart';
 import 'services/apple_tv_remote_touch_service.dart';
 import 'services/discord_rpc_service.dart';
@@ -165,8 +166,28 @@ void _bootstrapApp() {
       onCommitted: (dependencies) => _startNonessentialInitialization(dependencies.settings),
       lightTheme: monoTheme(dark: false),
       darkTheme: monoTheme(dark: true),
+      resolveTheme: _resolveStartupTheme,
+      // Android runs the Flutter surface in transparent mode over a window
+      // whose background MainActivity already restored, so the loading frame
+      // can leave the launch screen on display. Every other platform composites
+      // opaquely and has nothing behind Flutter worth showing.
+      transparentWhileLoading: Platform.isAndroid,
     ),
   );
+}
+
+/// Resolves the theme the app will settle on, for the frames that precede it.
+///
+/// Both singletons are memoised and awaited again by the gate, so this costs
+/// one preference load and one platform-channel round trip, shared. TV
+/// detection has to come first: the `themeMode` default is TV-aware and
+/// [TvDetectionService.isTVSync] answers false until its singleton exists,
+/// which would make a fresh Android TV install resolve the light theme.
+Future<StartupThemeResolution> _resolveStartupTheme() async {
+  final settings = await SettingsService.getInstance();
+  await TvDetectionService.getInstance(forceTv: settings.read(SettingsService.forceTvMode));
+  final mode = settings.read(SettingsService.themeMode);
+  return (themeMode: ThemeProvider.materialThemeModeFor(mode), darkTheme: ThemeProvider.darkThemeFor(mode));
 }
 
 /// Wraps [step] so a failure names the gate phase it came from.
@@ -328,9 +349,6 @@ StartupFailureRecord describeStartupFailure(Object error, StackTrace stackTrace)
 /// an empty id *without throwing*, so "the send did not throw" is not evidence
 /// that anything was sent.
 var _crashReporterReady = false;
-
-@visibleForTesting
-void debugSetCrashReporterReady(bool ready) => _crashReporterReady = ready;
 
 /// Sends a persisted startup failure to the crash reporter, once.
 ///
@@ -561,6 +579,9 @@ Future<void> showRepairOutcomeDialog(
   );
 }
 
+/// Theme the startup frames adopt once the persisted preference is readable.
+typedef StartupThemeResolution = ({material.ThemeMode themeMode, ThemeData darkTheme});
+
 /// Mounts a Flutter-owned startup frame before invoking the asynchronous
 /// initialization gate. The generic seam keeps frame ordering, failure, and
 /// retry behavior testable without constructing platform services.
@@ -577,6 +598,8 @@ class StartupBootstrap<T> extends StatefulWidget {
     this.lightTheme,
     this.darkTheme,
     this.themeMode = material.ThemeMode.system,
+    this.resolveTheme,
+    this.transparentWhileLoading = false,
   });
 
   final Future<T> Function() initialize;
@@ -597,6 +620,20 @@ class StartupBootstrap<T> extends StatefulWidget {
   final ThemeData? lightTheme;
   final ThemeData? darkTheme;
   final material.ThemeMode themeMode;
+
+  /// Reads the persisted theme so the startup frames match the one the app
+  /// settles on. Until it answers, [themeMode] resolves from platform
+  /// brightness, which disagrees with the app's own default on every device
+  /// that reports light while running the dark or OLED theme (#1833).
+  final Future<StartupThemeResolution> Function()? resolveTheme;
+
+  /// Whether the platform window behind Flutter already paints the launch
+  /// background, so the loading frame must not cover it.
+  ///
+  /// True only on Android, where `TransparencyMode.transparent` lets the
+  /// window decor show through and `MainActivity` has already restored the
+  /// persisted launch colour.
+  final bool transparentWhileLoading;
 
   @override
   State<StartupBootstrap<T>> createState() => _StartupBootstrapState<T>();
@@ -619,13 +656,35 @@ class _StartupBootstrapState<T> extends State<StartupBootstrap<T>> {
   bool _restartRequired = false;
   int _generation = 0;
 
+  /// Persisted theme for the startup frames, null until [StartupBootstrap.resolveTheme] answers.
+  StartupThemeResolution? _resolvedTheme;
+
   @override
   void initState() {
     super.initState();
+    unawaited(_resolveTheme());
     WidgetsBinding.instance.addPostFrameCallback((_) {
       AndroidExitDiagnostics.markStartupPhase(AndroidStartupPhase.firstFrame);
       if (mounted) unawaited(_initialize());
     });
+  }
+
+  /// Adopts the persisted theme for the startup frames.
+  ///
+  /// Deliberately best-effort and unbounded: on Android the loading frame is
+  /// transparent, so a slow answer costs spinner contrast rather than the
+  /// launch, and a store this cannot read is the gate's failure to report —
+  /// reporting it twice would race the diagnostic record.
+  Future<void> _resolveTheme() async {
+    final resolve = widget.resolveTheme;
+    if (resolve == null) return;
+    try {
+      final resolved = await resolve();
+      if (!mounted) return;
+      setState(() => _resolvedTheme = resolved);
+    } catch (error, stackTrace) {
+      appLogger.d('Could not resolve the persisted startup theme', error: error, stackTrace: stackTrace);
+    }
   }
 
   Future<void> _initialize() async {
@@ -716,14 +775,15 @@ class _StartupBootstrapState<T> extends State<StartupBootstrap<T>> {
   Widget build(BuildContext context) {
     if (_completed) return widget.buildApp(context, _value as T);
 
+    final resolved = _resolvedTheme;
     return TranslationProvider(
       child: Builder(
         builder: (context) => InputModeTracker(
           child: MaterialApp(
             debugShowCheckedModeBanner: false,
             theme: widget.lightTheme,
-            darkTheme: widget.darkTheme,
-            themeMode: widget.themeMode,
+            darkTheme: resolved?.darkTheme ?? widget.darkTheme,
+            themeMode: resolved?.themeMode ?? widget.themeMode,
             home: Builder(builder: _buildBootstrapHome),
           ),
         ),
@@ -733,16 +793,25 @@ class _StartupBootstrapState<T> extends State<StartupBootstrap<T>> {
 
   Widget _buildBootstrapHome(BuildContext context) {
     final failure = _failure;
+    if (failure != null) {
+      return Scaffold(
+        body: StartupFailureView(
+          failure: failure,
+          busy: _initializing || _repairing,
+          restartRequired: _restartRequired,
+          onRetry: () => unawaited(_initialize()),
+          onRepair: failure.repairable && widget.repair != null ? () => _repair(failure) : null,
+        ),
+      );
+    }
+
+    // Nothing here is worth covering the launch screen for. The platform
+    // window already holds the user's launch colour, and this frame outlives
+    // the whole gate, so painting a theme guessed from platform brightness is
+    // what turned a black Android TV splash into a flashbang (#1833).
     return Scaffold(
-      body: failure == null
-          ? const Center(child: CircularProgressIndicator(key: startupBootstrapProgressKey))
-          : StartupFailureView(
-              failure: failure,
-              busy: _initializing || _repairing,
-              restartRequired: _restartRequired,
-              onRetry: () => unawaited(_initialize()),
-              onRepair: failure.repairable && widget.repair != null ? () => _repair(failure) : null,
-            ),
+      backgroundColor: widget.transparentWhileLoading ? Colors.transparent : null,
+      body: const Center(child: CircularProgressIndicator(key: startupBootstrapProgressKey)),
     );
   }
 }
@@ -1677,13 +1746,7 @@ class _AppShell extends StatelessWidget {
                       const SingleActivator(LogicalKeyboardKey.browserBack): const DismissIntent(),
                       const SingleActivator(LogicalKeyboardKey.gameButtonB): const DismissIntent(),
                     },
-                    builder: (context, child) => ScaffoldMessenger(
-                      key: rootScaffoldMessengerKey,
-                      child: Scaffold(
-                        backgroundColor: Colors.transparent,
-                        body: _AppleTvScale(child: child),
-                      ),
-                    ),
+                    builder: (context, child) => rootShell(child),
                   ),
                 ),
               );
@@ -1695,47 +1758,85 @@ class _AppShell extends StatelessWidget {
   }
 }
 
-/// On Apple TV the system hands Flutter a 1920×1080 surface at
-/// devicePixelRatio 1.0, the same logical pixel count as a phablet. That's
-/// too dense for a 10ft viewing distance, so everything ends up tiny. We
-/// shrink the effective logical size to half and scale the rendered output
-/// back up so fonts, icons, and paddings end up visually ~2× larger — roughly
-/// matching the UI feel of Android TV (which renders at lower logical DPI).
-class _AppleTvScale extends StatelessWidget {
-  final Widget? child;
-  const _AppleTvScale({required this.child});
+/// The root shell every route renders inside.
+///
+/// The form-factor scale sits above the messenger and its root [Scaffold], not inside them:
+/// Flutter presents a messenger's snackbars on the rootmost registered scaffold, so anything
+/// below would leave global snackbars at the car's native density while the rest of the
+/// interface grew.
+Widget rootShell(Widget? child) {
+  return FormFactorScale(
+    child: ScaffoldMessenger(
+      key: rootScaffoldMessengerKey,
+      child: Scaffold(backgroundColor: Colors.transparent, body: child),
+    ),
+  );
+}
 
-  static const double _scale = 2.0;
+/// Apple TV receives a full-HD logical surface, while Android Automotive can
+/// report a very low display density. Both make otherwise comfortable controls
+/// physically too small, so render through a smaller, self-consistent logical
+/// viewport and scale the result back to the physical surface.
+class FormFactorScale extends StatelessWidget {
+  final Widget? child;
+  const FormFactorScale({super.key, required this.child});
+
+  static const double _appleTvScale = 2.0;
 
   @override
   Widget build(BuildContext context) {
-    if (child == null || !PlatformDetector.isAppleTV()) {
-      return child ?? const SizedBox.shrink();
+    final child = this.child;
+    if (child == null) return const SizedBox.shrink();
+
+    // Keep the existing Apple TV path independent of settings so its 2×
+    // behavior and overscan handling remain unchanged.
+    if (PlatformDetector.isAppleTV()) {
+      return _scaledSurface(child: child, scale: _appleTvScale, zeroInsets: true);
     }
+    if (!PlatformDetector.isAutomotive()) return child;
+
+    return SettingValueBuilder<double>(
+      pref: SettingsService.automotiveUiScale,
+      builder: (context, scale, _) => _scaledSurface(child: child, scale: scale, zeroInsets: false),
+    );
+  }
+
+  Widget _scaledSurface({required Widget child, required double scale, required bool zeroInsets}) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final logicalSize = Size(constraints.maxWidth / _scale, constraints.maxHeight / _scale);
+        final logicalSize = Size(constraints.maxWidth / scale, constraints.maxHeight / scale);
         final outerQ = MediaQuery.of(context);
         // tvOS reports conservative overscan insets (~60pt top/bottom,
         // ~90pt left/right). Modern TVs don't overscan, so treat them as
         // dead margin and zero them out — the UI can use the full surface.
+        //
+        // Automotive system bars are real touch-exclusion regions. Preserve
+        // their physical size in the scaled coordinate system so SafeArea
+        // continues to keep controls out from underneath them.
         return Transform.scale(
-          scale: _scale,
+          scale: scale,
           alignment: .topLeft,
           transformHitTests: true,
-          child: SizedBox(
-            width: logicalSize.width,
-            height: logicalSize.height,
-            child: MediaQuery(
-              data: outerQ.copyWith(
-                size: logicalSize,
-                devicePixelRatio: outerQ.devicePixelRatio * _scale,
-                padding: .zero,
-                viewPadding: .zero,
-                viewInsets: .zero,
-                systemGestureInsets: .zero,
+          // Align loosens what it passes down. Without it a tight incoming constraint — which is
+          // what the app's root hands its builder — forces the SizedBox back to the full surface,
+          // and the transform then only magnifies a full-size layout instead of rendering a
+          // smaller one into the same space.
+          child: Align(
+            alignment: Alignment.topLeft,
+            child: SizedBox(
+              width: logicalSize.width,
+              height: logicalSize.height,
+              child: MediaQuery(
+                data: outerQ.copyWith(
+                  size: logicalSize,
+                  devicePixelRatio: outerQ.devicePixelRatio * scale,
+                  padding: zeroInsets ? .zero : outerQ.padding * (1 / scale),
+                  viewPadding: zeroInsets ? .zero : outerQ.viewPadding * (1 / scale),
+                  viewInsets: zeroInsets ? .zero : outerQ.viewInsets * (1 / scale),
+                  systemGestureInsets: zeroInsets ? .zero : outerQ.systemGestureInsets * (1 / scale),
+                ),
+                child: child,
               ),
-              child: child!,
             ),
           ),
         );
@@ -1857,7 +1958,7 @@ class _SetupScreenState extends State<SetupScreen> with MountedSetStateMixin {
           serverManager: serverManager,
         ).pruneUnreferencedJellyfinConnections();
         if (pruned > 0) {
-          appLogger.i('Setup: pruned $pruned unreferenced Jellyfin connection${pruned == 1 ? '' : 's'}');
+          appLogger.i('Setup: pruned $pruned unreferenced MediaBrowser connection${pruned == 1 ? '' : 's'}');
         }
         // Provider initialization starts before this screen runs the legacy
         // migration. Reload after bootstrap so copied Plex Home users and the
@@ -1943,11 +2044,11 @@ class _SetupScreenState extends State<SetupScreen> with MountedSetStateMixin {
     }
 
     final plexCount = allConnections.whereType<PlexAccountConnection>().fold<int>(0, (n, c) => n + c.servers.length);
-    final jellyfinCount = allConnections.whereType<JellyfinConnection>().length;
+    final mediaBrowserCount = allConnections.whereType<JellyfinConnection>().length;
     unawaited(
       Sentry.addBreadcrumb(
         Breadcrumb(
-          message: 'Handing off to MainScreen with $plexCount Plex server(s) + $jellyfinCount Jellyfin',
+          message: 'Handing off to MainScreen with $plexCount Plex + $mediaBrowserCount MediaBrowser server(s)',
           category: 'setup',
         ),
       ),
@@ -2003,7 +2104,7 @@ class _SetupScreenState extends State<SetupScreen> with MountedSetStateMixin {
       if (!mounted) return;
       bindingSucceeded = activeProfile.active != null && activeProfile.lastBindingSucceeded;
     } else {
-      // Now wait for the binder to settle. This is the Plex/Jellyfin server
+      // Now wait for the binder to settle. This is the media-server client
       // race: per-server status flips on the splash list as each client comes
       // online, and we don't push MainScreen until they're all done (success
       // or fail). Eliminates the "Failed to load discover content: No servers
@@ -2023,7 +2124,7 @@ class _SetupScreenState extends State<SetupScreen> with MountedSetStateMixin {
     }
 
     // Repopulate metadata for downloaded items now that per-backend caches
-    // are resolvable (the Connections row + live JellyfinClient are in
+    // are resolvable (the Connections row + live MediaBrowser client are in
     // place). Without this the downloads list and sync-rule titles render
     // empty until something forces a later refresh.
     await downloadProvider.refreshMetadataFromCache();
@@ -2134,21 +2235,49 @@ class _SetupScreenState extends State<SetupScreen> with MountedSetStateMixin {
   @override
   Widget build(BuildContext context) {
     const coralColor = Color(0xFFE5A00D);
+    final height = MediaQuery.sizeOf(context).height;
+    // The stacked layout below hangs its two rows off fixed ±170/180 offsets from the middle, which
+    // needs roughly 700 logical pixels of height. A car at a large interface scale — and a phone in
+    // landscape — has less than that, and the rows would collide or fall outside the Stack's clip.
+    if (height < 700) {
+      return ColoredBox(
+        color: Theme.of(context).scaffoldBackgroundColor,
+        child: SafeArea(
+          child: Center(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.symmetric(vertical: 16),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  SvgPicture.asset('assets/plezy_adaptive_foreground.svg', width: 160, height: 160),
+                  _buildStatusText(context),
+                  const SizedBox(height: 16),
+                  Center(
+                    child: _serverStatus.isEmpty
+                        ? const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(strokeWidth: 2, color: coralColor),
+                          )
+                        : _buildServerStatusList(context),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+    }
     return ColoredBox(
       color: Theme.of(context).scaffoldBackgroundColor,
       child: Stack(
         children: [
           Center(child: SvgPicture.asset('assets/plezy_adaptive_foreground.svg', width: 288, height: 288)),
+          Positioned(left: 0, right: 0, bottom: height * 0.5 - 170, child: _buildStatusText(context)),
           Positioned(
             left: 0,
             right: 0,
-            bottom: MediaQuery.sizeOf(context).height * 0.5 - 170,
-            child: _buildStatusText(context),
-          ),
-          Positioned(
-            left: 0,
-            right: 0,
-            top: MediaQuery.sizeOf(context).height * 0.5 + 180,
+            top: height * 0.5 + 180,
             child: Center(
               child: _serverStatus.isEmpty
                   ? const SizedBox(

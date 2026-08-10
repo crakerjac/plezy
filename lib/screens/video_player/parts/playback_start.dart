@@ -7,6 +7,8 @@ extension _VideoPlayerPlaybackStartMethods on VideoPlayerScreenState {
     final attempt = _beginPlaybackAttempt(currentPlayer);
     _hasRenderedFirstFrame = false;
     _hasFatalPlaybackError = false;
+    // 503s observed from here on belong to this attempt's open.
+    _http503Watchdog.disarm();
 
     // Live TV mode: bypass standard playback initialization
     if (widget.isLive) {
@@ -198,6 +200,7 @@ extension _VideoPlayerPlaybackStartMethods on VideoPlayerScreenState {
         preKnownWidth: displayCriteria?.width ?? 0,
         preKnownHeight: displayCriteria?.height ?? 0,
         hasVideoUrl: result.videoUrl != null,
+        isTranscoding: result.isTranscoding,
         ensureAudioFocus: ensureAudioFocus,
       );
       if (frameRatePlan == null) return;
@@ -256,6 +259,12 @@ extension _VideoPlayerPlaybackStartMethods on VideoPlayerScreenState {
           resumePosition: resumePosition,
           durationMs: _currentMetadata.durationMs,
         );
+        await _awaitTranscodeReadiness(
+          client: playbackContext.reportingClient,
+          isTranscoding: result.isTranscoding,
+          videoUrl: result.videoUrl!,
+        );
+        if (!attempt.isCurrent) return;
         final openResult = await _openMediaOnPlayer(
           player: currentPlayer,
           settingsService: settingsService,
@@ -352,6 +361,12 @@ extension _VideoPlayerPlaybackStartMethods on VideoPlayerScreenState {
           preferredSubtitleTrack:
               subtitleSelection.declinedPreference ?? SubtitlePreference.trackOrNull(subtitleSelection.primaryTrack),
           preferredSecondarySubtitleTrack: SubtitlePreference.trackOrNull(subtitleSelection.secondaryTrack),
+          // Same rule as the reload flow: a source-backed primary with no sidecar on a transcode is
+          // burned into the picture, so nothing native is coming for it.
+          primarySubtitleIsServerRendered:
+              _isTranscoding &&
+              subtitleSelection.primarySourceStreamId != null &&
+              subtitleSelection.primarySidecar == null,
         );
 
         // Store only the active sidecars for re-use after backend fallback.

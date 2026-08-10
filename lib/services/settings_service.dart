@@ -59,6 +59,15 @@ enum SubAssOverride { no, yes, scale, force, strip }
 /// [quarter] trade sharpness for raster throughput on render-bound low-end TVs.
 enum SubtitleRenderResolution { screen, video, threeQuarter, half, third, quarter }
 
+/// Who reduces HDR content to what the display can actually show, on the Linux
+/// native video plane.
+///
+/// [compositor] hands the compositor the source's own metadata and lets its tone
+/// curve do the work — simple, and what Kodi does. [player] tone-maps in mpv to
+/// the display's real peak and declares that peak instead, which is mpv's own
+/// default and leaves the compositor an identity transform.
+enum HdrToneMapping { compositor, player }
+
 extension SubtitleRenderScale on SubtitleRenderResolution {
   /// Android libass overlay render scale (fraction of the surface resolution).
   /// Only Android reads this; the iOS-only [video] basis maps to full scale here.
@@ -80,6 +89,16 @@ extension DvConversionModePreferenceNativeValue on DvConversionModePreference {
     DvConversionModePreference.disabled => 'disabled',
     DvConversionModePreference.dv81 => 'dv81',
     DvConversionModePreference.hevcStrip => 'hevc_strip',
+  };
+}
+
+enum PlaybackBufferTier { auto, large, extraLarge }
+
+extension PlaybackBufferTierNativeValue on PlaybackBufferTier {
+  String get nativeValue => switch (this) {
+    PlaybackBufferTier.auto => 'auto',
+    PlaybackBufferTier.large => 'large',
+    PlaybackBufferTier.extraLarge => 'extra_large',
   };
 }
 
@@ -133,6 +152,31 @@ class _LibraryDensityPref extends Pref<int> {
   @override
   Future<void> writeTo(BaseSharedPreferencesService svc, int value) =>
       svc.writeInt(key, value.clamp(LibraryDensity.min, LibraryDensity.max));
+}
+
+class AutomotiveUiScale {
+  static const double min = 1.0;
+  static const double max = 2.0;
+  static const double defaultValue = 1.35;
+}
+
+/// Uses a larger default on car displays while honoring and clamping a stored
+/// user adjustment on every platform.
+class _AutomotiveUiScalePref extends Pref<double> {
+  const _AutomotiveUiScalePref() : super('automotive_ui_scale');
+
+  @override
+  double readFrom(BaseSharedPreferencesService svc) {
+    final fallback = PlatformDetector.isAutomotive() ? AutomotiveUiScale.defaultValue : 1.0;
+    // Tolerant read, not `prefs.getDouble`: this is read while building the root
+    // app, so a mistyped stored value would turn every launch into the error
+    // widget instead of dropping the key (#1732).
+    return svc.readDouble(key, defaultValue: fallback).clamp(AutomotiveUiScale.min, AutomotiveUiScale.max).toDouble();
+  }
+
+  @override
+  Future<void> writeTo(BaseSharedPreferencesService svc, double value) =>
+      svc.writeDouble(key, value.clamp(AutomotiveUiScale.min, AutomotiveUiScale.max).toDouble());
 }
 
 /// Migrates from the legacy `use_season_poster` boolean key.
@@ -303,16 +347,20 @@ class SettingsService extends BaseSharedPreferencesService {
   static const String defaultCreditsPattern = r'(?:^|\b)(?:outro|closing|credits?|ending)(?:\b|$)|^ed(?:\s?\d+)?$';
 
   static const enableDebugLogging = BoolPref('enable_debug_logging', onWrite: setLoggerLevel);
-  // Source URL for the Apple TV Atmos diagnostics screen; deliberately not
-  // resettable so a tester keeps it across "Reset All Settings".
-  static const atmosProbeUrl = StringPref('atmos_probe_url', defaultValue: '');
-  // Session-mode A/B for the Atmos diagnostics screen. Off = the mode Dolby's
-  // application guide prescribes; on = the mode the audio output used before.
-  // Not resettable, for the same reason as the URL above.
-  static const atmosProbeMoviePlaybackMode = BoolPref('atmos_probe_movie_playback_mode');
   static const crashReporting = BoolPref('crash_reporting', defaultValue: true);
   static const enableHardwareDecoding = BoolPref('enable_hardware_decoding', defaultValue: true);
   static const enableHDR = BoolPref('enable_hdr', defaultValue: true);
+  // Linux native video plane only. Defaults to the compositor: photographed on a
+  // 400-nit HDR output against a PQ chart, the compositor keeps 400 -> 1000 nits
+  // monotonic and separated while the player leg flattens it. The player path
+  // drives mpv's legacy vo_gpu, whose own standalone output scores the same, so
+  // the gap is the renderer rather than the wiring. Compositor also needs no
+  // knowledge of the display.
+  static const hdrToneMapping = EnumPref<HdrToneMapping>(
+    'hdr_tone_mapping',
+    values: HdrToneMapping.values,
+    defaultValue: HdrToneMapping.compositor,
+  );
   static const preferredVideoCodec = StringPref('preferred_video_codec', defaultValue: 'auto');
   static const preferredAudioCodec = StringPref('preferred_audio_codec', defaultValue: 'auto');
   static const viewMode = EnumPref<ViewMode>('view_mode', values: ViewMode.values, defaultValue: ViewMode.grid);
@@ -349,6 +397,12 @@ class SettingsService extends BaseSharedPreferencesService {
   );
   static const subtitleBold = BoolPref('subtitle_bold');
   static const subtitleItalic = BoolPref('subtitle_italic');
+
+  /// Render text subtitles (SRT/VTT/mov_text) anchored to the physical screen
+  /// instead of the video rect, so they land in the letterbox bars of
+  /// widescreen video (#1730). ExoPlayer backend only; mpv already places
+  /// plaintext subtitles in the margins by default (sub-use-margins=yes).
+  static const subtitleAnchorToScreen = BoolPref('subtitle_anchor_to_screen');
   static const cleanedOldImageCache = BoolPref('cleaned_old_image_cache');
   static const rememberTrackSelections = BoolPref('remember_track_selections', defaultValue: true);
 
@@ -410,6 +464,11 @@ class SettingsService extends BaseSharedPreferencesService {
     values: NavigationTabId.values,
     defaultValue: NavigationTabId.discover,
   );
+
+  /// Whether the Explore tab (Plex Discover / tracker catalog rows) is shown
+  /// at all. UI-only: catalog sources stay connected so watchlist surfaces
+  /// keep working while the tab is hidden.
+  static const showExploreTab = BoolPref('show_explore_tab', defaultValue: true);
   static const alwaysKeepSidebarOpen = BoolPref('always_keep_sidebar_open');
   static const showUnwatchedCount = BoolPref('show_unwatched_count', defaultValue: true);
   static const showEpisodeNumberOnCards = BoolPref('show_episode_number_on_cards', defaultValue: true);
@@ -479,7 +538,13 @@ class SettingsService extends BaseSharedPreferencesService {
   static const exitFullscreenOnPlayerClose = BoolPref('exit_fullscreen_on_player_close');
 
   static const bufferSize = _BufferSizePref();
+  static const playbackBufferTier = EnumPref<PlaybackBufferTier>(
+    'playback_buffer_tier',
+    values: PlaybackBufferTier.values,
+    defaultValue: PlaybackBufferTier.auto,
+  );
   static const libraryDensity = _LibraryDensityPref();
+  static const automotiveUiScale = _AutomotiveUiScalePref();
   static const tvCornerSpotlightBackdrop = BoolPref('tv_corner_spotlight_backdrop');
   static const episodePosterMode = _EpisodePosterModePref();
   static const continueWatchingAction = EnumPref<ContinueWatchingAction>(
@@ -844,6 +909,7 @@ class SettingsService extends BaseSharedPreferencesService {
     enableDebugLogging,
     enableHardwareDecoding,
     enableHDR,
+    hdrToneMapping,
     preferredVideoCodec,
     preferredAudioCodec,
     viewMode,
@@ -880,6 +946,7 @@ class SettingsService extends BaseSharedPreferencesService {
     autoPlayNextEpisode,
     useExoPlayer,
     startupSection,
+    showExploreTab,
     alwaysKeepSidebarOpen,
     showUnwatchedCount,
     showEpisodeNumberOnCards,
@@ -901,12 +968,15 @@ class SettingsService extends BaseSharedPreferencesService {
     maxVolume,
     downmixCenterBoost,
     subtitlePosition,
+    subtitleAnchorToScreen,
     defaultPlaybackSpeed,
     defaultBoxFitMode,
     themeMode,
     videoPlayerNavigationEnabled,
     bufferSize,
+    playbackBufferTier,
     libraryDensity,
+    automotiveUiScale,
     tvCornerSpotlightBackdrop,
     episodePosterMode,
     continueWatchingAction,

@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:fake_async/fake_async.dart';
 import 'package:plezy/media/ids.dart';
 
 import 'package:drift/native.dart';
@@ -6,12 +7,14 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:plezy/database/app_database.dart';
 import 'package:plezy/exceptions/media_server_exceptions.dart';
+import 'package:plezy/utils/media_server_http_client.dart' show AbortController;
 import 'package:plezy/media/media_backend.dart';
 
 import 'package:plezy/media/media_kind.dart';
 import 'package:plezy/media/media_source_info.dart';
 import 'package:plezy/mpv/mpv.dart';
 import 'package:plezy/models/transcode_quality_preset.dart';
+import 'package:plezy/services/subtitle_preference.dart';
 import 'package:plezy/services/playback_initialization_types.dart';
 import 'package:plezy/services/plex_api_cache.dart';
 import 'package:plezy/services/plex_client.dart';
@@ -130,10 +133,7 @@ void main() {
   }
 
   List<PlaybackSubtitleSidecar> buildTranscodeSubtitles(PlexClient client, List<MediaSubtitleTrack> subtitleTracks) {
-    return client.buildTranscodeSidecarSubtitlesForTesting(
-      mediaInfoWithSubtitles(subtitleTracks),
-      'https://plex.example.com/video.mkv?X-Plex-Token=token',
-    );
+    return client.buildTranscodeSidecarSubtitlesForTesting(mediaInfoWithSubtitles(subtitleTracks));
   }
 
   test('selectStreams sends audio stream selection with allParts', () async {
@@ -245,7 +245,7 @@ void main() {
     expect(data.mediaInfo?.subtitleTracks.single.selected, isTrue);
   });
 
-  test('transcode initialization wires a subtitle-free HLS request to the complete sidecar catalog', () async {
+  test('transcode initialization burns the selected embedded stream and sidecars only the external file', () async {
     final requests = <http.Request>[];
     final client = makeClient((request) async {
       requests.add(request);
@@ -308,6 +308,9 @@ void main() {
           headers: {'content-type': 'application/json'},
         );
       }
+      if (request.method == 'PUT' && request.url.path == '/library/parts/99') {
+        return http.Response('', 200);
+      }
       return http.Response('unexpected request', 500);
     });
     addTearDown(client.close);
@@ -319,21 +322,37 @@ void main() {
         qualityPreset: TranscodeQualityPreset.p720_3mbps,
         sessionIdentifier: 'session-id',
         transcodeSessionId: 'transcode-id',
+        transcodeOffset: const Duration(minutes: 8, seconds: 15),
       ),
     );
 
     final decisionRequest = requests.singleWhere(
       (request) => request.url.path == '/video/:/transcode/universal/decision',
     );
-    expect(decisionRequest.url.queryParameters['subtitles'], 'none');
-    expect(decisionRequest.url.queryParameters.containsKey('subtitleStreamID'), isFalse);
+    expect(decisionRequest.url.queryParameters['subtitles'], 'burn');
+    expect(decisionRequest.url.queryParameters['offset'], '495.000000');
+    expect(
+      decisionRequest.url.queryParameters.containsKey('subtitleStreamID'),
+      isFalse,
+      reason: 'the universal transcoder ignores it; the part selection below is what picks the stream',
+    );
     expect(decisionRequest.url.queryParameters.containsKey('advancedSubtitles'), isFalse);
+    expect(decisionRequest.url.queryParameters['X-Plex-Incomplete-Segments'], '1');
+
+    // What actually aims the burn: the embedded ASS track is selected on the
+    // part first, so the server burns 401 rather than whatever it had stored.
+    final selection = requests.singleWhere(
+      (request) => request.method == 'PUT' && request.url.path == '/library/parts/99',
+    );
+    expect(selection.url.queryParameters['subtitleStreamID'], '401');
+    expect(selection.url.queryParameters.containsKey('audioStreamID'), isFalse);
     expect(result.isTranscoding, isTrue);
     expect(result.videoUrl, contains('/video/:/transcode/universal/start.m3u8?'));
-    expect(result.subtitleSidecars.map((sidecar) => sidecar.sourceStreamId), [401, 402]);
-    expect(result.subtitleSidecars.every((sidecar) => sidecar.preload), isTrue);
-    expect(result.subtitleSidecars.first.track.isContainer, isTrue);
-    expect(result.subtitleSidecars.last.track.uri, contains('/library/streams/402.srt'));
+    expect(Uri.parse(result.videoUrl!).queryParameters['offset'], '495.000000');
+    expect(PlexClient.transcodeStreamOffsetFromUrl(result.videoUrl!), const Duration(minutes: 8, seconds: 15));
+    expect(result.subtitleSidecars.map((sidecar) => sidecar.sourceStreamId), [402]);
+    expect(result.subtitleSidecars.single.preload, isTrue);
+    expect(result.subtitleSidecars.single.track.uri, contains('/library/streams/402.srt'));
   });
 
   test('playback uses metadata availability flags without probing part URLs', () async {
@@ -538,37 +557,39 @@ void main() {
     expect(result.selectedMediaIndex, 1);
   });
 
-  test('transcode subtitle catalog includes embedded and keyed Plex streams', () {
+  test('transcode subtitle catalog carries only real external subtitle files', () {
+    // Embedded streams are burned into the picture by the transcoder. Handing them
+    // back as sidecars on the source container would make the client range-read the
+    // whole remux over HTTP while the transcode is already streaming (#1815, #1738).
     final client = makeClient((_) async => http.Response('not used', 500));
     addTearDown(client.close);
 
     final subtitles = buildTranscodeSubtitles(client, [
-      MediaSubtitleTrack(id: 401, codec: 'ass', languageCode: 'eng', title: 'Embedded', selected: true, forced: false),
+      MediaSubtitleTrack(id: 401, index: 3, codec: 'ass', languageCode: 'eng', selected: true, forced: false),
+      MediaSubtitleTrack(id: 402, index: 4, codec: 'pgs', languageCode: 'eng', selected: false, forced: false),
       MediaSubtitleTrack(
-        id: 402,
+        id: 403,
+        index: 5,
         codec: 'srt',
         languageCode: 'swe',
         title: 'External',
         selected: false,
         forced: false,
-        key: '/library/streams/402',
+        key: '/library/streams/403',
         external: true,
       ),
     ]);
 
-    expect(subtitles, hasLength(2));
-    expect(subtitles.map((sidecar) => sidecar.sourceStreamId), [401, 402]);
-    expect(subtitles.every((sidecar) => sidecar.preload), isTrue);
-    expect(subtitles.first.track.isContainer, isTrue);
-    expect(subtitles.first.track.uri, 'https://plex.example.com/video.mkv?X-Plex-Token=token');
-    expect(subtitles.last.track.isContainer, isFalse);
+    expect(subtitles.map((sidecar) => sidecar.sourceStreamId), [403]);
+    expect(subtitles.single.preload, isTrue);
+    expect(subtitles.single.track.isContainer, isFalse);
     expect(
-      subtitles.last.track.uri,
-      'https://plex.example.com/library/streams/402.srt?encoding=utf-8&X-Plex-Token=token',
+      subtitles.single.track.uri,
+      'https://plex.example.com/library/streams/403.srt?encoding=utf-8&X-Plex-Token=token',
     );
   });
 
-  test('tokenless transcode keeps embedded and keyed subtitle sources', () {
+  test('tokenless transcode still sidecars the external subtitle file', () {
     final client = testPlexClient(
       serverId: ServerId('server-id'),
       token: null,
@@ -589,17 +610,235 @@ void main() {
           external: true,
         ),
       ]),
-      'https://plex.example.com/video.mkv',
     );
 
-    expect(subtitles, hasLength(2));
-    expect(subtitles.first.track.isContainer, isTrue);
-    expect(subtitles.first.track.uri, 'https://plex.example.com/video.mkv');
-    expect(subtitles.last.track.isContainer, isFalse);
-    expect(subtitles.last.track.uri, 'https://plex.example.com/library/streams/402.srt?encoding=utf-8');
+    expect(subtitles.map((sidecar) => sidecar.sourceStreamId), [402]);
+    expect(subtitles.single.track.uri, 'https://plex.example.com/library/streams/402.srt?encoding=utf-8');
   });
 
-  test('video transcode stays subtitle-free while preserving the HLS profile', () {
+  test('transcode burns the selected embedded stream whatever its format', () {
+    // Burn covers text as well as image: it is the one mechanism that keeps ASS/SSA
+    // styling intact through an HLS transcode.
+    final client = makeClient((_) async => http.Response('not used', 500));
+    addTearDown(client.close);
+
+    Map<String, String> paramsForSelected(MediaSubtitleTrack track) => client.buildTranscodeParamsForTesting(
+      ratingKey: '42',
+      mediaIndex: 0,
+      preset: TranscodeQualityPreset.p720_3mbps,
+      sessionIdentifier: 'session-id',
+      transcodeSessionId: 'transcode-id',
+      selectedSubtitleTrack: track,
+    );
+
+    final textParams = paramsForSelected(
+      MediaSubtitleTrack(id: 401, index: 3, codec: 'ass', languageCode: 'eng', selected: true, forced: false),
+    );
+    expect(textParams['subtitles'], 'burn');
+    expect(textParams.containsKey('subtitleStreamID'), isFalse);
+    expect(textParams.containsKey('advancedSubtitles'), isFalse);
+
+    final imageParams = paramsForSelected(
+      MediaSubtitleTrack(id: 402, index: 4, codec: 'pgs', languageCode: 'eng', selected: true, forced: false),
+    );
+    expect(imageParams['subtitles'], 'burn');
+    expect(imageParams.containsKey('subtitleStreamID'), isFalse);
+  });
+
+  test('a burn aims at the caller track by selecting it on the part first', () async {
+    // The universal transcoder burns whatever the part has selected, so this
+    // PUT is the only thing that makes `subtitles=burn` hit the chosen stream.
+    final requests = <http.Request>[];
+    final client = makeClient((request) async {
+      requests.add(request);
+      return http.Response('', 200);
+    });
+    addTearDown(client.close);
+
+    await client.selectSubtitleStreamForBurn(
+      partId: 99,
+      track: MediaSubtitleTrack(id: 401, index: 3, codec: 'ass', selected: true, forced: false),
+    );
+
+    final put = requests.singleWhere((request) => request.method == 'PUT');
+    expect(put.url.path, '/library/parts/99');
+    expect(put.url.queryParameters['subtitleStreamID'], '401');
+  });
+
+  test('a sidecarred external file leaves the server selection untouched', () async {
+    // External files are fetched directly and never burned; rewriting the
+    // part's selection here would change what other Plex clients see.
+    final requests = <http.Request>[];
+    final client = makeClient((request) async {
+      requests.add(request);
+      return http.Response('', 200);
+    });
+    addTearDown(client.close);
+
+    await client.selectSubtitleStreamForBurn(
+      partId: 99,
+      track: MediaSubtitleTrack(
+        id: 403,
+        index: 5,
+        codec: 'srt',
+        selected: true,
+        forced: false,
+        key: '/library/streams/403',
+        external: true,
+      ),
+    );
+    await client.selectSubtitleStreamForBurn(partId: 99, track: null);
+
+    expect(requests, isEmpty);
+  });
+
+  test('an unaimable burn refuses rather than letting the server pick', () async {
+    // Proceeding would burn whatever the part already had selected, welding a
+    // language the viewer never chose into the picture.
+    final client = makeClient((_) async => http.Response('', 200));
+    addTearDown(client.close);
+
+    await expectLater(
+      client.selectSubtitleStreamForBurn(
+        partId: null,
+        track: MediaSubtitleTrack(id: 401, index: 3, codec: 'ass', selected: true, forced: false),
+      ),
+      throwsStateError,
+    );
+  });
+
+  test('a selection the server did not commit refuses the burn too', () async {
+    // 204 rather than 200: no HTTP error to raise, but nothing was stored
+    // either, so the burn target is still whatever the part had before.
+    final client = makeClient((_) async => http.Response('', 204));
+    addTearDown(client.close);
+
+    await expectLater(
+      client.selectSubtitleStreamForBurn(
+        partId: 99,
+        track: MediaSubtitleTrack(id: 401, index: 3, codec: 'ass', selected: true, forced: false),
+      ),
+      throwsStateError,
+    );
+  });
+
+  test('a burn that cannot be aimed never reaches the decision endpoint', () async {
+    // The whole transcode is abandoned: the caller falls back to direct play,
+    // where the native player reads the embedded track itself.
+    final requests = <http.Request>[];
+    final client = makeClient((request) async {
+      requests.add(request);
+      return http.Response(
+        jsonEncode({
+          'MediaContainer': {'generalDecisionCode': 1001, 'transcodeDecisionCode': 1001},
+        }),
+        request.method == 'PUT' ? 403 : 200,
+        headers: {'content-type': 'application/json'},
+      );
+    });
+    addTearDown(client.close);
+
+    final result = await client.buildTranscodeStartPath(
+      ratingKey: '42',
+      mediaIndex: 0,
+      preset: TranscodeQualityPreset.p720_3mbps,
+      sessionIdentifier: 'session-id',
+      transcodeSessionId: 'transcode-id',
+      partId: 99,
+      selectedSubtitleTrack: MediaSubtitleTrack(id: 401, index: 3, codec: 'ass', selected: true, forced: false),
+    );
+
+    expect(result.outcome, TranscodeDecisionOutcome.failed);
+    expect(result.startPath, isNull);
+    expect(
+      requests.where((request) => request.url.path.contains('/transcode/universal')),
+      isEmpty,
+      reason: 'no burn may be requested once the target could not be selected',
+    );
+  });
+
+  test('transcode leaves a real external subtitle file to the sidecar instead of burning it', () {
+    final client = makeClient((_) async => http.Response('not used', 500));
+    addTearDown(client.close);
+
+    final params = client.buildTranscodeParamsForTesting(
+      ratingKey: '42',
+      mediaIndex: 0,
+      preset: TranscodeQualityPreset.p720_3mbps,
+      sessionIdentifier: 'session-id',
+      transcodeSessionId: 'transcode-id',
+      selectedSubtitleTrack: MediaSubtitleTrack(
+        id: 403,
+        index: 5,
+        codec: 'srt',
+        languageCode: 'swe',
+        selected: true,
+        forced: false,
+        key: '/library/streams/403',
+        external: true,
+      ),
+    );
+
+    expect(params['subtitles'], 'none');
+    expect(params.containsKey('subtitleStreamID'), isFalse);
+  });
+
+  test('no burn keeps the per-preset directPlay/directStream pinning', () {
+    final client = makeClient((_) async => http.Response('not used', 500));
+    addTearDown(client.close);
+
+    final originalParams = client.buildTranscodeParamsForTesting(
+      ratingKey: '42',
+      mediaIndex: 0,
+      preset: TranscodeQualityPreset.original,
+      sessionIdentifier: 'session-id',
+      transcodeSessionId: 'transcode-id',
+    );
+    expect(originalParams['directPlay'], '1');
+    expect(originalParams['directStream'], '1');
+
+    final cappedParams = client.buildTranscodeParamsForTesting(
+      ratingKey: '42',
+      mediaIndex: 0,
+      preset: TranscodeQualityPreset.p720_3mbps,
+      sessionIdentifier: 'session-id',
+      transcodeSessionId: 'transcode-id',
+    );
+    expect(cappedParams['directPlay'], '0');
+    expect(cappedParams['directStream'], '0');
+  });
+
+  test('a burn withdraws directPlay, because painting the subtitle in is a re-encode', () {
+    // Not a preference: a real PMS answers HTTP 400 to `directPlay=1` combined
+    // with `subtitles=burn`, for text and image subtitles alike. With
+    // directPlay withdrawn it answers `decision=transcode` on the video stream
+    // and `decision=burn` on the subtitle.
+    final client = makeClient((_) async => http.Response('not used', 500));
+    addTearDown(client.close);
+
+    Map<String, String> paramsFor(String codec, TranscodeQualityPreset preset) => client.buildTranscodeParamsForTesting(
+      ratingKey: '42',
+      mediaIndex: 0,
+      preset: preset,
+      sessionIdentifier: 'session-id',
+      transcodeSessionId: 'transcode-id',
+      selectedSubtitleTrack: MediaSubtitleTrack(id: 401, index: 3, codec: codec, selected: true, forced: false),
+    );
+
+    for (final codec in ['ass', 'srt', 'pgs']) {
+      final params = paramsFor(codec, TranscodeQualityPreset.p720_3mbps);
+      expect(params['subtitles'], 'burn', reason: '$codec should burn');
+      expect(params['directPlay'], '0', reason: '$codec burn must not also advertise direct play');
+    }
+
+    // Even an original-quality session must drop directPlay once it burns.
+    final originalBurn = paramsFor('ass', TranscodeQualityPreset.original);
+    expect(originalBurn['subtitles'], 'burn');
+    expect(originalBurn['directPlay'], '0');
+    expect(originalBurn['directStream'], '1');
+  });
+
+  test('video transcode requests no subtitles when none is selected, preserving the HLS profile', () {
     final client = makeClient((_) async => http.Response('not used', 500));
     addTearDown(client.close);
 
@@ -661,8 +900,503 @@ void main() {
 
     expect(startPath, startsWith('/video/:/transcode/universal/start.m3u8?'));
     expect(startPath, contains('protocol=hls'));
+    // Without a requested offset the start path must stay offset-free so the
+    // session transcodes from the beginning exactly as before.
     expect(startPath, isNot(contains('offset=')));
     expect(startPath, isNot(contains('X-Plex-Token')));
+  });
+
+  test('transcode start path carries the requested decision offset', () {
+    final client = makeClient((_) async => http.Response('not used', 500));
+    addTearDown(client.close);
+
+    final params = client.buildTranscodeParamsForTesting(
+      ratingKey: '42',
+      mediaIndex: 0,
+      preset: TranscodeQualityPreset.p720_3mbps,
+      sessionIdentifier: 'session-id',
+      transcodeSessionId: 'transcode-id',
+      offset: const Duration(minutes: 8, seconds: 15),
+    );
+
+    final startPath = client.buildTranscodeStartPathFromParamsForTesting(params);
+
+    expect(startPath, startsWith('/video/:/transcode/universal/start.m3u8?'));
+    expect(Uri.parse(startPath).queryParameters['offset'], '495.000000');
+    expect(startPath, isNot(contains('X-Plex-Token')));
+  });
+
+  test('transcode stream offset is parsed from an offset start URL only', () {
+    expect(
+      PlexClient.transcodeStreamOffsetFromUrl(
+        'https://plex.example.com/video/:/transcode/universal/start.m3u8?offset=495.000000',
+      ),
+      const Duration(minutes: 8, seconds: 15),
+    );
+
+    expect(
+      PlexClient.transcodeStreamOffsetFromUrl(
+        'https://plex.example.com/video/:/transcode/universal/start.m3u8?session=abc',
+      ),
+      isNull,
+    );
+    expect(
+      PlexClient.transcodeStreamOffsetFromUrl(
+        'https://plex.example.com/video/:/transcode/universal/start.m3u8?offset=0.000000',
+      ),
+      isNull,
+    );
+    expect(PlexClient.transcodeStreamOffsetFromUrl('https://plex.example.com/library/parts/1/file.mkv'), isNull);
+    // Percent-encoded spelling of the same path must not silently switch the
+    // probe off.
+    expect(
+      PlexClient.transcodeStreamOffsetFromUrl(
+        'https://plex.example.com/video/%3A/transcode/universal/start.m3u8?offset=495.000000',
+      ),
+      const Duration(minutes: 8, seconds: 15),
+    );
+  });
+
+  test('transcode readiness probes the segment at the offset, not the first one', () async {
+    final requests = <Uri>[];
+    final rangeHeaders = <String?>[];
+    final acceptHeaders = <String?>[];
+    var segmentAttempts = 0;
+    // Plex media playlists cover the full title from segment zero; the probe
+    // must touch the offset's segment because requesting a segment is how a
+    // client seeks a Plex HLS session — probing 00000.ts would relocate the
+    // transcoder back to the start.
+    final mediaPlaylist = StringBuffer('#EXTM3U\n#EXT-X-TARGETDURATION:1\n');
+    for (var i = 0; i < 600; i++) {
+      mediaPlaylist.write('#EXTINF:1.000000,\n${i.toString().padLeft(5, '0')}.ts\n');
+    }
+    final client = makeClient((request) async {
+      requests.add(request.url);
+      rangeHeaders.add(request.headers['Range']);
+      acceptHeaders.add(request.headers['Accept']);
+      return switch (request.url.path) {
+        '/video/:/transcode/universal/start.m3u8' => http.Response(
+          '#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1500000\nindex.m3u8?session=transcode-id\n',
+          200,
+        ),
+        '/video/:/transcode/universal/index.m3u8' => http.Response(mediaPlaylist.toString(), 200),
+        '/video/:/transcode/universal/00495.ts' =>
+          ++segmentAttempts == 1
+              ? http.Response('not ready', 404)
+              : http.Response('segment bytes', 206, headers: {'content-type': 'video/mp2t'}),
+        _ => http.Response('unexpected request', 500),
+      };
+    });
+    addTearDown(client.close);
+
+    final ready = await client.waitForTranscodeReady(
+      'https://plex.example.com/video/:/transcode/universal/start.m3u8?offset=495.500000',
+      timeout: const Duration(seconds: 1),
+      pollInterval: Duration.zero,
+    );
+
+    expect(ready, isTrue);
+    expect(segmentAttempts, 2);
+    expect(requests.map((uri) => uri.path), [
+      '/video/:/transcode/universal/start.m3u8',
+      '/video/:/transcode/universal/index.m3u8',
+      '/video/:/transcode/universal/00495.ts',
+      '/video/:/transcode/universal/00495.ts',
+    ]);
+    expect(requests[1].queryParameters['session'], 'transcode-id');
+    expect(rangeHeaders, [null, null, 'bytes=0-0', 'bytes=0-0']);
+    // The client's default Accept is application/json; the probe must mirror
+    // the player's request shape instead.
+    expect(acceptHeaders, everyElement('*/*'));
+  });
+
+  test('an embedded subtitle this server cannot burn falls back as a failure', () async {
+    // The row has no `key`, so it is embedded and a transcode would have to burn it; `dvb_teletext`
+    // is not a codec the burn path accepts. Treating that as "no burn requested" sent
+    // `subtitles=none` with the row still selected, so the caption vanished while state reported it
+    // active *and* the capped preset was silently retained.
+    final client = makeClient((request) async {
+      if (request.url.path == '/library/metadata/42') {
+        return http.Response(
+          jsonEncode({
+            'MediaContainer': {
+              'Metadata': [
+                {
+                  'ratingKey': '42',
+                  'Media': [
+                    {
+                      'id': 1,
+                      'Part': [
+                        {
+                          'id': 11,
+                          'key': '/library/parts/11/file.mkv',
+                          'Stream': <dynamic>[
+                            {'id': 31, 'streamType': 3, 'index': 2, 'codec': 'dvb_teletext', 'language': 'English'},
+                          ],
+                        },
+                      ],
+                    },
+                  ],
+                },
+              ],
+            },
+          }),
+          200,
+          headers: {'content-type': 'application/json'},
+        );
+      }
+      if (request.url.path == '/video/:/transcode/universal/decision') {
+        // The server answers direct-play-only, which is what refusing the burn looks like.
+        return http.Response(
+          jsonEncode({
+            'MediaContainer': {'generalDecisionCode': 1000, 'transcodeDecisionCode': 1000},
+          }),
+          200,
+          headers: {'content-type': 'application/json'},
+        );
+      }
+      return http.Response('unexpected request', 500);
+    });
+    addTearDown(client.close);
+
+    final result = await client.getPlaybackInitialization(
+      PlaybackInitializationOptions(
+        metadata: testMediaItem(id: '42', backend: MediaBackend.plex, kind: MediaKind.movie, serverId: 'server-id'),
+        selectedMediaIndex: 0,
+        qualityPreset: TranscodeQualityPreset.p720_3mbps,
+        sessionIdentifier: 'session-id',
+        transcodeSessionId: 'transcode-id',
+        preferredSubtitleTrack: const SubtitlePreference.track(
+          SubtitleTrack(id: 'source:31', codec: 'dvb_teletext', language: 'English'),
+        ),
+      ),
+    );
+
+    expect(result.playMethod, 'DirectPlay', reason: 'direct play is the route that can deliver it');
+    expect(result.fallbackReason, isNotNull, reason: 'a dropped burn is a refusal to warn about, not a silent success');
+  });
+
+  test('a valid transcode is refused when it cannot carry the selected subtitle', () async {
+    // The server happily transcodes the video, but the decision went out as `subtitles=none` because
+    // `dvb_teletext` cannot be burned. Accepting that stream left the row selected with nothing
+    // drawing it and no sidecar behind it, so the caption was simply gone.
+    final client = makeClient((request) async {
+      if (request.url.path == '/library/metadata/42') {
+        return http.Response(
+          jsonEncode({
+            'MediaContainer': {
+              'Metadata': [
+                {
+                  'ratingKey': '42',
+                  'Media': [
+                    {
+                      'id': 1,
+                      'Part': [
+                        {
+                          'id': 11,
+                          'key': '/library/parts/11/file.mkv',
+                          'Stream': <dynamic>[
+                            {'id': 31, 'streamType': 3, 'index': 2, 'codec': 'dvb_teletext', 'language': 'English'},
+                          ],
+                        },
+                      ],
+                    },
+                  ],
+                },
+              ],
+            },
+          }),
+          200,
+          headers: {'content-type': 'application/json'},
+        );
+      }
+      if (request.url.path == '/video/:/transcode/universal/decision') {
+        // 1001 = the server will transcode. Without the refusal this is accepted outright.
+        return http.Response(
+          jsonEncode({
+            'MediaContainer': {'generalDecisionCode': 1001, 'transcodeDecisionCode': 1001},
+          }),
+          200,
+          headers: {'content-type': 'application/json'},
+        );
+      }
+      return http.Response('unexpected request', 500);
+    });
+    addTearDown(client.close);
+
+    final result = await client.getPlaybackInitialization(
+      PlaybackInitializationOptions(
+        metadata: testMediaItem(id: '42', backend: MediaBackend.plex, kind: MediaKind.movie, serverId: 'server-id'),
+        selectedMediaIndex: 0,
+        qualityPreset: TranscodeQualityPreset.p720_3mbps,
+        sessionIdentifier: 'session-id',
+        transcodeSessionId: 'transcode-id',
+        preferredSubtitleTrack: const SubtitlePreference.track(
+          SubtitleTrack(id: 'source:31', codec: 'dvb_teletext', language: 'English'),
+        ),
+      ),
+    );
+
+    expect(result.isTranscoding, isFalse, reason: 'the stream could not carry the caption that was asked for');
+    expect(result.playMethod, 'DirectPlay', reason: 'direct play lets the native player read it');
+  });
+
+  test('readiness probe target selection walks segment durations to the offset', () {
+    const mediaPlaylist =
+        '#EXTM3U\n'
+        '#EXT-X-TARGETDURATION:2\n'
+        '#EXTINF:2.000000,\n00000.ts\n'
+        '#EXTINF:2.000000,\n00001.ts\n'
+        '#EXTINF:2.000000,\n00002.ts\n';
+    expect(PlexClient.selectReadinessProbeTarget(mediaPlaylist, Duration.zero), '00000.ts');
+    expect(PlexClient.selectReadinessProbeTarget(mediaPlaylist, const Duration(seconds: 3)), '00001.ts');
+    // Durations never cross the offset: the playlist cannot say where the
+    // offset lives, and probing a guessed segment would seek the session.
+    expect(PlexClient.selectReadinessProbeTarget(mediaPlaylist, const Duration(seconds: 30)), isNull);
+    // A master playlist has no segment durations: descend into the first variant.
+    const masterPlaylist = '#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1500000\nindex.m3u8\nfallback.m3u8\n';
+    expect(PlexClient.selectReadinessProbeTarget(masterPlaylist, const Duration(minutes: 10)), 'index.m3u8');
+  });
+
+  test('transcode readiness skips probing when the playlist cannot locate the offset', () {
+    fakeAsync((async) {
+      final requestPaths = <String>[];
+      // The offset-relative playlist shape this client has never observed
+      // against a real PMS: segments named from the resume point, durations
+      // summing to a minute. Probing its last segment would ask the session
+      // to produce a minute past the resume point.
+      final mediaPlaylist = StringBuffer('#EXTM3U\n#EXT-X-TARGETDURATION:1\n');
+      for (var i = 8062; i <= 8121; i++) {
+        mediaPlaylist.write('#EXTINF:1.000000,\n${i.toString().padLeft(5, '0')}.ts\n');
+      }
+      final client = makeClient((request) async {
+        requestPaths.add(request.url.path);
+        if (request.url.path.endsWith('/start.m3u8')) {
+          return http.Response(mediaPlaylist.toString(), 200);
+        }
+        return http.Response('segment bytes', 206, headers: {'content-type': 'video/mp2t'});
+      });
+      addTearDown(client.close);
+
+      bool? ready;
+      client
+          .waitForTranscodeReady(
+            'https://plex.example.com/video/:/transcode/universal/start.m3u8?offset=8062.000000',
+            timeout: const Duration(seconds: 15),
+            pollInterval: const Duration(milliseconds: 500),
+          )
+          .then((value) => ready = value);
+      async.flushMicrotasks();
+
+      expect(ready, isTrue);
+      expect(requestPaths.where((path) => path.endsWith('.ts')), isEmpty);
+    });
+  });
+
+  test('transcode readiness hands off on a 500 that arrives inside a decode exception', () {
+    fakeAsync((async) {
+      var requestCount = 0;
+      // A proxy or gateway in front of PMS answering 500 with a JSON
+      // content-type and a non-JSON body: the client's body decode throws a
+      // status-bearing exception instead of returning the response, and the
+      // exception path must apply the same hand-off rule as the response
+      // path.
+      final client = makeClient((request) async {
+        requestCount++;
+        return http.Response('<html>gateway error</html>', 500, headers: {'content-type': 'application/json'});
+      });
+      addTearDown(client.close);
+
+      bool? ready;
+      client
+          .waitForTranscodeReady(
+            'https://plex.example.com/video/:/transcode/universal/start.m3u8?offset=495.000000',
+            timeout: const Duration(seconds: 15),
+            pollInterval: const Duration(milliseconds: 500),
+          )
+          .then((value) => ready = value);
+      // No elapse: like the response-path 500, the exception-path 500 must
+      // complete the probe without a single poll wait.
+      async.flushMicrotasks();
+
+      expect(ready, isFalse);
+      expect(requestCount, 1);
+    });
+  });
+
+  test('transcode readiness returns immediately when the probe is already aborted', () async {
+    var requestCount = 0;
+    final client = makeClient((request) async {
+      requestCount++;
+      return http.Response('#EXTM3U\n#EXTINF:1.0,\nmedia-00000.ts\n', 200);
+    });
+    addTearDown(client.close);
+
+    final abort = AbortController()..abort();
+    final ready = await client.waitForTranscodeReady(
+      'https://plex.example.com/video/:/transcode/universal/start.m3u8?offset=0.500000',
+      abort: abort,
+    );
+
+    expect(ready, isFalse);
+    expect(requestCount, 0);
+  });
+
+  test('transcode readiness polls a bounded number of times while the segment stays unavailable', () {
+    fakeAsync((async) {
+      var requestCount = 0;
+      final client = makeClient((request) async {
+        requestCount++;
+        if (request.url.path.endsWith('/start.m3u8')) {
+          return http.Response('#EXTM3U\n#EXTINF:1.0,\nmedia-00000.ts\n', 200);
+        }
+        return http.Response('not ready', 404);
+      });
+      addTearDown(client.close);
+
+      bool? ready;
+      client
+          .waitForTranscodeReady(
+            'https://plex.example.com/video/:/transcode/universal/start.m3u8?offset=0.500000',
+            timeout: const Duration(milliseconds: 600),
+            pollInterval: const Duration(milliseconds: 50),
+          )
+          .then((value) => ready = value);
+      async.elapse(const Duration(milliseconds: 700));
+
+      expect(ready, isFalse);
+      // The not-ready signal is a non-2xx *response*, not an exception: every
+      // failed probe must still wait out the poll interval, and after three
+      // consecutive failures the interval doubles to a 4x cap. Under a fake
+      // clock the cadence is exact: the playlist hop, then segment polls at
+      // 0/50/100/150/250/450ms. Drafts of this probe that skipped the delay
+      // on non-2xx or discarded the backoff measured 3,651 and 12 requests
+      // respectively in this same window; neither shape ever shipped.
+      expect(requestCount, 7);
+    });
+  });
+
+  test('transcode readiness requests bypass endpoint failover', () {
+    fakeAsync((async) {
+      var exhaustedSignals = 0;
+      var requestCount = 0;
+      final client = testPlexClient(
+        serverId: ServerId('server-id'),
+        prioritizedEndpoints: const ['https://plex.example.com'],
+        onAllEndpointsExhausted: () => exhaustedSignals++,
+        // 503 on the playlist itself: the segment leg goes through getRaw,
+        // which never enters the failover path, so the playlist request is
+        // the one that could drive the cascade.
+        handler: (request) async {
+          requestCount++;
+          return http.Response('busy', 503);
+        },
+      );
+      addTearDown(client.close);
+
+      bool? ready;
+      client
+          .waitForTranscodeReady(
+            'https://plex.example.com/video/:/transcode/universal/start.m3u8?offset=495.000000',
+            timeout: const Duration(milliseconds: 200),
+            pollInterval: const Duration(milliseconds: 50),
+          )
+          .then((value) => ready = value);
+      async.elapse(const Duration(milliseconds: 300));
+
+      expect(ready, isFalse);
+      expect(requestCount, greaterThanOrEqualTo(3));
+      // The probe carries its own retry budget, so it must not drive the
+      // endpoint-failover cascade: its URL is absolute (the retry re-hits the
+      // same host), each switch rewrites config.baseUrl underneath the
+      // videoUrl already handed to the open path, and on a single-endpoint
+      // server every failed poll fires the all-endpoints-exhausted signal —
+      // the manager's cue to flip server status and reconnect.
+      expect(exhaustedSignals, 0);
+      expect(client.config.baseUrl, 'https://plex.example.com');
+    });
+  });
+
+  test('transcode readiness stops on cancellation instead of sleeping out the window', () {
+    fakeAsync((async) {
+      var requestCount = 0;
+      late final PlexClient client;
+      client = testPlexClient(
+        serverId: ServerId('server-id'),
+        handler: (request) async {
+          requestCount++;
+          if (request.url.path.endsWith('/start.m3u8')) {
+            return http.Response('#EXTM3U\n#EXTINF:1.0,\nmedia-00000.ts\n', 200);
+          }
+          // The owner closes mid-probe; the next request must surface as a
+          // cancellation, not as one more not-ready round.
+          client.close();
+          return http.Response('not ready', 404);
+        },
+      );
+
+      bool? ready;
+      client
+          .waitForTranscodeReady(
+            'https://plex.example.com/video/:/transcode/universal/start.m3u8?offset=0.500000',
+            timeout: const Duration(milliseconds: 600),
+            pollInterval: const Duration(milliseconds: 50),
+          )
+          .then((value) => ready = value);
+      // One poll interval is all it may consume after the close; a probe
+      // that counts cancellation as not-ready sleeps out the full 600ms.
+      async.elapse(const Duration(milliseconds: 100));
+
+      expect(ready, isFalse);
+      expect(requestCount, 2);
+    });
+  });
+
+  test('transcode readiness hands off immediately on HTTP 500', () {
+    fakeAsync((async) {
+      var requestCount = 0;
+      final client = makeClient((request) async {
+        requestCount++;
+        if (request.url.path.endsWith('/start.m3u8')) {
+          return http.Response('#EXTM3U\n#EXTINF:1.0,\nmedia-00000.ts\n', 200);
+        }
+        return http.Response('limit rejected', 500);
+      });
+      addTearDown(client.close);
+
+      bool? ready;
+      client
+          .waitForTranscodeReady(
+            'https://plex.example.com/video/:/transcode/universal/start.m3u8?offset=0.500000',
+            timeout: const Duration(seconds: 15),
+            pollInterval: const Duration(milliseconds: 500),
+          )
+          .then((value) => ready = value);
+      // No elapse: a 500 must complete the probe without a single poll wait,
+      // so the player opens promptly and the server-limit dialog path runs.
+      async.flushMicrotasks();
+
+      expect(ready, isFalse);
+      expect(requestCount, 2);
+    });
+  });
+
+  test('transcode readiness returns immediately for URLs without an offset', () async {
+    var requestCount = 0;
+    final client = makeClient((request) async {
+      requestCount++;
+      return http.Response('should not be called', 500);
+    });
+    addTearDown(client.close);
+
+    // Probing a no-offset playlist would touch segment zero, and requesting
+    // a segment is how a client seeks a Plex HLS session.
+    expect(
+      await client.waitForTranscodeReady('https://plex.example.com/video/:/transcode/universal/start.m3u8?session=x'),
+      isTrue,
+    );
+    expect(await client.waitForTranscodeReady('https://plex.example.com/library/parts/1/file.mkv'), isTrue);
+    expect(requestCount, 0);
   });
 
   test('transcode params preserve resolved media and part indices', () {
@@ -682,20 +1416,28 @@ void main() {
     expect(params['partIndex'], '2');
   });
 
-  test('image-based embedded subtitles use the shared container sidecar', () {
+  test('image-based embedded subtitles are burned rather than sidecarred', () {
     final client = makeClient((_) async => http.Response('not used', 500));
     addTearDown(client.close);
 
-    final subtitles = buildTranscodeSubtitles(client, [
-      MediaSubtitleTrack(id: 401, codec: 'pgs', languageCode: 'eng', selected: true, forced: false),
-      MediaSubtitleTrack(id: 402, codec: 'dvd_subtitle', languageCode: 'eng', selected: false, forced: false),
-    ]);
+    final tracks = [
+      MediaSubtitleTrack(id: 401, index: 3, codec: 'pgs', languageCode: 'eng', selected: true, forced: false),
+      MediaSubtitleTrack(id: 402, index: 4, codec: 'dvd_subtitle', languageCode: 'eng', selected: false, forced: false),
+    ];
 
-    expect(subtitles, hasLength(2));
-    expect(subtitles.every((sidecar) => sidecar.track.isContainer), isTrue);
-    expect(subtitles.map((sidecar) => sidecar.track.uri).toSet(), {
-      'https://plex.example.com/video.mkv?X-Plex-Token=token',
-    });
+    expect(buildTranscodeSubtitles(client, tracks), isEmpty);
+
+    final params = client.buildTranscodeParamsForTesting(
+      ratingKey: '42',
+      mediaIndex: 0,
+      preset: TranscodeQualityPreset.p720_3mbps,
+      sessionIdentifier: 'session-id',
+      transcodeSessionId: 'transcode-id',
+      selectedSubtitleTrack: client.resolveTranscodeSubtitleTrackForTesting(mediaInfoWithSubtitles(tracks), null),
+    );
+
+    expect(params['subtitles'], 'burn');
+    expect(params.containsKey('subtitleStreamID'), isFalse);
   });
 
   group('playback metadata failure contract', () {

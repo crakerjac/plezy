@@ -13,6 +13,7 @@ class PlayerAndroid extends PlayerBase {
 
   int? _bufferSizeBytes;
   bool _bufferSizeIsAuto = false;
+  String _bufferTier = 'auto';
   bool _tunnelingEnabled = true;
   String _dvConversionMode = 'auto';
   bool _audioNormalizationEnabled = false;
@@ -20,6 +21,12 @@ class PlayerAndroid extends PlayerBase {
   bool _downmixEnabled = false;
   int _downmixCenterBoostDb = 0;
   bool _downmixNormalize = true;
+
+  /// Server-reported frame rate for the next item, or null when unknown.
+  ///
+  /// Rides on `open` rather than a standalone call because it is per-item and
+  /// must be known before the native side settles tunneling for that item.
+  double? _contentFrameRate;
 
   /// The native plugin switched from ExoPlayer to its mpv fallback for this
   /// session. Sticky for the instance lifetime, mirroring the native flag
@@ -109,6 +116,7 @@ class PlayerAndroid extends PlayerBase {
       final result = await invoke<bool>('initialize', {
         'bufferSizeBytes': _bufferSizeBytes,
         'bufferSizeAuto': _bufferSizeIsAuto,
+        'bufferTier': _bufferTier,
         'tunnelingEnabled': _tunnelingEnabled,
         'dvConversionMode': _dvConversionMode,
         'audioPassthroughEnabled': _audioPassthroughEnabled,
@@ -200,6 +208,7 @@ class PlayerAndroid extends PlayerBase {
         'hasStartPosition': hasStartPosition,
         'autoPlay': play,
         'isLive': isLive,
+        if (_contentFrameRate != null) 'contentFrameRate': _contentFrameRate,
         if (externalSubtitles != null && externalSubtitles.isNotEmpty)
           'externalSubtitles': externalSubtitles
               .where((s) => s.uri?.isNotEmpty == true)
@@ -324,8 +333,18 @@ class PlayerAndroid extends PlayerBase {
       case 'demuxer-max-bytes-auto':
         _bufferSizeIsAuto = value != 'no';
         break;
+      // Not an mpv property. mpv read-ahead is owned by the mpv.conf editor; this tier is
+      // a named ExoPlayer read-ahead depth rather than a duration because the byte cap can
+      // bind first (#1816).
+      case 'exo-buffer-tier':
+        _bufferTier = value;
+        break;
       case 'tunneled-playback':
         _tunnelingEnabled = value != 'no';
+        break;
+      case 'content-frame-rate':
+        final fps = double.tryParse(value);
+        _contentFrameRate = fps != null && fps > 0 ? fps : null;
         break;
       case 'dv-conversion-mode':
         _dvConversionMode = value;
@@ -523,6 +542,7 @@ class PlayerAndroid extends PlayerBase {
     int subtitlePosition = 100,
     bool bold = false,
     bool italic = false,
+    bool anchorToScreen = false,
   }) async {
     if (disposed || !initialized) return;
     await invoke('setSubtitleStyle', {
@@ -535,6 +555,7 @@ class PlayerAndroid extends PlayerBase {
       'subtitlePosition': subtitlePosition,
       'bold': bold,
       'italic': italic,
+      'anchorToScreen': anchorToScreen,
     });
   }
 

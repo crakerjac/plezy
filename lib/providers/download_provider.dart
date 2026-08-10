@@ -405,7 +405,7 @@ class DownloadProvider extends ChangeNotifier with DisposableChangeNotifierMixin
       // Load all downloads from database
       final downloads = await _downloadManager.getAllDownloads();
 
-      // Bulk-load all pinned metadata across both backends in a single pass
+      // Bulk-load all pinned metadata across every backend in a single pass
       // instead of per-item DB calls.
       final allMetadata = await _downloadManager.getAllPinnedMetadata(
         preferActiveScope: true,
@@ -639,10 +639,11 @@ class DownloadProvider extends ChangeNotifier with DisposableChangeNotifierMixin
             // Fallback: synthesize from episode metadata (missing year, summary)
             // Only Plex consumers read `raw['key']` (library-section + folder
             // navigation), so we synthesize the Plex URI for Plex shows and
-            // emit a Jellyfin-shaped item for Jellyfin (Id + Type=Series).
+            // emit a MediaBrowser-shaped item for Jellyfin or Emby
+            // (`Id` + `Type=Series`).
             final synthesizedRaw = switch (meta.backend) {
               MediaBackend.plex => <String, dynamic>{'key': '/library/metadata/$showRatingKey'},
-              MediaBackend.jellyfin => <String, dynamic>{'Id': showRatingKey, 'Type': 'Series'},
+              MediaBackend.jellyfin || MediaBackend.emby => <String, dynamic>{'Id': showRatingKey, 'Type': 'Series'},
             };
             shows[showRatingKey] = MediaItem(
               id: showRatingKey,
@@ -1378,7 +1379,7 @@ class DownloadProvider extends ChangeNotifier with DisposableChangeNotifierMixin
 
   /// Queue every track under an album/artist. Expansion is one
   /// recursive-leaves call ([MediaServerClient.fetchPlayableDescendants]) on
-  /// both backends — Plex branches album→/children, Jellyfin retries
+  /// every backend — Plex branches album→/children, while MediaBrowser retries
   /// tag-only artists by album-artist credit.
   Future<int> _queueMusicContainerDownload(
     MediaItem container,

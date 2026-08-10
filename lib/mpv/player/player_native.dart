@@ -56,9 +56,16 @@ class PlayerNative extends PlayerBase {
   @visibleForTesting
   static bool debugForceContentFdConversion = false;
 
-  /// Overrides the Linux-only video readiness handshake in host tests.
+  /// Overrides the Linux video-plane detection in host tests.
   @visibleForTesting
-  static bool? debugUseLinuxVideoBootstrap;
+  static bool? debugUseLinuxVideoPlane;
+
+  /// Whether this process drives video through the Linux Wayland plane, which
+  /// is `Platform.isLinux` and nothing finer — Linux has no other render path.
+  ///
+  /// The one place the test override is resolved, so production code and host
+  /// tests agree on which path is live without reading a test-only field.
+  static bool get usesLinuxVideoPlane => debugUseLinuxVideoPlane ?? Platform.isLinux;
 
   // Set by open() and consumed by that load's file-loaded event, so it is
   // not mistaken for a gapless advance (see _handleAudioFileLoaded).
@@ -181,10 +188,6 @@ class PlayerNative extends PlayerBase {
     );
   }
 
-  /// Whether the UI must mount the provisional texture before initialization
-  /// can complete its first render/bootstrap handshake.
-  bool get requiresProvisionalTextureSurface => !audioOnly && (debugUseLinuxVideoBootstrap ?? Platform.isLinux);
-
   // Memoizes the in-flight init Future so concurrent callers (e.g. the
   // parallel `requestAudioFocus()` and `setProperty()` paths kicked off in
   // VideoPlayerScreen._initializePlayer) share one `invoke('initialize')`.
@@ -213,20 +216,7 @@ class PlayerNative extends PlayerBase {
   Future<void> _doInitialize() async {
     try {
       final result = await invoke<Object>('initialize');
-      final bool ok;
-      if (result is int) {
-        // Linux publishes a provisional texture so Flutter can invoke
-        // FlTextureGL::populate. Playback stays gated until native GPU
-        // bootstrap reports that the texture is usable.
-        setTextureId(result);
-        if (debugUseLinuxVideoBootstrap ?? Platform.isLinux) {
-          await invoke('waitForVideoReady');
-        }
-        ok = true;
-      } else {
-        ok = result == true;
-      }
-      if (!ok) {
+      if (result != true) {
         throw Exception('Failed to initialize player');
       }
       if (_nativeCoreUnavailable) throw StateError('Player was disposed during initialization');
@@ -255,7 +245,6 @@ class PlayerNative extends PlayerBase {
       if (_nativeCoreUnavailable) throw StateError('Player was disposed during initialization');
       initialized = true;
     } catch (e) {
-      setTextureId(null);
       _initFuture = null;
       if (!_nativeCoreUnavailable) {
         errorController.add(PlayerError('Initialization failed: $e'));
@@ -479,6 +468,10 @@ class PlayerNative extends PlayerBase {
       return;
     }
 
+    // The handover is off: the entry is not playing and is about to be removed.
+    // Anything frozen for it would otherwise outlive the arm and be preferred
+    // by a later advance whose own boundary edge went missing.
+    discardFrozenOutgoingPosition();
     appLogger.d('MPV-audio: clearing armed entry (playlist-remove 1)');
     try {
       if (duringDispose) {
@@ -511,6 +504,9 @@ class PlayerNative extends PlayerBase {
   /// arm — the fd (if any) was consumed by mpv — remove the spent entry so
   /// the playing entry rebases to index 0, and surface the transition.
   void _completeArmedAdvance(String? uri) {
+    // A different source is playing now, so a seek still in flight against the
+    // old one must not land its target on this one's timeline (#1819).
+    takeSourceOwnership();
     _hasArmedNext = false;
     _armedNextUri = null;
     _armedNextFd = null;
@@ -530,7 +526,11 @@ class PlayerNative extends PlayerBase {
   @override
   void handlePropertyChange(String name, dynamic value) {
     if (audioOnly && name == 'playlist-pos') {
-      // Debug aid only — see _handleAudioFileLoaded for the real detection.
+      // Detection still belongs to _handleAudioFileLoaded, but this is the last
+      // point ordered ahead of the new source's own position reports: they ride
+      // this same property flow, while `file-loaded` rides the event flow. Take
+      // the outgoing track's final position while it is still the current one.
+      if (_hasArmedNext) freezeOutgoingSourcePosition();
       appLogger.d('MPV-audio: playlist-pos=$value (armed=$_hasArmedNext)');
       return;
     }
@@ -729,11 +729,48 @@ class PlayerNative extends PlayerBase {
     return Map<String, dynamic>.from(result ?? const {});
   }
 
+  /// mpv commands that relocate the playhead while computing their own
+  /// destination, so Dart never learns where it landed up front (#1819).
+  static const _playheadRelocatingCommands = {'sub-seek'};
+
   @override
   Future<void> command(List<String> args) async {
     if (_nativeCoreUnavailable) return;
     await _ensureInitialized();
+    // Re-checked after the await: initialization can fail, or the core can be
+    // torn down, while this call is suspended. Announcing a jump that no
+    // command will follow would retire a consumer's pending target for nothing.
+    if (_nativeCoreUnavailable) return;
+    if (args.isEmpty || !_playheadRelocatingCommands.contains(args.first)) {
+      await invoke('command', {'args': args});
+      return;
+    }
+
+    // Claimed before the announcement so two overlapping subtitle seeks, or a
+    // seek issued while this one runs, cannot both think they own the playhead.
+    final token = beginPlayheadRelocation();
+    // Announced before dispatch for the same reason runSeek announces its
+    // request: the stale window is the round trip, not what follows it. The
+    // destination is unknown at this point, hence null.
+    announcePlayheadJump(null);
     await invoke('command', {'args': args});
+    // The command was accepted, so the playhead has moved even if the read
+    // below cannot say where. Take ownership now: an in-flight seek group
+    // settling afterwards must not roll back across a cue that happened.
+    commitPlayheadRelocation(token);
+    // Read back where mpv actually went. `PlayerState.position` is what
+    // relative seeks rebase from and its tick updates are throttled, so
+    // without this a skip pressed straight after would start from the
+    // pre-command position.
+    //
+    // Nothing is published when the read fails: guessing would hand a
+    // fabricated position to consumers as authoritative. The null announced
+    // before dispatch already told consumers to drop what they were holding,
+    // and the backend's next tick supplies the real position.
+    final seconds = double.tryParse(await invoke<String>('getProperty', {'name': 'time-pos'}) ?? '');
+    if (seconds != null && seconds.isFinite && !seconds.isNegative) {
+      publishPlayheadRelocation(Duration(milliseconds: (seconds * 1000).round()), token: token);
+    }
   }
 
   @override
@@ -1013,5 +1050,25 @@ class PlayerNative extends PlayerBase {
   Future<void> abandonAudioFocus() async {
     if (_nativeCoreUnavailable || !Platform.isAndroid || !initialized) return;
     await invoke('abandonAudioFocus');
+  }
+
+  /// See [Player.isHdrOutputSupported] for why this is a query and not a constant.
+  ///
+  /// Only Linux delegates to the native side, because only there does the answer
+  /// move: it folds in the output the plane currently sits on. Everywhere else it
+  /// is a platform constant. Windows has a native query of its own, but nothing
+  /// consults this method there - the settings sheet offers HDR on Windows
+  /// unconditionally - so asking would only let the two disagree about the same
+  /// platform. Nothing is cached on either path.
+  @override
+  Future<bool> isHdrOutputSupported() async {
+    // No video plane without video, on any platform, so this precedes the
+    // platform question rather than sitting inside one branch of it.
+    if (_nativeCoreUnavailable || audioOnly) return false;
+    // Asked through usesLinuxVideoPlane, not Platform.isLinux, so this and the
+    // settings sheet's _probesHdrSupport resolve the same way under the test
+    // override; on a real Linux host the two are the same answer.
+    if (usesLinuxVideoPlane) return await invoke<bool>('isHDRSupported') ?? false;
+    return Platform.isIOS || Platform.isMacOS || Platform.isWindows;
   }
 }

@@ -40,6 +40,7 @@ import '../../mixins/mounted_set_state_mixin.dart';
 import '../../mpv/mpv.dart';
 import '../overlay_sheet.dart';
 import '../../focus/dpad_navigator.dart';
+import '../../focus/focus_navigation_intent.dart';
 
 import '../../database/app_database.dart';
 import '../../media/media_backend.dart';
@@ -104,13 +105,15 @@ part 'parts/visibility.dart';
 /// Subtitle tracks offered in the player's "source" subtitle list.
 ///
 /// Direct play exposes embedded tracks in the native player and can attach
-/// arbitrary sidecars itself. A transcode can only deliver external sidecars
-/// or embedded codecs that the server can convert/burn into the rendition.
+/// arbitrary sidecars itself. A transcode can only deliver a resolved sidecar or
+/// an embedded codec the server can burn into the rendition — which every
+/// backend can be asked to do (Plex `subtitles=burn`, Jellyfin/Emby an `Encode`
+/// subtitle profile plus `SubtitleStreamIndex`), so the codec is the only
+/// discriminator here.
 List<MediaSubtitleTrack> selectableSourceSubtitleTracks(
   List<MediaSubtitleTrack> tracks, {
   required bool isTranscoding,
   required Set<int> sidecarSourceIds,
-  required bool supportsEmbeddedTranscodeSelection,
 }) {
   if (!isTranscoding) {
     return tracks
@@ -122,11 +125,24 @@ List<MediaSubtitleTrack> selectableSourceSubtitleTracks(
         .toList(growable: false);
   }
   return tracks
-      .where(
-        (track) =>
-            sidecarSourceIds.contains(track.id) ||
-            (supportsEmbeddedTranscodeSelection && CodecUtils.isTranscodableSubtitleCodec(track.codec)),
-      )
+      .where((track) {
+        if (sidecarSourceIds.contains(track.id)) return true;
+        // A row the client has to fetch itself is selectable only once its sidecar resolved: when that
+        // build failed nothing can put it on screen and reloading cannot help.
+        //
+        // Bitmaps are not fetched at all. The transcode profile offers image formats as `Embed` with
+        // no `External` entry, so the server burns them into the picture - external files included -
+        // and they never get a sidecar by design. Gating those on one made the active track vanish
+        // from the picker while its captions were still burned into the video, with no row left to
+        // switch or turn off. So burn eligibility is decided by the codec, not by where the row came
+        // from.
+        final burnedByServer = CodecUtils.isImageSubtitleCodec(track.codec);
+        final requiresSidecar =
+            !burnedByServer &&
+            (track.isExternalFile || (!track.usesExternalDelivery && track.key != null && track.key!.isNotEmpty));
+        if (requiresSidecar) return false;
+        return CodecUtils.isTranscodableSubtitleCodec(track.codec);
+      })
       .toList(growable: false);
 }
 
@@ -217,12 +233,62 @@ bool shouldShowSkipMarkerButton({
   return hasFirstFrame && hasMarker && !hasPlayNextPrompt && (!skipButtonDismissed || controlsVisible);
 }
 
+/// The viewer's raw "Video Player Navigation" preference, ignoring TV.
+///
+/// Use this for genuine preferences — auto-hide delay, Escape semantics,
+/// hardware transport interception. For "do arrow keys move focus in the
+/// player?" use [playerDirectionalNavigationEnabled] instead: OR-ing `isTV()`
+/// into a preference read changes behaviour for a TV viewer who turned the
+/// preference off.
+///
+/// Reads through [SettingsService.instanceOrNull] because focus policy is
+/// consulted from a global key handler that can run before startup finishes.
+/// The pre-init answer is `false`; the preference's real default is
+/// `TvDetectionService.isTVSync`, so a pre-init read understates it on TV —
+/// harmless only because no player route, and so no
+/// [DirectionalShortcutFocusNode], can mount before settings are loaded.
+bool videoPlayerNavigationPreference() =>
+    SettingsService.instanceOrNull?.read(SettingsService.videoPlayerNavigationEnabled) ?? false;
+
+/// Whether the video player treats arrow / D-pad keys as focus navigation
+/// rather than playback shortcuts. A television always navigates.
+///
+/// This is the single derivation of that policy. Every site that used to spell
+/// it `pref || PlatformDetector.isTV()` by hand reads it from here.
+bool playerDirectionalNavigationEnabled() => videoPlayerNavigationPreference() || PlatformDetector.isTV();
+
+/// Builds one of the player's catch-all surface nodes.
+///
+/// Both the screen node and the player-surface node can hold primary focus
+/// without the viewer ever having navigated — they autofocus and are actively
+/// reclaimed — so an arrow pressed while they hold focus is a playback
+/// shortcut, not traversal, and must not switch the app into keyboard mode.
+/// Minting them here keeps that derivation in one place; [alsoOwns] adds the
+/// per-key exceptions a surface still claims once navigation is enabled.
+///
+/// `skipTraversal` keeps these full-screen invisible nodes out of the Tab ring:
+/// they are entered by autofocus and explicit requests, never by traversal.
+DirectionalShortcutFocusNode playerSurfaceFocusNode(
+  String debugLabel, {
+  bool Function(LogicalKeyboardKey key)? alsoOwns,
+}) {
+  return DirectionalShortcutFocusNode(
+    debugLabel: debugLabel,
+    skipTraversal: true,
+    consumesDirectionalKeys: (key) => !playerDirectionalNavigationEnabled() || (alsoOwns?.call(key) ?? false),
+  );
+}
+
 enum PlayerNavigationKey { none, physicalEscape, back, home }
 
 enum PlayerBackDisposition { closeContentStrip, exitFullscreenIfActive, hideControls, exitPlayer }
 
-bool shouldPhysicalEscapeExitFullscreen({required bool isMacOS, required bool videoPlayerNavigationEnabled}) {
-  return !isMacOS && !videoPlayerNavigationEnabled;
+bool shouldPhysicalEscapeExitFullscreen({
+  required bool isMacOS,
+  required bool videoPlayerNavigationEnabled,
+  required bool playerEnteredFullscreen,
+}) {
+  return !isMacOS && !videoPlayerNavigationEnabled && playerEnteredFullscreen;
 }
 
 /// Coordinates the player-level stages shared by keyboard, controller, and
@@ -739,8 +805,6 @@ class _PlexVideoControlsState extends State<PlexVideoControls>
   // Skip button dismiss state
   bool _skipButtonDismissed = false;
   Timer? _skipButtonDismissTimer;
-  // Video player navigation (use arrow keys to navigate controls)
-  bool get _videoPlayerNavigationEnabled => _settings.read(SettingsService.videoPlayerNavigationEnabled);
   // Performance overlay
   bool get _showPerformanceOverlay => _settings.read(SettingsService.showPerformanceOverlay);
   bool get _autoHidePerformanceOverlay => _settings.read(SettingsService.autoHidePerformanceOverlay);
@@ -772,7 +836,14 @@ class _PlexVideoControlsState extends State<PlexVideoControls>
     _lastControlsVisible = widget.chromeController.controlsVisible;
     _controlsMounted = _lastControlsVisible;
     _controlsOpaque = _lastControlsVisible;
-    _focusNode = FocusNode();
+    // Horizontal arrows stay the player's even with navigation enabled: with
+    // the chrome down they run a hidden seek (see parts/key_events.dart), so
+    // they are not evidence of a focus session. Up/Down raises the chrome and
+    // is traversal, so it promotes.
+    _focusNode = playerSurfaceFocusNode(
+      'PlayerSurface',
+      alsoOwns: (key) => !_showControls && (key.isLeftKey || key.isRightKey),
+    );
     _skipMarkerFocusNode = FocusNode(debugLabel: 'SkipMarkerButton');
     _seekThrottle = throttle(
       (Duration pos) {
@@ -786,6 +857,13 @@ class _PlexVideoControlsState extends State<PlexVideoControls>
       currentPosition: () => widget.player.state.position,
       duration: () => widget.player.state.duration,
       seek: (target) => unawaited(_seekToPosition(target)),
+      playheadJumps: widget.player.streams.playheadJump,
+      // The badge is a promise about the coalesced burst. Once that burst is
+      // abandoned — the timeline, a chapter jump, a peer, a stream rebuilt at a
+      // resume position, a new item, a swapped player — the promise is void, so
+      // take the readout down instead of leaving a total nothing will seek to
+      // (#1819, keeping the #1676 badge-matches-seek invariant).
+      onBurstAbandoned: _dismissSkipFeedback,
     );
     // Side effects: rotation lock + focus on nav-enable. Both fire immediately
     // so init wiring (orientation, focus) lives in one place.
@@ -850,11 +928,15 @@ class _PlexVideoControlsState extends State<PlexVideoControls>
       _lastReportedRate = widget.player.state.rate;
       _rateSubscription = widget.player.streams.rate.listen(_onRateChanged);
       _loadPlaybackExtras();
-      _focusPlayPauseIfKeyboardMode();
-      // A route that opened with no chrome never ran the hide transition that
-      // normally hands focus down here, and this Focus autofocuses too late to
-      // win it: the screen node claimed it during the loading phase.
-      if (!widget.chromeController.controlsVisible) _claimHiddenChromeFocus();
+      // The player surface owns the remote whenever no chrome control was
+      // deliberately given focus. A route that opens with the chrome already up
+      // (every desktop route — see playerChromeStartsVisible) never runs the
+      // hide transition that normally hands focus down here, and this Focus
+      // autofocuses too late to win it back from the screen node claimed during
+      // the loading phase. Leaving focus parked up there is what turns the first
+      // actionable key into a chrome-raising self-heal instead of a playback
+      // shortcut.
+      if (!_focusPlayPauseIfKeyboardMode()) _claimPlayerSurfaceFocus();
       if (PlatformDetector.isMobile(context) && !PlatformDetector.isTV()) {
         _refreshDeviceAdjustmentValues();
       }
@@ -872,6 +954,9 @@ class _PlexVideoControlsState extends State<PlexVideoControls>
     super.didUpdateWidget(oldWidget);
     if (oldWidget.player != widget.player) {
       ++_subtitleVisibilityWriteGeneration;
+      // Otherwise the accumulator keeps listening to the retired player and
+      // never hears the new one move.
+      _hiddenSeek.attachPlayheadJumps(widget.player.streams.playheadJump);
     }
     if (oldWidget.chromeController != widget.chromeController) {
       oldWidget.chromeController.removeListener(_onChromeChanged);
@@ -884,6 +969,15 @@ class _PlexVideoControlsState extends State<PlexVideoControls>
     // the per-item chapters/markers/skip state when the item changes.
     // (Quality/version switches keep the same item, so no refetch churn.)
     if (oldWidget.metadata.globalKey != widget.metadata.globalKey) {
+      // A pending skip is an offset into the outgoing item's timeline; letting
+      // it survive would rebase the next press onto the previous episode. This
+      // is the lifecycle backstop for every route that replaces the item
+      // without going through a wrapped next/previous callback — natural
+      // completion, a peer, an external change — so it also has to reach the
+      // desktop timeline's own accumulator and the shared readout.
+      _hiddenSeek.cancel();
+      _desktopControlsKey.currentState?.abandonPendingSeek();
+      _dismissSkipFeedback();
       _setControlsState(() {
         _chapters = [];
         _chaptersLoaded = false;
@@ -1004,6 +1098,25 @@ class _PlexVideoControlsState extends State<PlexVideoControls>
         _isFullscreen = false;
       });
     }
+  }
+
+  /// Re-activating the window drops Flutter's primary focus to the root scope,
+  /// and the enclosing player screen reclaims it onto its own node. Nothing
+  /// hands it back down while the chrome stays visible — the hide transition is
+  /// the only other handoff — so the next arrow key reaches the screen's
+  /// self-heal and jumps focus into the OSD (#1797). Take the surface back
+  /// unless a control below already owns it.
+  @override
+  void onWindowFocus() {
+    // Claim now rather than post-frame: this arrives on a platform callback,
+    // which is not guaranteed to be followed by a frame. The screen's own
+    // reclaim re-tests `hasFocus` when it runs, so once the surface holds the
+    // remote the two no longer compete.
+    if (!mounted || _focusNode.hasFocus) return;
+    // A route pushed above the player still leaves these controls mounted;
+    // re-activating the window must not pull the remote off the top route.
+    if (ModalRoute.of(context)?.isCurrent != true) return;
+    _claimPlayerSurfaceFocus();
   }
 
   @override
@@ -1164,8 +1277,8 @@ class _PlexVideoControlsState extends State<PlexVideoControls>
                                                       onCancelAutoHide: widget.chromeController.cancelAutoHide,
                                                       onStartAutoHide: widget.chromeController.startAutoHide,
                                                       onBack: widget.onBack,
-                                                      onNext: widget.onNext,
-                                                      onPrevious: widget.onPrevious,
+                                                      onNext: _abandoningBurst(widget.onNext),
+                                                      onPrevious: _abandoningBurst(widget.onPrevious),
                                                       canControl: widget.canControl,
                                                       hasFirstFrame: widget.hasFirstFrame,
                                                       thumbnailDataBuilder: widget.thumbnailDataBuilder,
@@ -1174,7 +1287,7 @@ class _PlexVideoControlsState extends State<PlexVideoControls>
                                                       captureBuffer: widget.captureBuffer,
                                                       isAtLiveEdge: widget.isAtLiveEdge,
                                                       streamStartEpoch: widget.streamStartEpoch,
-                                                      onLiveSeek: widget.onLiveSeek,
+                                                      onLiveSeek: _liveSeekAbandoningBurst(widget.onLiveSeek),
                                                       serverId: widget.metadata.serverId,
                                                       showQueueTab: canShowQueue,
                                                       onQueueItemSelected: canShowQueue ? _onQueueItemSelected : null,

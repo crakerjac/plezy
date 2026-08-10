@@ -1,10 +1,8 @@
 import 'dart:async';
 
-import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:plezy/i18n/strings.g.dart';
 import 'package:plezy/models/audio_quality_preset.dart';
-import 'package:plezy/models/hotkey_model.dart';
 import 'package:plezy/services/base_shared_preferences_service.dart';
 import 'package:plezy/services/settings_service.dart';
 import 'package:plezy/services/trackers/tracker_constants.dart';
@@ -74,15 +72,6 @@ void main() {
     });
   });
 
-  group('SettingsService keyboard hotkey defaults', () {
-    test('includes Ctrl+S screenshot shortcut', () {
-      final hotkey = SettingsService.defaultKeyboardHotkeys()['screenshot'];
-      expect(hotkey, isNotNull);
-      expect(hotkey!.key, PhysicalKeyboardKey.keyS);
-      expect(hotkey.modifiers, [HotKeyModifier.control]);
-    });
-  });
-
   group('SettingsService mute volume restoration', () {
     test('keeps 37 persisted across mute and restores it on unmute', () async {
       final settings = await SettingsService.getInstance();
@@ -124,14 +113,6 @@ void main() {
 
       expect(unmute.playerVolume, 100);
       expect(unmute.persistedVolume, 100);
-    });
-  });
-
-  group('SettingsService TV card defaults', () {
-    test('full card layout starts disabled', () async {
-      final settings = await SettingsService.getInstance();
-
-      expect(settings.read(SettingsService.tvFullCardLayout), isFalse);
     });
   });
 
