@@ -71,8 +71,21 @@ mixin _JellyfinPlaybackMethods on _JellyfinClientInternals {
     required MediaItem item,
     required MediaSourceInfo mediaSource,
   }) async {
-    // Emby 4.9.5 has neither the `Trickplay` field nor the tile route; its capabilities stop URL construction here.
     if (!capabilities.scrubThumbnails) return null;
+
+    // Emby has neither the `Trickplay` item field nor the tile route; its
+    // preview transport is a Roku-format BIF at `/Videos/{id}/index.bif` —
+    // the same wire format Plex serves, parsed by the same service. A server
+    // whose extraction task has not run answers with a header-only BIF, which
+    // parses to zero frames and leaves the service unavailable.
+    if (dialect == MediaBrowserDialect.emby) {
+      // load() swallows download/parse failures internally; an unavailable
+      // service just suppresses the tooltip.
+      final service = BifThumbnailService();
+      await service.load(() => _downloadEmbyBifFile(item.id), aspectRatio: mediaSource.videoAspectRatio);
+      return service;
+    }
+
     final manifest = mediaSource.trickplayByWidth;
     if (manifest == null || manifest.isEmpty) return null;
     return JellyfinTrickplayService.create(
@@ -81,6 +94,22 @@ mixin _JellyfinPlaybackMethods on _JellyfinClientInternals {
       mediaSourceId: mediaSource.mediaSourceId,
       manifest: manifest,
     );
+  }
+
+  /// Fetch Emby's scrub-preview BIF for [itemId]. [Width] is required by
+  /// Emby's `GET /Videos/{id}/index.bif`; 320 is the width its extraction
+  /// task generates (`<name>-320-10.bif`). Returns null on failure so
+  /// thumbnails stay silently unavailable.
+  Future<Uint8List?> _downloadEmbyBifFile(String itemId) async {
+    try {
+      final bytes = await _http.getBytes(
+        '/Videos/${Uri.encodeComponent(itemId)}/index.bif?Width=320',
+        timeout: const Duration(seconds: 30),
+      );
+      return bytes.isEmpty ? null : bytes;
+    } catch (_) {
+      return null;
+    }
   }
 
   Future<List<MediaMarker>> _fetchMediaSegmentMarkers(String itemId) async {
@@ -154,7 +183,7 @@ mixin _JellyfinPlaybackMethods on _JellyfinClientInternals {
       preferredSignature: options.preferredVersionSignature,
     );
     if (bundle == null) {
-      throw PlaybackException('Item ${metadata.id} returned no MediaSources');
+      throw PlaybackException(t.messages.playbackNoMediaSources, reason: PlaybackFailureReason.noPlayableSource);
     }
     var mediaInfo = jellyfinMediaSourceToMediaSourceInfo(
       bundle.selectedSource,
@@ -500,6 +529,13 @@ mixin _JellyfinPlaybackMethods on _JellyfinClientInternals {
       externalSubtitles.add(
         PlaybackSubtitleSidecar(
           sourceStreamId: track.id,
+          // A real external file is a cheap static fetch, so it loads with the
+          // media whether or not it is selected — that is what lets the track
+          // sheet offer it as a secondary subtitle without a reopen (#1860).
+          // An embedded row extracted on a transcode stays lazy: extraction can
+          // stall while the transcoder spins up, which is exactly what used to
+          // trip the sidecar open guard (#1738).
+          preload: track.isExternalFile,
           track: SubtitleTrack.uri(
             url,
             title:

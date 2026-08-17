@@ -218,6 +218,9 @@ class ExoPlayerCore(private val activity: Activity) :
   private var subtitleAnchorToScreen: Boolean = false
   private var lastSubtitleCues: List<Cue> = emptyList()
 
+  // Retain the inferred composition-plane aspect across empty cue groups.
+  private var bitmapSubtitlePlaneAspect: Float? = null
+
   // Tracks whether a text track was selected on the previous onTracksChanged so we
   // can detect the transition to "no subtitle" and clear the painted overlays (#1387).
   private var hadSelectedTextTrack: Boolean = false
@@ -727,7 +730,9 @@ class ExoPlayerCore(private val activity: Activity) :
       val handler = AssHandler()
       assHandler = handler
 
-      val assParserFactory = AssSubtitleParserFactory(handler)
+      // PGS goes through PgsCompositionParser; media3's parser drops all but one
+      // composition object and blanks palette-only fade updates (#1953).
+      val subtitleParserFactory = PgsSubtitleParserFactory(AssSubtitleParserFactory(handler))
 
       // Wrap extractors: replace MatroskaExtractor with ASS+DV variant,
       // wrap MP4 extractors with DV converter when enabled.
@@ -739,7 +744,7 @@ class ExoPlayerCore(private val activity: Activity) :
         extractorsFactory.createExtractors().map { extractor ->
           when {
             extractor is MatroskaExtractor -> {
-              val assExtractor = ZlibMatroskaExtractor(assParserFactory, handler)
+              val assExtractor = ZlibMatroskaExtractor(subtitleParserFactory, handler)
               val inner = if (doviEnabled) {
                 DoviExtractorWrapper(assExtractor, currentDvMode) { level, prefix, message ->
                   emitLog(level, prefix, message)
@@ -765,7 +770,7 @@ class ExoPlayerCore(private val activity: Activity) :
       }
 
       val mediaSourceFactory = DefaultMediaSourceFactory(dataSourceFactory!!, wrappedExtractorsFactory)
-        .setSubtitleParserFactory(assParserFactory)
+        .setSubtitleParserFactory(subtitleParserFactory)
       playbackMediaSourceFactory = mediaSourceFactory
 
       // Wrap text renderers with subtitle delay support
@@ -1110,9 +1115,29 @@ class ExoPlayerCore(private val activity: Activity) :
   private fun renderSubtitleCues(cues: List<Cue>) {
     val textCues = cues.filter { it.bitmap == null }
     val bitmapCues = cues.filter { it.bitmap != null }
+    updateBitmapSubtitlePlaneAspect(bitmapCues)
     val outgoing = SubtitleCueLayout.layout(textCues, subtitlePositionPercent, subtitleFontSize)
     subtitleView?.setCues(outgoing)
     bitmapSubtitleView?.setCues(bitmapCues)
+  }
+
+  private fun updateBitmapSubtitlePlaneAspect(bitmapCues: List<Cue>) {
+    val inferredAspect = bitmapCues.firstNotNullOfOrNull { cue ->
+      val bitmap = cue.bitmap ?: return@firstNotNullOfOrNull null
+      SubtitleViewLayout.bitmapPlaneAspect(
+        bitmap.width,
+        bitmap.height,
+        cue.size,
+        cue.bitmapHeight
+      )
+    } ?: return
+    val previousAspect = bitmapSubtitlePlaneAspect
+    if (previousAspect != null && kotlin.math.abs(inferredAspect / previousAspect - 1f) <= 0.001f) return
+
+    bitmapSubtitlePlaneAspect = inferredAspect
+    lastVideoSize?.let {
+      updateSubtitleViewSize(it.width, it.height, it.pixelWidthHeightRatio)
+    }
   }
 
   private fun handleIsPlayingChanged(isPlaying: Boolean) {
@@ -1230,12 +1255,13 @@ class ExoPlayerCore(private val activity: Activity) :
       }
     }
 
-    // Disabling the text track produces no trailing empty CueGroup, and no new
-    // video frame re-renders the libass overlay while paused, so the last SRT/VTT
-    // cue stays painted on the SubtitleViews and the last ASS frame stays on the
-    // overlay. AssHandler (registered before this listener) has already nulled the
-    // libass track by now, so re-rendering the last position clears it. Gate on the
-    // transition to avoid redundant clears on every track change. (#1387)
+    // Disabling the text track produces no trailing empty CueGroup, so the last
+    // SRT/VTT cue stays painted on the SubtitleViews. AssHandler (registered
+    // before this listener) has already nulled the libass track by now, so the
+    // invalidate pushes one request through the atlas pipeline, which swaps an
+    // explicit blank frame for a trackless render — required while paused, where
+    // no video frame triggers one. Gate on the transition to avoid redundant
+    // clears on every track change. (#1387, #1884)
     val hasSelectedText = hasSelectedTextTrack(tracks)
     if (!hasSelectedText && hadSelectedTextTrack) {
       lastSubtitleCues = emptyList()
@@ -1767,8 +1793,7 @@ class ExoPlayerCore(private val activity: Activity) :
       videoWidth,
       videoHeight,
       pixelRatio,
-      resizeMode,
-      videoZoomScale
+      bitmapSubtitlePlaneAspect
     )
 
     activity.runOnUiThread {
@@ -3381,6 +3406,7 @@ class ExoPlayerCore(private val activity: Activity) :
     externalSubtitleUris.clear()
     externalSubtitleContainerUris.clear()
     lastSubtitleCues = emptyList()
+    bitmapSubtitlePlaneAspect = null
     hadSelectedTextTrack = false
     audioTrackGroupMap.clear()
     subtitleTrackGroupMap.clear()

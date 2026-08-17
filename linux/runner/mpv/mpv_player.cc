@@ -48,6 +48,12 @@ bool EnsureProcessNumericLocale() {
 // happening.
 constexpr uint64_t kVideoParamsUserdata = UINT64_MAX;
 
+// Runner-internal observation of the decode path mpv actually took. The
+// "silent software fallback" is the one hwdec failure mode with no visible
+// symptom, so every transition is logged with a timestamp from the native
+// side rather than inferred from an overlay readout.
+constexpr uint64_t kHwdecCurrentUserdata = UINT64_MAX - 1;
+
 }  // namespace
 
 // Flutter on Linux uses EGL (OpenGL ES) for both X11 and Wayland.
@@ -360,8 +366,14 @@ bool MpvPlayer::Initialize() {
   // so it has to be set here rather than from Dart.
   mpv_set_option_string(mpv_, "ytdl", "no");
 
-  // Default to warn-level logging
-  mpv_request_log_messages(mpv_, "warn");
+  // Default to info-level logging. The vaapi hwdec probe and the "Using
+  // software decoding" fallback are MSGL_INFO messages, and both are the only
+  // evidence a silently software-decoding session leaves behind; at "warn"
+  // neither ever reaches the app log (mpv_request_log_messages takes a single
+  // global level - there is no per-module syntax here), so a hwdec regression
+  // is indistinguishable from a working one. Debug logging raises this
+  // further via setLogLevel.
+  mpv_request_log_messages(mpv_, "info");
 
   // Initialize mpv.
   int err = mpv_initialize(mpv_);
@@ -386,6 +398,9 @@ bool MpvPlayer::Initialize() {
     // An audio-only core has no video-params to report, so it is not asked.
     source_hdr_metadata_ = SourceHdrMetadata();
     mpv_observe_property(mpv_, kVideoParamsUserdata, "video-params", MPV_FORMAT_NODE);
+    // Which decode path is in use. mpv only emits on change, so each event is
+    // a real transition worth a log line.
+    mpv_observe_property(mpv_, kHwdecCurrentUserdata, "hwdec-current", MPV_FORMAT_STRING);
   }
 
   g_message("MPV: Initialization successful (%s)", audio_only_ ? "audio-only" : "render context deferred");
@@ -504,6 +519,28 @@ bool MpvPlayer::InitRenderContextForSurface(EGLDisplay display, EGLConfig config
       "MPV video plane: GL_VERSION='%s' dispatch_compute=%s image_load_store=%s",
       gl_version ? reinterpret_cast<const char*>(gl_version) : "(null)",
       eglGetProcAddress("glDispatchCompute") ? "yes" : "no", eglGetProcAddress("glBindImageTexture") ? "yes" : "no");
+
+  // Pre-flight the VAAPI dmabuf interop prerequisites. mpv's probe
+  // (dmabuf_interop_gl_init) does not run here - it is lazy, on the first
+  // hardware decode attempt - and its failure never fails
+  // mpv_render_context_create, so a driver that lacks the pieces quietly
+  // decodes everything in software. Naming which prerequisite is missing on
+  // this display/context turns that into a diagnosable one-liner. The three
+  // extensions are the ones the probe requires; EGL_EXT_image_dma_buf_import
+  // is the display-level one, GL_OES_EGL_image is context-level.
+  const char* egl_exts = eglQueryString(display, EGL_EXTENSIONS);
+  const GLubyte* gl_exts = glGetString(GL_EXTENSIONS);
+  const bool has_dma_buf = egl_exts != nullptr && strstr(egl_exts, "EGL_EXT_image_dma_buf_import") != nullptr;
+  const bool has_image_base = egl_exts != nullptr && strstr(egl_exts, "EGL_KHR_image_base") != nullptr;
+  const bool has_oes_egl_image =
+      gl_exts != nullptr && strstr(reinterpret_cast<const char*>(gl_exts), "GL_OES_EGL_image") != nullptr;
+  if (!has_dma_buf || !has_image_base || !has_oes_egl_image) {
+    g_warning(
+        "MPV video plane: VAAPI dmabuf interop prerequisites missing "
+        "(EGL_EXT_image_dma_buf_import=%d EGL_KHR_image_base=%d GL_OES_EGL_image=%d); "
+        "hardware decoding may silently fall back to software",
+        has_dma_buf, has_image_base, has_oes_egl_image);
+  }
 
   // Now that a context is current, the surface's swap interval can be set.
   // eglSwapBuffers runs on the GTK main thread and must never block: at the
@@ -705,7 +742,23 @@ void MpvPlayer::SetPropertyAsync(const std::string& name, const std::string& val
     SetHDREnabled(plezy::mpv_common::ParseEnabledFlag(value), std::move(callback));
     return;
   }
-  plezy::mpv_common::SubmitSetPropertyAsync(mpv_, pending_requests_, name, value, std::move(callback));
+  plezy::mpv_common::SubmitSetPropertyAsync(
+      mpv_, pending_requests_, name, value, [this, name, value, cb = std::move(callback)](int error) mutable {
+        // Native-side attribution for the same failure the platform channel
+        // reports: the HDR transaction's property writes never reach the
+        // channel handler, so without this a refused target-* write leaves
+        // only mpv's error string in the log. Values are truncated the same
+        // way the channel error description is, so a token or URL that lands
+        // in a property value stays bounded.
+        if (error < 0 && !disposed_) {
+          std::string logged = value;
+          if (logged.size() > plezy::mpv_common::kSetPropertyErrorDescriptionLimit) {
+            logged.resize(plezy::mpv_common::kSetPropertyErrorDescriptionLimit);
+          }
+          g_warning("MPV: setProperty '%s'='%s' failed: %s", name.c_str(), logged.c_str(), mpv_error_string(error));
+        }
+        if (cb) cb(error);
+      });
 }
 
 bool MpvPlayer::ReadSourceHdrMetadata(SourceHdrMetadata* out) {
@@ -1005,6 +1058,11 @@ void MpvPlayer::HandleMpvEvent(mpv_event* event) {
       // its own under its own userdata.
       if (event->reply_userdata == kVideoParamsUserdata) {
         UpdateSourceHdrMetadata(&node);
+        break;
+      }
+      if (event->reply_userdata == kHwdecCurrentUserdata) {
+        const char* value = node.format == MPV_FORMAT_STRING ? node.u.string : nullptr;
+        g_message("MPV: hwdec-current=%s", value && value[0] != '\0' ? value : "(none)");
         break;
       }
 

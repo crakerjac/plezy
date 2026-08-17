@@ -177,45 +177,6 @@ class MediaServerHttpClient {
     );
   }
 
-  /// Issue a GET and return only status and headers, draining the body
-  /// unread — the shape for probes that ask "does this answer?" rather than
-  /// "what does it say?".
-  ///
-  /// Unlike [getBytes] the status code is surfaced instead of only logged.
-  /// Unlike [get] nothing is ever decoded, so a body that fails decoding
-  /// cannot convert a status into an exception, and — because
-  /// [FailoverHttpClient] overrides [get] alone — this method structurally
-  /// never enters the endpoint-failover cascade. Non-2xx is returned, not
-  /// thrown, matching [get].
-  Future<MediaServerResponse> getStatus(
-    String url, {
-    Map<String, String>? headers,
-    Duration? timeout,
-    AbortController? abort,
-  }) {
-    return _perform<MediaServerResponse>(
-      'GET',
-      url,
-      headers: headers,
-      timeout: timeout,
-      abort: abort,
-      consume: (streamed, scope) async {
-        final effectiveUri = switch (streamed) {
-          http.BaseResponseWithUrl(:final url) => url,
-          _ => scope.uri,
-        };
-        await scope.receive(streamed.stream.drain<void>());
-        scope.logResponse(streamed.statusCode);
-        return MediaServerResponse(
-          statusCode: streamed.statusCode,
-          headers: streamed.headers,
-          requestUri: scope.uri,
-          effectiveUri: effectiveUri,
-        );
-      },
-    );
-  }
-
   /// Stream-download a URL directly into a file.
   Future<void> downloadFile(
     String url,
@@ -456,10 +417,13 @@ class MediaServerHttpClient {
       return;
     }
 
-    // Content type comes from the caller's headers (Jellyfin/Plex put
-    // `application/json` in their defaults); `request.body` falls back to
-    // text/plain. Don't add one here — `request.headers` is case-insensitive,
-    // and the setter above has already filled the key in either way.
+    // Structured bodies are always JSON-encoded, so default the content type
+    // to match. `request.headers` is case-insensitive and already carries the
+    // caller/default headers, so an explicit content type wins (Jellyfin pins
+    // `application/json` in its defaults). Without this, `request.body` falls
+    // back to text/plain, which Plex's cloud endpoints reject — the favorites
+    // PUT to epg.provider.plex.tv answered 400 (#1878).
+    request.headers.putIfAbsent('content-type', () => 'application/json');
     request.body = jsonEncode(body);
   }
 

@@ -240,6 +240,15 @@ class PlayerNative extends PlayerBase {
         // setProperty() would await _ensureInitialized and deadlock on the
         // memoized future of this very _doInitialize call.
         await invoke('setProperty', {'name': 'gapless-audio', 'value': 'weak'});
+        // ao_audiounit requests mixWithOthers unless audio-exclusive is set,
+        // and a mixable session disqualifies the app from iOS Now Playing —
+        // no lock-screen/headphone controls (#1921). Same contract as the
+        // video path (VideoPlayerScreen sets it at playback start). iOS-only:
+        // elsewhere audio-exclusive means exclusive device access (hog-mode
+        // CoreAudio on macOS, exclusive WASAPI on Windows).
+        if (Platform.isIOS) {
+          await invoke('setProperty', {'name': 'audio-exclusive', 'value': 'yes'});
+        }
       }
 
       if (_nativeCoreUnavailable) throw StateError('Player was disposed during initialization');
@@ -330,22 +339,31 @@ class PlayerNative extends PlayerBase {
       }
     }
 
-    // 'start' must be set before loadfile.
-    if (startPosition.inSeconds > 0) {
-      await setProperty('start', (startPosition.inMilliseconds / 1000.0).toString());
-    } else {
-      await setProperty('start', 'none');
-    }
+    // 'start' must be set before loadfile. These are playback defaults, not
+    // user track selection, and mpv refuses a property write with
+    // MPV_ERROR_PROPERTY_FORMAT when the value fails its option parser — the
+    // same refusal that surfaces as SET_PROPERTY_FAILED on the channel. A
+    // refused default must degrade to mpv's own behaviour, not abort the
+    // open: the loadfile below is what actually starts playback.
+    try {
+      if (startPosition.inSeconds > 0) {
+        await setProperty('start', (startPosition.inMilliseconds / 1000.0).toString());
+      } else {
+        await setProperty('start', 'none');
+      }
 
-    // Prevents race condition that can freeze the video decoder on Android (issue #226).
-    if (!play) {
-      await setProperty('pause', 'yes');
-    }
+      // Prevents race condition that can freeze the video decoder on Android (issue #226).
+      if (!play) {
+        await setProperty('pause', 'yes');
+      }
 
-    // Prevent mpv's own default subtitle selection from racing the
-    // server-backed TrackManager decision applied after tracks are discovered.
-    await setProperty('sid', 'no');
-    await setProperty('secondary-sid', 'no');
+      // Prevent mpv's own default subtitle selection from racing the
+      // server-backed TrackManager decision applied after tracks are discovered.
+      await setProperty('sid', 'no');
+      await setProperty('secondary-sid', 'no');
+    } catch (e) {
+      appLogger.w('MPV: pre-open playback defaults not applied', error: e);
+    }
 
     // Convert content:// URIs to fdclose:// for MPV on Android (SAF SD card
     // downloads). The immediate `loadfile replace` consumes the fd, so no
@@ -1011,6 +1029,17 @@ class PlayerNative extends PlayerBase {
     if (Platform.isAndroid || Platform.isIOS || Platform.isMacOS || Platform.isLinux) {
       await invoke('updateFrame');
     }
+  }
+
+  /// iOS/tvOS scale the native video container instead of mpv's `video-zoom`:
+  /// on the avfoundation VO a nonzero zoom re-renders every frame through
+  /// Core Image, which destroys HDR/Dolby Vision passthrough (DV renders
+  /// near-black on tvOS). macOS keeps the property path — gpu-next zooms
+  /// losslessly in-shader.
+  @override
+  Future<void> setVideoZoom(double scale) async {
+    if (_nativeCoreUnavailable || audioOnly || !Platform.isIOS || !initialized) return;
+    await invoke('setVideoZoom', {'scale': scale});
   }
 
   @override

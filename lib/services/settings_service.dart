@@ -48,6 +48,26 @@ enum ContinueWatchingAction { play, details }
 
 enum EpisodeAction { play, details }
 
+/// How Specials (season 0) are placed in the episode watch order — the
+/// sequence auto-advance, offline next/prev, and "download next N" walk.
+enum SpecialsOrdering {
+  /// Follow the backend's own ordering: Plex builds its server-side show
+  /// queue from `/allLeaves` (aired order, Specials interleaved); Jellyfin's
+  /// `/Shows/{id}/Episodes` order is preserved as returned (Specials placed
+  /// only by explicit `AirsBefore*` metadata, per the server-wide
+  /// `DisplaySpecialsWithinSeasons` setting). Client-side selections with no
+  /// server order (offline queue, downloads, offline OnDeck) fall back to
+  /// Specials-last.
+  respectServer,
+
+  /// Interleave Specials between regular episodes by air date on every
+  /// surface (#1416), the way Plex's own play queue orders a show.
+  airDate,
+
+  /// Specials strictly after the regular seasons on every surface (#1952).
+  specialsLast,
+}
+
 enum SubAssOverride { no, yes, scale, force, strip }
 
 /// Resolution ASS/image subtitles are rasterized at.
@@ -458,6 +478,16 @@ class SettingsService extends BaseSharedPreferencesService {
   /// around.
   static const musicVolume = DoublePref('music_volume', defaultValue: 100.0);
   static const autoPlayNextEpisode = BoolPref('auto_play_next_episode', defaultValue: true);
+
+  /// Where Specials (season 0) land in the episode watch order (#1416/#1952).
+  /// Consumed by [sortEpisodesByWatchOrder] (Jellyfin online queue, offline
+  /// next/prev, download/sync "next N", offline OnDeck, Plex fallback queue)
+  /// and by the Plex show play-queue source URI.
+  static const specialsOrdering = EnumPref<SpecialsOrdering>(
+    'specials_ordering',
+    values: SpecialsOrdering.values,
+    defaultValue: SpecialsOrdering.respectServer,
+  );
   static const useExoPlayer = BoolPref('use_exoplayer', defaultValue: true);
   static const startupSection = EnumPref<NavigationTabId>(
     'startup_section',
@@ -470,6 +500,10 @@ class SettingsService extends BaseSharedPreferencesService {
   /// keep working while the tab is hidden.
   static const showExploreTab = BoolPref('show_explore_tab', defaultValue: true);
   static const alwaysKeepSidebarOpen = BoolPref('always_keep_sidebar_open');
+
+  /// Sidebar Libraries section expansion. Persisted so a collapsed section
+  /// stays collapsed across launches instead of springing back open (#1896).
+  static const librariesSectionExpanded = BoolPref('libraries_section_expanded', defaultValue: true);
   static const showUnwatchedCount = BoolPref('show_unwatched_count', defaultValue: true);
   static const showEpisodeNumberOnCards = BoolPref('show_episode_number_on_cards', defaultValue: true);
   static const showSeasonPostersOnTabs = BoolPref('show_season_posters_on_tabs');
@@ -944,10 +978,12 @@ class SettingsService extends BaseSharedPreferencesService {
     dvConversionMode,
     musicVolume,
     autoPlayNextEpisode,
+    specialsOrdering,
     useExoPlayer,
     startupSection,
     showExploreTab,
     alwaysKeepSidebarOpen,
+    librariesSectionExpanded,
     showUnwatchedCount,
     showEpisodeNumberOnCards,
     showSeasonPostersOnTabs,

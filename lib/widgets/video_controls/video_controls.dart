@@ -41,6 +41,7 @@ import '../../mpv/mpv.dart';
 import '../overlay_sheet.dart';
 import '../../focus/dpad_navigator.dart';
 import '../../focus/focus_navigation_intent.dart';
+import '../../focus/transport_keys.dart';
 
 import '../../database/app_database.dart';
 import '../../media/media_backend.dart';
@@ -300,6 +301,7 @@ class PlayerNavigationCoordinator {
   final bool Function() isChromePresented;
   final Future<bool> Function() exitFullscreenIfActive;
   final bool Function() _physicalEscapeExitsFullscreen;
+  final bool Function() _exitPlayerBeforeChrome;
   final VoidCallback exitPlayer;
   final VoidCallback navigateHome;
   final bool Function() isActive;
@@ -313,14 +315,17 @@ class PlayerNavigationCoordinator {
     required this.isChromePresented,
     required this.exitFullscreenIfActive,
     bool Function()? physicalEscapeExitsFullscreen,
+    bool Function()? exitPlayerBeforeChrome,
     required this.exitPlayer,
     required this.navigateHome,
     bool Function()? isActive,
   }) : _physicalEscapeExitsFullscreen = physicalEscapeExitsFullscreen ?? _alwaysTrue,
+       _exitPlayerBeforeChrome = exitPlayerBeforeChrome ?? _alwaysFalse,
        isActive = isActive ?? _alwaysActive;
 
   static bool _alwaysActive() => true;
   static bool _alwaysTrue() => true;
+  static bool _alwaysFalse() => false;
 
   void handle(PlayerNavigationKey navigationKey) {
     if (navigationKey == PlayerNavigationKey.home) {
@@ -329,6 +334,12 @@ class PlayerNavigationCoordinator {
     }
     if (isPromptOpen()) {
       dismissPrompt();
+      return;
+    }
+    if (navigationKey == PlayerNavigationKey.back && _exitPlayerBeforeChrome()) {
+      // Mobile Back exits even with the chrome up (#1938); the staged
+      // strip/fullscreen/hide/exit chain is TV and desktop behavior.
+      exitPlayer();
       return;
     }
     final disposition = resolvePlayerBackDisposition(
@@ -479,20 +490,6 @@ bool shouldSkipDuplicateTimelineSeek({required Duration? lastDispatchedSeek, req
   return lastDispatchedSeek == finalSeek;
 }
 
-/// A user transport intent. `play`/`pause` are *directed* — a remote with
-/// dedicated buttons must not flip the state it explicitly asked for.
-enum TransportCommand { play, pause, toggle }
-
-/// Maps hardware media transport keys to their intent. Returns null for keys
-/// that are not transport keys (including the configured play/pause hotkey,
-/// which callers resolve to [TransportCommand.toggle] themselves).
-TransportCommand? classifyTransportKey(LogicalKeyboardKey key) {
-  if (key == LogicalKeyboardKey.mediaPlay) return TransportCommand.play;
-  if (key == LogicalKeyboardKey.mediaPause) return TransportCommand.pause;
-  if (key == LogicalKeyboardKey.mediaPlayPause) return TransportCommand.toggle;
-  return null;
-}
-
 /// Directional seeking with the chrome hidden owns the whole key burst —
 /// repeats accelerate in place rather than escalating to the timeline — so
 /// both the initial press and its repeats perform a step.
@@ -634,6 +631,12 @@ class PlexVideoControls extends StatefulWidget {
   @visibleForTesting
   final List<MediaChapter>? initialChapters;
 
+  /// Seeds the marker list so widget tests can exercise skip-marker behaviour
+  /// without a media-server client. Production always loads through
+  /// [VideoControlsPlaybackExtrasLoader].
+  @visibleForTesting
+  final List<MediaMarker>? initialMarkers;
+
   const PlexVideoControls({
     super.key,
     required this.player,
@@ -641,6 +644,7 @@ class PlexVideoControls extends StatefulWidget {
     required this.metadata,
     required this.toastController,
     this.initialChapters,
+    this.initialMarkers,
     this.onNext,
     this.onPrevious,
     this.availableVersions = const [],
@@ -788,8 +792,8 @@ class _PlexVideoControlsState extends State<PlexVideoControls>
   int _hiddenSeekRepeatCount = 0;
   // Current marker state
   MediaMarker? _currentMarker;
-  List<MediaMarker> _markers = [];
-  bool _markersLoaded = false;
+  late List<MediaMarker> _markers = widget.initialMarkers ?? [];
+  late bool _markersLoaded = widget.initialMarkers != null;
   // Playback state subscription for auto-hide timer
   StreamSubscription<bool>? _playingSubscription;
   // Completed subscription to show controls when video ends

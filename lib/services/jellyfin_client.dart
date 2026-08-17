@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:http/http.dart' as http;
@@ -56,6 +57,7 @@ import 'jellyfin_auth_header.dart';
 import 'jellyfin_endpoint_discovery.dart';
 import '../media/download_resolution.dart';
 import 'api_cache.dart';
+import 'bif_thumbnail_service.dart';
 import 'download_artwork_helpers.dart';
 import 'jellyfin_api_cache.dart';
 import 'jellyfin_mappers.dart';
@@ -66,6 +68,7 @@ import 'jellyfin_trickplay_service.dart';
 import 'media_browser_paths.dart';
 import 'playback_initialization_types.dart';
 import 'scrub_preview_source.dart';
+import 'settings_service.dart' show SpecialsOrdering;
 import 'subtitle_preference.dart';
 import 'track_selection_service.dart';
 import '../mpv/mpv.dart';

@@ -53,6 +53,13 @@ extension _VideoPlayerEpisodeNavigationMethods on VideoPlayerScreenState {
     if (!mounted) return;
     if (_nextEpisode == null || _isLoadingNext) return;
 
+    // EOF-driven advances (prompt confirm, auto-play countdown, PiP) run with
+    // the completion latch set; a mid-episode Next press does not. Captured
+    // before the prompt state below is cleared — a transiently failed advance
+    // from EOF re-presents the Play Next prompt instead of parking on the
+    // finished episode's last frame (#1867).
+    final wasAtCompletion = _completionLatch.triggered;
+
     _autoPlayTimer?.cancel();
     _unfocusPlayNextPrompt();
     _dismissStillWatching();
@@ -64,7 +71,10 @@ extension _VideoPlayerEpisodeNavigationMethods on VideoPlayerScreenState {
       _showPlayNextDialog = false;
     });
 
-    await _navigateToEpisode(_nextEpisode!);
+    final outcome = await _navigateToEpisode(_nextEpisode!);
+    if (outcome == _MediaReloadOutcome.failed) {
+      _presentPlayNextRetryPrompt(wasAtCompletion: wasAtCompletion);
+    }
   }
 
   Future<void> _playPrevious() async {
@@ -132,11 +142,17 @@ extension _VideoPlayerEpisodeNavigationMethods on VideoPlayerScreenState {
   }
 
   /// Navigates to a new episode by reusing the current player whenever possible.
-  Future<void> _navigateToEpisode(MediaItem episodeMetadata) async {
+  ///
+  /// Returns the reload outcome so [_playNext] can distinguish a failed
+  /// in-place swap (previous session still on screen) from rejected or
+  /// superseded attempts. The screen-replacement fallback reports
+  /// [_MediaReloadOutcome.rejected]: no in-place reload ran.
+  Future<_MediaReloadOutcome> _navigateToEpisode(MediaItem episodeMetadata) async {
+    _lastMediaReloadFailureReason = null;
     final currentPlayer = player;
     if (currentPlayer == null) {
       if (mounted) unawaited(_replaceScreenWithPlayer(episodeMetadata));
-      return;
+      return _MediaReloadOutcome.rejected;
     }
 
     // Callers fire this without awaiting (auto-play countdown, PiP, the prompt), so an escaping
@@ -174,7 +190,7 @@ extension _VideoPlayerEpisodeNavigationMethods on VideoPlayerScreenState {
               nativeTrack: currentPlayer.state.track.secondarySubtitle,
               sessionPreference: _sessionSecondarySubtitlePreference,
             );
-      await _reloadMediaInPlace(
+      return await _reloadMediaInPlace(
         metadata: episodeMetadata,
         selectedMediaIndex: _effectiveSelectedMediaIndex,
         selectedMediaSourceId: null,
@@ -193,6 +209,7 @@ extension _VideoPlayerEpisodeNavigationMethods on VideoPlayerScreenState {
       appLogger.e('Failed to navigate to the next item', error: e, stackTrace: stackTrace);
       _clearEpisodeLoadingFlags();
       if (mounted) showErrorSnackBar(context, t.messages.errorLoading(error: e.toString()));
+      return _MediaReloadOutcome.failed;
     }
   }
 
@@ -324,7 +341,10 @@ extension _VideoPlayerEpisodeNavigationMethods on VideoPlayerScreenState {
       if ((isSubtitleChange && isPlexBacked) || (isAudioChange && isPlexBacked)) {
         final partId = _currentMediaInfo?.partId;
         if (streamSelectClient == null || partId == null) {
-          throw StateError('No Plex part available for stream selection');
+          throw PlaybackException(
+            t.messages.streamSelectionUnavailable,
+            reason: PlaybackFailureReason.invalidPlaybackData,
+          );
         }
         final saved = await streamSelectClient.selectStreams(
           partId,
@@ -339,7 +359,7 @@ extension _VideoPlayerEpisodeNavigationMethods on VideoPlayerScreenState {
           allParts: true,
         );
         if (!saved) {
-          throw StateError('Failed to select streams');
+          throw PlaybackException(t.messages.streamSelectionFailed);
         }
         if (!isCurrentSourceSwitch()) return PlaybackSourceChangeOutcome.superseded;
       }
@@ -692,7 +712,6 @@ extension _VideoPlayerEpisodeNavigationMethods on VideoPlayerScreenState {
             preferredSubtitleTrack: initializationSubtitleTrack,
             sessionIdentifier: _playbackSessionIdentifier,
             transcodeSessionId: _playbackTranscodeSessionId,
-            transcodeOffset: openResumePosition,
           ),
           offlineLibraryMode: _offlineLibraryMode,
         );
@@ -703,7 +722,7 @@ extension _VideoPlayerEpisodeNavigationMethods on VideoPlayerScreenState {
         final streamHeaders = playbackContext.streamHeaders;
 
         if (result.videoUrl == null) {
-          throw PlaybackException('No video URL available');
+          throw PlaybackException(t.messages.noVideoUrl, reason: PlaybackFailureReason.noPlayableSource);
         }
         if (result.isOffline && !_offlineLibraryMode) {
           // The pre-resolve lookup assumed an online source; a download won
@@ -716,7 +735,7 @@ extension _VideoPlayerEpisodeNavigationMethods on VideoPlayerScreenState {
           );
           if (!isCurrentReload()) return _MediaReloadOutcome.superseded;
         }
-        var subtitleSelection = await _resolveSubtitleSelectionForOpen(
+        final subtitleSelection = await _resolveSubtitleSelectionForOpen(
           metadata: metadata,
           result: result,
           preferredAudioTrack: initializationAudioTrack,
@@ -732,7 +751,7 @@ extension _VideoPlayerEpisodeNavigationMethods on VideoPlayerScreenState {
         // Build the replacement session now, commit it only once open()
         // succeeds — until then every session-derived getter still describes
         // the item that is actually playing.
-        var session = PlaybackSession.fromContext(
+        final session = PlaybackSession.fromContext(
           playbackContext,
           requestedQualityPreset: targetQualityPreset,
           requestedMediaSourceId: selectedMediaSourceId,
@@ -742,84 +761,85 @@ extension _VideoPlayerEpisodeNavigationMethods on VideoPlayerScreenState {
           showErrorSnackBar(context, t.videoControls.transcodeUnavailableFallback);
         }
 
-        final displayCriteria = result.mediaInfo?.displayCriteria;
         final settingsService = await SettingsService.getInstance();
         if (!isCurrentReload()) return _MediaReloadOutcome.superseded;
 
-        // Same pre-open frame-rate orchestration as the initial start flow —
-        // including the Android MPV startup decoder refresh, whose gate is
-        // armed before open and released after track setup below.
-        final frameRatePlan = await _prepareFrameRateForOpen(
+        // Shared open orchestration with the initial start flow
+        // ([_openResolvedMedia]) — including the Android MPV startup decoder
+        // refresh, whose gate is armed before open and released after track
+        // setup.
+        final flow = await _openResolvedMedia(
           currentPlayer: currentPlayer,
           settingsService: settingsService,
-          preKnownFps: displayCriteria?.fps,
-          preKnownWidth: displayCriteria?.width ?? 0,
-          preKnownHeight: displayCriteria?.height ?? 0,
-          hasVideoUrl: true,
-          isTranscoding: result.isTranscoding,
-          ensureAudioFocus: () => currentPlayer.requestAudioFocus(),
-        );
-        if (frameRatePlan == null || !isCurrentReload()) {
-          return _MediaReloadOutcome.superseded;
-        }
-        _frameRate.resetForNewItem();
-        if (frameRatePlan.countsAsApplied) _frameRate.applied = true;
-
-        await _primeDisplayCriteria(
-          player: currentPlayer,
-          settingsService: settingsService,
-          displayCriteria: displayCriteria,
-          isTranscoding: result.isTranscoding,
-        );
-        if (!isCurrentReload()) return _MediaReloadOutcome.superseded;
-        final openTiming = _playbackOpenTiming(
-          isTranscoding: result.isTranscoding,
-          resumePosition: openResumePosition,
-          durationMs: metadata.durationMs,
-        );
-        _progressTracker?.stopTracking();
-        _progressTracker?.dispose();
-        _progressTracker = null;
-        unawaited(DiscordRPCService.instance.stopPlayback());
-        unawaited(TrackerCoordinator.instance.stopPlayback());
-        if (!isCurrentReload()) return _MediaReloadOutcome.superseded;
-
-        // Generation invalidation prevents follow-on selection calls, but a
-        // native audio/subtitle/rate mutation may already have been
-        // dispatched. Drain exactly that captured operation before reusing
-        // the player for replacement media, otherwise its late completion can
-        // mutate the replacement item's tracks.
-        await attempt.trackMutationDrain;
-        if (!isCurrentReload()) return _MediaReloadOutcome.superseded;
-
-        frameRatePlan.armStartupRefreshGate(currentPlayer);
-        final externalSubtitlePlan = _prepareExternalSubtitleOpenPlan(
-          player: currentPlayer,
-          externalSubtitles: subtitleSelection.sidecarsAtOpen,
-        );
-        var effectiveExternalSubtitlePlan = externalSubtitlePlan;
-        await _awaitTranscodeReadiness(
-          client: mediaClient,
-          isTranscoding: result.isTranscoding,
-          videoUrl: result.videoUrl!,
-        );
-        if (!isCurrentReload()) return _MediaReloadOutcome.superseded;
-        final openResult = await _openMediaOnPlayer(
-          player: currentPlayer,
-          settingsService: settingsService,
-          videoUrl: result.videoUrl!,
-          isTranscoding: result.isTranscoding,
+          metadata: metadata,
+          result: result,
+          session: session,
+          subtitleSelection: subtitleSelection,
+          headers: result.usesLocalMedia ? null : streamHeaders,
           // Not _isOfflinePlayback: the replacement session commits later, in
           // onOpened, so the getter still describes the previous item here.
           isLocalMedia: _offlineLibraryMode || result.usesLocalMedia,
-          selectedVersion: result.selectedVersion,
-          timing: openTiming,
-          headers: result.usesLocalMedia ? null : streamHeaders,
-          // The vehicle is not consulted here: `_openMediaOnPlayer` reads it at the `player.open`
-          // itself, which is after this and its own awaited tuning work.
-          play: shouldAutoStart && !frameRatePlan.holdPlaybackStart && externalSubtitlePlan.canStartBeforeTrackSetup,
-          externalSubtitlesAtOpen: externalSubtitlePlan.subtitlesAtOpen,
-          shouldContinue: isCurrentReload,
+          isCurrent: isCurrentReload,
+          staleGuard: isCurrentReload,
+          // Captured before the reload detached the player from the sync
+          // layer; a live read would see the detached state.
+          watchTogetherOwnsStart: () => wtOwnsStart,
+          resolveShouldAutoStart: (_) => shouldAutoStart,
+          resumePosition: () => openResumePosition,
+          plexClient: () => plexClient,
+          getProfileSettings: () => userProfileProvider.profileSettings,
+          preferredAudioTrack: initializationAudioTrack,
+          primarySubtitleTranscoding: () => result.isTranscoding,
+          ensureAudioFocus: () => currentPlayer.requestAudioFocus(),
+          clearFirstFrameForOpen: false,
+          deferAutomotiveStart: false,
+          beforeArm: () async {
+            if (!isCurrentReload()) return false;
+            _progressTracker?.stopTracking();
+            _progressTracker?.dispose();
+            _progressTracker = null;
+            unawaited(DiscordRPCService.instance.stopPlayback());
+            unawaited(TrackerCoordinator.instance.stopPlayback());
+            if (!isCurrentReload()) return false;
+
+            // Generation invalidation prevents follow-on selection calls,
+            // but a native audio/subtitle/rate mutation may already have
+            // been dispatched. Drain exactly that captured operation before
+            // reusing the player for replacement media, otherwise its late
+            // completion can mutate the replacement item's tracks.
+            await attempt.trackMutationDrain;
+            return isCurrentReload();
+          },
+          afterMediaOpened: (_, _, _) async {
+            _completionLatch.reset();
+            if (isItemChange) {
+              // Same-item reloads (including the spurious-EOF recovery itself
+              // and quality switches) keep the spent budget — that is the
+              // loop guard.
+              _spuriousEofRecoveryAttempts = 0;
+              _spuriousEofRecoveryBaselineMs = null;
+            }
+
+            // Versions/mediaInfo come from the committed session; rebuild so
+            // the controls pick them up. Same-part switches
+            // (quality/audio/subtitle) keep the scrub-preview source —
+            // BIF/trickplay is per part, so a reset would re-download
+            // identical bytes.
+            final reusesScrubPreview =
+                previousMetadata.globalKey == metadata.globalKey &&
+                previousPartId != null &&
+                previousPartId == result.mediaInfo?.partId;
+            if (reusesScrubPreview) {
+              _setPlayerState(() {});
+            } else {
+              _resetScrubPreviewForNewItem(metadata: metadata, mediaInfo: result.mediaInfo, mediaClient: mediaClient);
+            }
+            _clearEpisodeLoadingFlags();
+            if (isItemChange) _showChromeForSwappedItem();
+
+            _trackManager?.dispose();
+            return true;
+          },
           onOpening: () {
             _hasRenderedFirstFrame = false;
             // 503s observed from here on belong to the replacement open.
@@ -832,100 +852,7 @@ extension _VideoPlayerEpisodeNavigationMethods on VideoPlayerScreenState {
             _commitPlaybackSession(session);
           },
         );
-        // A false didOpen means shouldContinue stopped the sequence pre-open
-        // (open failures throw into the catch below) — superseded either way.
-        if (!openResult.didOpen || !isCurrentReload()) {
-          return _MediaReloadOutcome.superseded;
-        }
-        if (openResult.sidecarFallbackUsed) {
-          session = _commitSidecarFallbackSession(session);
-          subtitleSelection = session.subtitleSelection;
-          effectiveExternalSubtitlePlan = _prepareExternalSubtitleOpenPlan(
-            player: currentPlayer,
-            externalSubtitles: const [],
-          );
-        }
-        _completionLatch.reset();
-        if (isItemChange) {
-          // Same-item reloads (including the spurious-EOF recovery itself and
-          // quality switches) keep the spent budget — that is the loop guard.
-          _spuriousEofRecoveryAttempts = 0;
-          _spuriousEofRecoveryBaselineMs = null;
-        }
-
-        // Versions/mediaInfo come from the committed session; rebuild so the
-        // controls pick them up. Same-part switches (quality/audio/subtitle)
-        // keep the scrub-preview source — BIF/trickplay is per part, so a
-        // reset would re-download identical bytes.
-        final reusesScrubPreview =
-            previousMetadata.globalKey == metadata.globalKey &&
-            previousPartId != null &&
-            previousPartId == result.mediaInfo?.partId;
-        if (reusesScrubPreview) {
-          _setPlayerState(() {});
-        } else {
-          _resetScrubPreviewForNewItem(metadata: metadata, mediaInfo: result.mediaInfo, mediaClient: mediaClient);
-        }
-        _clearEpisodeLoadingFlags();
-        if (isItemChange) _showChromeForSwappedItem();
-
-        _trackManager?.dispose();
-        final trackManager = _buildTrackManager(
-          forPlayer: currentPlayer,
-          metadata: metadata,
-          plexClient: plexClient,
-          getProfileSettings: () => userProfileProvider.profileSettings,
-          preferredAudioTrack: initializationAudioTrack,
-          // A declined carry stays alive for the native passes: freezing the
-          // resolver's off verdict here would turn a metadata mismatch into a
-          // navigation-priority off that no late track can undo (#1785).
-          preferredSubtitleTrack:
-              subtitleSelection.declinedPreference ?? SubtitlePreference.trackOrNull(subtitleSelection.primaryTrack),
-          preferredSecondarySubtitleTrack: SubtitlePreference.trackOrNull(subtitleSelection.secondaryTrack),
-          // A source-backed primary with no sidecar on a transcode is one the server burned into
-          // the picture: it is already visible, and no native track will ever arrive to match it.
-          primarySubtitleIsServerRendered:
-              result.isTranscoding &&
-              subtitleSelection.primarySourceStreamId != null &&
-              subtitleSelection.primarySidecar == null,
-        );
-        _trackManager = trackManager;
-        trackManager.cacheExternalSubtitles(subtitleSelection.sidecarsAtOpen);
-
-        final resumeForStartupFrame =
-            shouldAutoStart && frameRatePlan.needsStartupRefresh && effectiveExternalSubtitlePlan.requiresPostOpenAdd;
-        await _applyTracksAfterOpen(
-          trackManager: trackManager,
-          externalSubtitlePlan: effectiveExternalSubtitlePlan,
-          // Same guard as the start path: don't resume a player a newer flow
-          // owns, and let a pending startup gate (or Watch Together's group
-          // start) own the resume instead. Post-open external-subtitle paths
-          // resume once here so the startup refresh gate can observe a frame.
-          shouldResumeAfterSubtitleLoad: () =>
-              shouldAutoStart &&
-              (!frameRatePlan.holdPlaybackStart || resumeForStartupFrame) &&
-              mounted &&
-              player == currentPlayer,
-          applySelectionWhenResumeSkipped: !shouldAutoStart && !frameRatePlan.holdPlaybackStart,
-        );
-        if (!isCurrentReload()) return _MediaReloadOutcome.superseded;
-
-        await _releaseFrameRateStartupGate(
-          currentPlayer: currentPlayer,
-          settingsService: settingsService,
-          plan: frameRatePlan,
-          // Paused reloads use the same no-resume branch as an externally
-          // coordinated start: track selection is armed without manufacturing
-          // a new play intent.
-          resumeAfterStartupGate: (reason) => _finishPlaybackAfterStartupGate(
-            currentPlayer: currentPlayer,
-            externalSubtitlePlan: effectiveExternalSubtitlePlan,
-            reason: reason,
-            shouldResume: shouldAutoStart,
-            watchTogetherOwnsStart: wtOwnsStart,
-          ),
-          playbackResumedForStartupFrame: resumeForStartupFrame,
-        );
+        if (flow == null) return _MediaReloadOutcome.superseded;
         if (!isCurrentReload()) return _MediaReloadOutcome.superseded;
 
         // Same helper as the initial start flow, so any future change lands in
@@ -943,6 +870,9 @@ extension _VideoPlayerEpisodeNavigationMethods on VideoPlayerScreenState {
           _nextEpisode = null;
           _previousEpisode = null;
           _nextEpisodeStatus = QueueNavigationStatus.failed;
+          // A successful swap restores the transient-retry budget for the
+          // next transition (#1867).
+          _playNextTransientRetryCount = 0;
         });
 
         try {
@@ -960,6 +890,11 @@ extension _VideoPlayerEpisodeNavigationMethods on VideoPlayerScreenState {
         return _MediaReloadOutcome.opened;
       } catch (e) {
         if (!isCurrentReload()) return _MediaReloadOutcome.superseded;
+        // Record the classified reason so _playNext can re-present the Play
+        // Next prompt when an EOF-driven advance merely hit a transient
+        // server blip (#1867). Non-PlaybackException throws stay null —
+        // they never qualify for a retry prompt.
+        _lastMediaReloadFailureReason = e is PlaybackException ? e.reason : null;
         _completionLatch.reset();
         if (!didOpenReplacement) {
           // Nothing was opened: the previous session is still committed, so

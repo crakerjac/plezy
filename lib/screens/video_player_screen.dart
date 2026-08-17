@@ -75,7 +75,6 @@ import '../providers/shader_provider.dart';
 import '../providers/user_profile_provider.dart';
 import '../utils/app_logger.dart';
 import '../utils/dialogs.dart';
-import '../utils/media_server_http_client.dart' show AbortController;
 import '../utils/log_redaction_manager.dart';
 import '../utils/live_tv_player_navigation.dart';
 import '../utils/player_utils.dart';
@@ -106,6 +105,7 @@ import '../focus/input_mode_tracker.dart';
 import '../focus/dpad_navigator.dart';
 import '../focus/focus_navigation_intent.dart';
 import '../focus/key_event_utils.dart';
+import '../focus/transport_keys.dart';
 import '../i18n/strings.g.dart';
 import '../watch_together/providers/watch_together_provider.dart';
 
@@ -162,8 +162,19 @@ const _appInterceptedMpvProperties = {'hdr-enabled', 'hdr-tone-mapping'};
 /// everywhere else, nothing caches them there, and no other platform exposes a
 /// UI control for them - so withholding them off Linux would remove the user's
 /// only way to set them and point the log at a control they do not have.
+/// The windowed-VO family. Embedded video is pinned to vo=libmpv (the render
+/// API the plane and every other embedded surface are created against); a
+/// config line switching `vo` — or the `gpu-context`/`gpu-api` it rides on —
+/// makes mpv re-create its output as a separate, uncontrollable window and
+/// orphans the embedded render context. vo=gpu-next is windowed by
+/// construction and compute shaders (ArtCNN) need it, so no embedded vo is
+/// worth accepting; the skip log for these names says that instead of pointing
+/// at the HDR settings.
+const _appEmbeddedOwnedMpvProperties = {'vo', 'gpu-context', 'gpu-api'};
+
 const _appOwnedMpvProperties = {
   ..._appInterceptedMpvProperties,
+  ..._appEmbeddedOwnedMpvProperties,
   'target-trc',
   'target-prim',
   'target-peak',
@@ -462,6 +473,9 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
   // Retryable sentinel until the fire-and-forget initial adjacency load
   // commits found, boundary, or unavailable.
   QueueNavigationStatus _nextEpisodeStatus = QueueNavigationStatus.failed;
+  // globalKey of the adjacent episode whose playback metadata row was last
+  // prefetched into the API cache — see _primeNextEpisodePlaybackMetadata.
+  String? _primedNextEpisodeGlobalKey;
   bool _isResolvingCompletionAdjacency = false;
   bool _isLoadingNext = false;
   bool _isLoadingPrevious = false;
@@ -473,9 +487,6 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
   Completer<void>? _playbackTransitionIdleCompleter;
   bool _playbackIntentShouldPlay = true;
 
-  /// In-flight transcode readiness probe, aborted by the next probe or by
-  /// dispose so a superseded open never leaves it polling out its window.
-  AbortController? _transcodeReadinessAbort;
   int _pendingSubtitleCycleCount = 0;
   bool _subtitleCycleDrainActive = false;
 
@@ -572,6 +583,15 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
   Timer? _autoPlayTimer;
   int _autoPlayCountdown = 5;
 
+  // Transient episode-transition failure retry (#1867). A failed in-place
+  // reload records the classified reason here so _playNext can distinguish
+  // "server momentarily unreachable" (re-present the Play Next prompt,
+  // optionally with an auto-retry countdown) from terminal failures.
+  // _navigateToEpisode clears the field before each attempt; the counter
+  // resets when a reload succeeds.
+  PlaybackFailureReason? _lastMediaReloadFailureReason;
+  int _playNextTransientRetryCount = 0;
+
   // End-of-video Play Next latch. Completion comes from the player EOF signal;
   // position ticks only re-arm once playback is more than 2s from the end.
   final CompletionLatch _completionLatch = CompletionLatch(rearmWindowMs: 2000);
@@ -641,6 +661,14 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
   /// (assistant overlay, HDMI-CEC events) so quick app switches don't churn
   /// codecs.
   static const Duration _tvBackgroundPlayerSuspendGrace = Duration(seconds: 30);
+
+  /// Redelivery schedule for the suspend-time stopped report. Standby entry
+  /// can drop Wi-Fi into power-save and stall exactly that connect, and
+  /// mutations deliberately never fail over ([FailoverHttpClient]), so the
+  /// one report the suspend exists for gets a bounded retry window instead
+  /// of a single fail-fast attempt.
+  static const Duration _tvBackgroundStopReportRetryDelay = Duration(seconds: 10);
+  static const int _tvBackgroundStopReportMaxRetries = 5;
   Timer? _tvBackgroundPlayerSuspendTimer;
   bool _playerSuspendedForTvBackground = false;
   Duration? _tvBackgroundSuspendPosition;
@@ -900,6 +928,11 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
       dismissPrompt: _dismissPlaybackPromptForBack,
       isChromePresented: () =>
           _isPlayerInitialized && player != null && _hasFirstFrame.value && _chromeController.controlsPresented,
+      // On phones a Back must exit the player even with the controls up
+      // (#1938); the staged chrome handling is TV/desktop behavior (#4443b761
+      // applied it to the phone system-back path too, so back stopped
+      // closing the player).
+      exitPlayerBeforeChrome: () => PlatformDetector.isMobile(context),
       exitFullscreenIfActive: FullscreenStateManager().exitFullscreenIfActive,
       // macOS fullscreen belongs to the app window, while HTPC-style player
       // navigation treats physical Escape as semantic Back. In both cases the
@@ -1307,13 +1340,6 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
             preferredSubtitleTrack: _preferredSubtitleTrack,
             sessionIdentifier: _playbackSessionIdentifier,
             transcodeSessionId: _playbackTranscodeSessionId,
-            // The initial resume position is the server view offset (the
-            // online open resolves the same value later), so a resumed
-            // transcode starts producing at the resume point instead of
-            // seeking a stream that begins at zero.
-            transcodeOffset: _currentMetadata.viewOffsetMs != null
-                ? Duration(milliseconds: _currentMetadata.viewOffsetMs!)
-                : null,
           ),
           offlineLibraryMode: false,
         );
@@ -1396,29 +1422,55 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
       }
       await currentPlayer.setProperty('hwdec', _getHwdecValue(enableHardwareDecoding));
 
-      await currentPlayer.setProperty(
-        'sub-font-size',
-        settingsService.read(SettingsService.subtitleFontSize).toString(),
-      );
-      await currentPlayer.setProperty('sub-color', settingsService.read(SettingsService.subtitleTextColor));
-      await currentPlayer.setProperty(
-        'sub-border-size',
-        settingsService.read(SettingsService.subtitleBorderSize).toString(),
-      );
-      await currentPlayer.setProperty('sub-border-color', settingsService.read(SettingsService.subtitleBorderColor));
-      await currentPlayer.setProperty('sub-bold', settingsService.read(SettingsService.subtitleBold) ? 'yes' : 'no');
-      await currentPlayer.setProperty(
-        'sub-italic',
-        settingsService.read(SettingsService.subtitleItalic) ? 'yes' : 'no',
-      );
-      final bgOpacity = (settingsService.read(SettingsService.subtitleBackgroundOpacity) * 255 / 100).toInt();
-      final bgColor = settingsService.read(SettingsService.subtitleBackgroundColor).replaceFirst('#', '');
-      await currentPlayer.setProperty(
-        'sub-back-color',
-        '#${bgOpacity.toRadixString(16).padLeft(2, '0').toUpperCase()}$bgColor',
-      );
-      if (settingsService.read(SettingsService.subtitleBackgroundOpacity) > 0) {
-        await currentPlayer.setProperty('sub-border-style', 'background-box');
+      // Subtitle styling is a preference, never a reason to fail playback.
+      // mpv 0.40's OPT_COLOR parser accepts only #RRGGBB/#AARRGGBB (or
+      // r/g/b/a floats), so a stored colour that does not parse would make
+      // mpv refuse the write - and, unwrapped, that refusal aborts player
+      // initialization on every open. Values are sanitized first, and
+      // whatever is left is a logged warning with mpv keeping its own
+      // default styling.
+      try {
+        await currentPlayer.setProperty(
+          'sub-font-size',
+          settingsService.read(SettingsService.subtitleFontSize).toString(),
+        );
+        await currentPlayer.setProperty(
+          'sub-color',
+          _sanitizedSubtitleColor(
+            settingsService.read(SettingsService.subtitleTextColor),
+            SettingsService.subtitleTextColor.defaultValue,
+          ),
+        );
+        await currentPlayer.setProperty(
+          'sub-border-size',
+          settingsService.read(SettingsService.subtitleBorderSize).toString(),
+        );
+        await currentPlayer.setProperty(
+          'sub-border-color',
+          _sanitizedSubtitleColor(
+            settingsService.read(SettingsService.subtitleBorderColor),
+            SettingsService.subtitleBorderColor.defaultValue,
+          ),
+        );
+        await currentPlayer.setProperty('sub-bold', settingsService.read(SettingsService.subtitleBold) ? 'yes' : 'no');
+        await currentPlayer.setProperty(
+          'sub-italic',
+          settingsService.read(SettingsService.subtitleItalic) ? 'yes' : 'no',
+        );
+        final bgOpacity = (settingsService.read(SettingsService.subtitleBackgroundOpacity) * 255 / 100).toInt();
+        final bgColor = _sanitizedSubtitleColor(
+          settingsService.read(SettingsService.subtitleBackgroundColor),
+          SettingsService.subtitleBackgroundColor.defaultValue,
+        ).replaceFirst('#', '');
+        await currentPlayer.setProperty(
+          'sub-back-color',
+          '#${bgOpacity.toRadixString(16).padLeft(2, '0').toUpperCase()}$bgColor',
+        );
+        if (settingsService.read(SettingsService.subtitleBackgroundOpacity) > 0) {
+          await currentPlayer.setProperty('sub-border-style', 'background-box');
+        }
+      } catch (e) {
+        appLogger.w('VideoPlayerScreen: subtitle styling not applied', error: e);
       }
       await currentPlayer.setProperty('sub-ass-override', settingsService.read(SettingsService.subAssOverride).name);
       await currentPlayer.setProperty('sub-ass-video-aspect-override', '1');
@@ -1572,10 +1624,19 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
         // unapplied and where to set it instead, at the same level as the other
         // skipped or failed startup writes below.
         if (ownedHere.contains(entry.key)) {
-          appLogger.w(
-            'Skipped custom MPV property ${entry.key}=${entry.value}: the app owns it, '
-            'set it in the player HDR settings instead',
-          );
+          if (_appEmbeddedOwnedMpvProperties.contains(entry.key)) {
+            appLogger.w(
+              'Skipped custom MPV property ${entry.key}=${entry.value}: the app owns the video '
+              'output on this platform (embedded rendering is vo=libmpv); a windowed VO such as '
+              'gpu-next cannot be used inside the app, so compute shaders like ArtCNN cannot run '
+              'embedded either',
+            );
+          } else {
+            appLogger.w(
+              'Skipped custom MPV property ${entry.key}=${entry.value}: the app owns it, '
+              'set it in the player HDR settings instead',
+            );
+          }
           continue;
         }
         try {
@@ -1587,7 +1648,11 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
       }
 
       final maxVolume = settingsService.read(SettingsService.maxVolume);
-      await currentPlayer.setProperty('volume-max', maxVolume.toString());
+      try {
+        await currentPlayer.setProperty('volume-max', maxVolume.toString());
+      } catch (e) {
+        appLogger.w('VideoPlayerScreen: volume-max not applied', error: e);
+      }
 
       final savedVolume = settingsService.read(SettingsService.volume).clamp(0.0, maxVolume.toDouble());
       await currentPlayer.setVolume(savedVolume);
@@ -1828,7 +1893,6 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
   @override
   void dispose() {
     unawaited(AndroidExitDiagnostics.markUiState(AndroidUiState.mainScreen));
-    _transcodeReadinessAbort?.abort();
     _playerInitializationGeneration++;
     _frameRate.dispose();
     WidgetsBinding.instance.removeObserver(this);
@@ -2393,6 +2457,19 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
       ),
     );
   }
+}
+
+/// mpv's OPT_COLOR parser accepts only #RRGGBB / #AARRGGBB (plus r/g/b/a
+/// floats). The stored subtitle colours are free-form strings, so a legacy,
+/// tampered or foreign value (named colour, 3-digit hex, ARGB-int text) makes
+/// mpv refuse the write with MPV_ERROR_PROPERTY_FORMAT. Sanitized here so a
+/// bad preference degrades to the default colour instead of failing playback.
+String _sanitizedSubtitleColor(String value, String fallback) {
+  final cleaned = value.replaceFirst('#', '').toUpperCase();
+  if (RegExp(r'^[0-9A-F]{6}([0-9A-F]{2})?$').hasMatch(cleaned)) {
+    return '#$cleaned';
+  }
+  return fallback;
 }
 
 /// Returns the appropriate hwdec value based on platform and user preference.

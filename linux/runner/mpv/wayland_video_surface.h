@@ -118,6 +118,14 @@ class WaylandVideoSurface {
   // regardless would queue work that can never drain.
   bool frame_pending() const { return frame_pending_; }
 
+  // Whether any buffer has been presented since the surface was created. The
+  // caller uses this to refuse the very first present until mpv has actually
+  // produced a frame: presenting an empty buffer (the pre-allocated 1x1 or a
+  // black frame) is exactly the commit an occluded surface is entitled to
+  // ignore, and the frame callback it arms would then be the one a stalled
+  // plane waits on forever.
+  bool first_frame_presented() const { return first_frame_presented_; }
+
   // Invoked on the GTK main thread when the compositor acknowledges a frame.
   // This is what resumes rendering after the plane becomes visible again, so
   // it must trigger a render — mpv's redraw latch stays set while frames are
@@ -226,6 +234,20 @@ class WaylandVideoSurface {
   // being told this plane carries an HDR curve.
   bool hdr_active() const { return hdr_active_; }
 
+  // Bounds each half of a staged transition: first the compositor's verdict on
+  // the image description, then the caller's mpv leg deciding to commit or
+  // abort. Present() and the plugin's render path are held across *both*, so it
+  // is re-armed rather than cancelled when the compositor answers - the second
+  // wait is the longer one and has no timeout of its own. Public because the
+  // plugin's own mpv-leg timeout (mpv_plugin.cc) shares this horizon: the two
+  // halves of the transaction must give up together or the surface would
+  // resume presenting while the HDR method call stayed unanswered.
+  static constexpr int kTransitionTimeoutSeconds = 5;
+  // How many roundtrips a synchronous bootstrap waits for its answer. Ready,
+  // then the info burst, then done is three at worst, plus one spare for a
+  // compositor that splits them differently.
+  static constexpr int kBootstrapRoundtrips = 4;
+
  private:
   bool BindGlobals(GdkDisplay* display, std::string* error);
   void BuildImageDescription();
@@ -257,19 +279,26 @@ class WaylandVideoSurface {
   static void HandleImageDescriptionFailed(
       void* data, wp_image_description_v1* desc, uint32_t cause, const char* message);
 
-  // Bounds each half of a staged transition: first the compositor's verdict on
-  // the image description, then the caller's mpv leg deciding to commit or
-  // abort. Present() and the plugin's render path are held across *both*, so it
-  // is re-armed rather than cancelled when the compositor answers - the second
-  // wait is the longer one and has no timeout of its own.
-  static constexpr int kTransitionTimeoutSeconds = 5;
-  // How many roundtrips a synchronous bootstrap waits for its answer. Ready,
-  // then the info burst, then done is three at worst, plus one spare for a
-  // compositor that splits them differently.
-  static constexpr int kBootstrapRoundtrips = 4;
   void ArmTransitionWatchdog();
   void CancelTransitionWatchdog();
   guint watchdog_source_ = 0;
+
+  // Bounds the frame-acknowledgement wait. A compositor is entitled to stop
+  // acknowledging frames for an occluded or minimized surface - wlroots
+  // lineage compositors (Hyprland) do exactly that - and frame_pending_ is the
+  // only latch between Present() and the frame callback. Without a bound, one
+  // missed wl_callback freezes the plane on its last buffer for good: every
+  // later render bails on frame_pending(), and nothing else clears it. The
+  // watchdog withdraws the dead callback and asks for a fresh present, which
+  // re-arms the callback; a compositor that keeps ignoring the surface (still
+  // minimized) hits the miss budget and stops being poked until a real
+  // acknowledgement or a new frame turns up.
+  static constexpr int kFrameAckTimeoutMs = 500;
+  static constexpr int kMaxConsecutiveFrameAckMisses = 5;
+  void ArmFrameAckWatchdog();
+  void CancelFrameAckWatchdog();
+  guint frame_ack_source_ = 0;
+  int consecutive_frame_acks_missed_ = 0;
 
   // Creates the preferred-description query. The returned description is ready
   // immediately per the protocol, so get_information follows on ready, and the
@@ -335,6 +364,12 @@ class WaylandVideoSurface {
   int32_t width_ = 0;
   int32_t height_ = 0;
   int32_t scale_ = 1;
+  // The buffer_scale actually on the wire. A change is deferred until the
+  // first frame is presented: the compositor must never see a scale > 1
+  // while the EGL surface's pre-allocated 1x1 back buffer is still live.
+  // Reset to 1 in Destroy(): a freshly created wl_surface starts at scale 1,
+  // and a stale value would suppress the first scale request after recreation.
+  int32_t scale_sent_ = 1;
   // The view's own offset inside the toplevel, which is the frame
   // wl_subsurface_set_position uses. Non-zero under client-side decorations.
   int32_t view_x_ = 0;
@@ -343,7 +378,14 @@ class WaylandVideoSurface {
   // Set from the size Dart asked for, before SetRect rounds it into a whole
   // number of scale-sized blocks. See has_size().
   bool rect_valid_ = false;
-  bool buffer_attached_ = false;
+  // Set once a frame has been presented at the current scale, cleared only
+  // when the wl_surface is torn down. While false, the EGL surface's
+  // pre-allocated 1x1 back buffer is still live, so scale changes must be
+  // deferred; once true the wire scale may change at any time, because the
+  // next buffer mesa allocates matches the current window size. Deliberately
+  // not "a buffer is attached": a detach keeps the committed scale on the
+  // wire, so the scale gate must not depend on attachment.
+  bool first_frame_presented_ = false;
   bool frame_pending_ = false;
   wl_callback* frame_callback_ = nullptr;
   std::function<void()> on_frame_;

@@ -266,7 +266,7 @@ bool WaylandVideoSurface::InitEgl(std::string* error) {
     EGLint bits;    // per-channel size requested, and the depth then reported
     bool floating;  // half-float rather than unorm
   };
-  for (const ConfigTier tier : {ConfigTier{10, false}, ConfigTier{16, true}, ConfigTier{8, false}}) {
+  for (const ConfigTier tier : std::vector<ConfigTier>{{10, false}, {16, true}, {8, false}}) {
     if (tier.floating && !has_float_configs) continue;
     for (const EGLint renderable : {EGL_OPENGL_ES3_BIT, EGL_OPENGL_ES2_BIT}) {
       const EGLint attributes[] = {
@@ -982,7 +982,48 @@ void WaylandVideoSurface::BuildImageDescription() {
   wp_image_description_v1_add_listener(staged_description_, &kDescriptionListener, this);
 }
 
+void WaylandVideoSurface::ArmFrameAckWatchdog() {
+  // One watchdog per outstanding callback. Present() re-arms after each
+  // acknowledgement or timeout, so a source that is already set means the
+  // previous timer is still waiting on a callback that has not been answered.
+  if (frame_ack_source_ != 0 || !frame_pending_ || !visible_) return;
+  frame_ack_source_ = g_timeout_add(
+      kFrameAckTimeoutMs,
+      +[](gpointer data) -> gboolean {
+        auto* self = static_cast<WaylandVideoSurface*>(data);
+        self->frame_ack_source_ = 0;
+        if (!self->frame_pending_) return G_SOURCE_REMOVE;
+        // A real acknowledgement arriving later cannot retroactively answer
+        // this callback, so the callback has to go; ClearFrameCallback also
+        // clears frame_pending_. Rendering resumes from the same place
+        // HandleFrameDone would have started it - the frame callback fires
+        // once per display refresh and the plugin's handler skips without
+        // either a new mpv frame or a forced render, so calling on_frame_
+        // directly is what makes the next present happen at all.
+        self->ClearFrameCallback();
+        if (++self->consecutive_frame_acks_missed_ > kMaxConsecutiveFrameAckMisses) {
+          g_warning(
+              "MPV video plane: compositor is not acknowledging frames (%d misses); "
+              "stopping re-present attempts until a frame or visibility change",
+              self->consecutive_frame_acks_missed_);
+          return G_SOURCE_REMOVE;
+        }
+        g_message("MPV video plane: frame not acknowledged within %d ms; re-presenting", kFrameAckTimeoutMs);
+        if (self->on_frame_) self->on_frame_();
+        return G_SOURCE_REMOVE;
+      },
+      this);
+}
+
+void WaylandVideoSurface::CancelFrameAckWatchdog() {
+  if (frame_ack_source_ != 0) {
+    g_source_remove(frame_ack_source_);
+    frame_ack_source_ = 0;
+  }
+}
+
 void WaylandVideoSurface::ClearFrameCallback() {
+  CancelFrameAckWatchdog();
   if (frame_callback_ != nullptr) {
     wl_callback_destroy(frame_callback_);
     frame_callback_ = nullptr;
@@ -1001,16 +1042,21 @@ void WaylandVideoSurface::HandleFrameDone(void* data, wl_callback* callback, uin
     self->frame_callback_ = nullptr;
   }
   self->frame_pending_ = false;
+  self->consecutive_frame_acks_missed_ = 0;
+  // A real acknowledgement is the watchdog's success case; it has no more
+  // work to do (this is a static handler, so the call goes through `self`).
+  self->CancelFrameAckWatchdog();
   // Rendering resumes from here, not from mpv: its redraw latch is still set
   // from the update we declined to serve, so it will not notify again.
   if (self->on_frame_) self->on_frame_();
 }
 
 void WaylandVideoSurface::Destroy() {
-  // Unconditionally, ahead of everything: the timeout closure captures `this`,
-  // and DiscardTransition below only cancels it when a transition is actually
-  // staged.
+  // Unconditionally, ahead of everything: both timeout closures capture
+  // `this`, and the transition watchdog is only cancelled below when a
+  // transition is actually staged.
   CancelTransitionWatchdog();
+  CancelFrameAckWatchdog();
   if (egl_surface_ != EGL_NO_SURFACE) {
     if (eglGetCurrentSurface(EGL_DRAW) == egl_surface_ || eglGetCurrentSurface(EGL_READ) == egl_surface_) {
       eglMakeCurrent(egl_display_, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
@@ -1088,9 +1134,13 @@ void WaylandVideoSurface::Destroy() {
   width_ = 0;
   height_ = 0;
   scale_ = 1;
+  // A fresh wl_surface starts at buffer_scale 1; a stale scale_sent_ would
+  // suppress the first scale request after recreation.
+  scale_sent_ = 1;
   visible_ = false;
   rect_valid_ = false;
-  buffer_attached_ = false;
+  first_frame_presented_ = false;
+  consecutive_frame_acks_missed_ = 0;
 }
 
 void WaylandVideoSurface::RequestParentCommit() {
@@ -1161,7 +1211,18 @@ void WaylandVideoSurface::SetRect(int32_t x, int32_t y, int32_t width, int32_t h
 
   if (surface_ == nullptr || subsurface_ == nullptr || egl_window_ == nullptr) return;
 
-  if (scale_changed) wl_surface_set_buffer_scale(surface_, scale_);
+  // A buffer_scale change must not reach the wire before the first frame is
+  // presented: mesa commits the EGL surface's pre-allocated 1x1 back buffer
+  // on the first swap regardless of wl_egl_window_resize, and a 1x1 buffer at
+  // scale > 1 is a fatal protocol error (the compositor disconnects us).
+  // Present() flushes the deferred scale right after that first commit. The
+  // gate is the first-frame latch rather than buffer attachment: the committed
+  // scale survives a detach, so once a frame has been presented the scale must
+  // be updatable with no buffer attached.
+  if (scale_changed && first_frame_presented_ && scale_ != scale_sent_) {
+    wl_surface_set_buffer_scale(surface_, scale_);
+    scale_sent_ = scale_;
+  }
   if (size_changed || scale_changed) wl_egl_window_resize(egl_window_, width_, height_, 0, 0);
   // Both axes are floored into surface-local units and then offset by the
   // view's position inside the toplevel; PlaneSurfacePosition explains why.
@@ -1180,7 +1241,6 @@ void WaylandVideoSurface::DetachBuffer() {
   ClearFrameCallback();
   wl_surface_attach(surface_, nullptr, 0, 0);
   wl_surface_commit(surface_);
-  buffer_attached_ = false;
 }
 
 void WaylandVideoSurface::SetVisible(bool visible) {
@@ -1215,12 +1275,26 @@ bool WaylandVideoSurface::Present() {
     g_warning("MPV video plane: eglSwapBuffers failed: 0x%x", eglGetError());
     return false;
   }
-  if (!buffer_attached_) {
-    buffer_attached_ = true;
+  if (!first_frame_presented_) {
+    // First frame published at scale 1; the real scale may now go out. It
+    // applies to the next commit, whose buffer mesa allocates at the resized
+    // window size (a multiple of the scale). The latch is deliberately not
+    // buffer attachment: DetachBuffer() clears that while the committed scale
+    // stays on the wire, and once a frame has been presented SetRect() must be
+    // free to change the scale with no buffer attached.
+    first_frame_presented_ = true;
+    if (scale_ != scale_sent_) {
+      wl_surface_set_buffer_scale(surface_, scale_);
+      scale_sent_ = scale_;
+    }
     // The first buffer changes what the plane occludes; make sure the parent's
     // view of the subsurface is up to date.
     RequestParentCommit();
   }
+  // The acknowledgement for this commit is now owed; bound the wait so a
+  // compositor that never pays it cannot freeze the plane (see
+  // ArmFrameAckWatchdog).
+  ArmFrameAckWatchdog();
   return true;
 }
 

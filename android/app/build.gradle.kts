@@ -64,7 +64,7 @@ val mpvDir = layout.buildDirectory.dir("libmpv").get().asFile
 val mpvAar = "libmpv-release.aar"
 val mpvUrl = "https://github.com/edde746/libmpv-android/releases/download/$mpvVersion/$mpvAar"
 
-val media3Version = "1.10.1"
+val media3Version = "1.11.0"
 val mpvFfmpegVersion = "8.0.1"
 val mpvFfmpegSourceSha256 = "05ee0b03119b45c0bdb4df654b96802e909e0a752f72e4fe3794f487229e5a41"
 val mpvFfmpegSourceUrl = "https://ffmpeg.org/releases/ffmpeg-$mpvFfmpegVersion.tar.xz"
@@ -336,8 +336,6 @@ android {
 
   defaultConfig {
     applicationId = "com.edde746.plezy"
-    // You can update the following values to match your application needs.
-    // For more information, see: https://flutter.dev/to/review-gradle-config.
     minSdk = 25 // Fire OS 6.x (API 25); overrides libmpv-android's minSdk=26
     targetSdk = flutter.targetSdkVersion
     versionCode = flutter.versionCode
@@ -518,8 +516,10 @@ dependencies {
   // Android TV Watch Next integration
   implementation("androidx.tvprovider:tvprovider:1.1.0")
 
-  // Periodic Watch Next background refresh (ShelfRefreshWorker). Same version
-  // background_downloader pins, so the merged classpath stays coherent.
+  // Only used to cancel the legacy periodic shelf refresh job (2.13.0's
+  // removed ShelfRefreshWorker) that WorkManager persisted on updated
+  // devices. Same version background_downloader pins, so the merged
+  // classpath stays coherent.
   implementation("androidx.work:work-runtime-ktx:2.11.0")
 
   // Media3 ExoPlayer for Android

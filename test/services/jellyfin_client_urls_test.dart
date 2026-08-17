@@ -20,11 +20,13 @@ import 'package:plezy/services/playback_initialization_types.dart';
 import 'package:plezy/services/subtitle_preference.dart';
 import 'package:plezy/utils/device_identity.dart';
 import 'package:plezy/utils/media_server_http_client.dart';
+import 'package:plezy/services/settings_service.dart';
 
 import '../test_helpers/backend_client_fixtures.dart';
 import '../test_helpers/http_fixtures.dart';
 import '../test_helpers/paged_fakes.dart';
 import '../test_helpers/media_items.dart';
+import '../test_helpers/prefs.dart';
 
 JellyfinConnection _conn({String accessToken = 'tok-abc', String baseUrl = 'https://jf.example.com'}) =>
     testJellyfinConnection(
@@ -131,11 +133,8 @@ _initializeJellyfinAudioCarry({int? selectedAudioStreamId, AudioTrack? preferred
   return (client: client, requests: requests);
 }
 
-/// URL-builder smoke tests. We can't unit-test a network round-trip without
-/// spinning up a Jellyfin server, but the URL shape is a clear unit-of-work:
-/// query parameters must include the right keys and the auth token. These
-/// tests pin the contract so the next iteration of the player (Task 8 wiring)
-/// has something to point at.
+/// URL-builder smoke tests. Without a live Jellyfin server, pin query keys and
+/// authentication parameters directly.
 void main() {
   // Pin device identity so JellyfinClient.create's MediaBrowser header falls
   // back to Device="Plezy" instead of resolving the host machine's name.
@@ -831,6 +830,11 @@ void main() {
       // Nothing is selected and the fixture declares no default, so the server burns nothing and
       // this embedded row stays fetchable as an extracted file.
       expect(result.subtitleSidecars.single.sourceStreamId, 2);
+      expect(
+        result.subtitleSidecars.single.preload,
+        isFalse,
+        reason: 'an extracted embedded row stays lazy: extraction can stall behind the transcoder (#1738)',
+      );
       expect(result.externalSubtitles.single.title, 'English');
       expect(result.externalSubtitles.single.language, 'eng');
       final subtitleUri = Uri.parse(result.externalSubtitles.single.uri!);
@@ -1370,6 +1374,11 @@ void main() {
       expect(sidecarRow.key, '/Videos/item-1/src-1/Subtitles/5/0/Stream.srt');
       expect(sidecarRow.isExternalFile, isTrue);
       expect(result.subtitleSidecars.map((sidecar) => sidecar.sourceStreamId), [5]);
+      expect(
+        result.subtitleSidecars.single.preload,
+        isTrue,
+        reason: 'a real file loads with the media so it stays selectable as secondary (#1860)',
+      );
 
       // The server default survives normalization so selection can honour it.
       expect(result.mediaInfo!.defaultSubtitleStreamIndex, 3);
@@ -1468,6 +1477,7 @@ void main() {
       expect(result.mediaInfo!.subtitleTracks, hasLength(1));
       expect(result.externalSubtitles, hasLength(1));
       expect(result.subtitleSidecars.single.sourceStreamId, 3);
+      expect(result.subtitleSidecars.single.preload, isTrue);
       expect(result.externalSubtitles.single.title, 'English');
       final subtitleUri = Uri.parse(result.externalSubtitles.single.uri!);
       expect(subtitleUri.path, '/Videos/item-1/src-1/Subtitles/3/Stream.srt');
@@ -1620,6 +1630,11 @@ void main() {
       // one row not fetched: a sidecar for it would paint a second copy over the burned pixels.
       // The other two stay fetchable, which is what keeps a secondary track renderable.
       expect(result.subtitleSidecars.map((sidecar) => sidecar.sourceStreamId), [3, 5]);
+      expect(
+        result.subtitleSidecars.map((sidecar) => sidecar.preload),
+        everyElement(isFalse),
+        reason: 'extraction-backed rows must not gate the open on the transcoder',
+      );
     });
 
     test('getPlaybackInitialization ignores TranscodingUrl for original playback static fallback', () async {
@@ -3239,6 +3254,66 @@ void main() {
       expect(starts, ['0', '200']);
       expect(sortBy, everyElement('ParentIndexNumber,IndexNumber,SortName'));
       expect(sortOrder, everyElement('Ascending,Ascending,Ascending'));
+    });
+
+    test('fetchClientSideEpisodeQueue orders per the specials-ordering preference', () async {
+      resetSharedPreferencesForTest();
+      await SettingsService.getInstance();
+
+      // Server response order mimics Jellyfin's native watch order for a show
+      // whose Specials carry no AirsBefore placement: the season-0 block leads
+      // (never interrupting the regular run), then the regular seasons.
+      // The special's air date falls between the two regular episodes, so
+      // air-date mode would interleave it.
+      final orderedClient = JellyfinClient.forTesting(
+        connection: _conn(),
+        httpClient: MockClient(
+          (req) async => jsonResponse({
+            'Items': [
+              {
+                'Id': 'special',
+                'Type': 'Episode',
+                'ParentIndexNumber': 0,
+                'IndexNumber': 1,
+                'PremiereDate': '2022-10-27T00:00:00Z',
+                'SeriesId': 'show-1',
+              },
+              {
+                'Id': 'ep-1',
+                'Type': 'Episode',
+                'ParentIndexNumber': 1,
+                'IndexNumber': 1,
+                'PremiereDate': '2022-10-05T00:00:00Z',
+                'SeriesId': 'show-1',
+              },
+              {
+                'Id': 'ep-2',
+                'Type': 'Episode',
+                'ParentIndexNumber': 1,
+                'IndexNumber': 2,
+                'PremiereDate': '2022-11-02T00:00:00Z',
+                'SeriesId': 'show-1',
+              },
+            ],
+            'TotalRecordCount': 3,
+          }),
+        ),
+      );
+      addTearDown(orderedClient.close);
+
+      // Default respectServer: the response order is preserved verbatim.
+      final serverOrder = await orderedClient.fetchClientSideEpisodeQueue('show-1');
+      expect(serverOrder!.map((e) => e.id), ['special', 'ep-1', 'ep-2']);
+
+      // airDate: re-sorted into the aired interleave (#1416).
+      await SettingsService.instance.write(SettingsService.specialsOrdering, SpecialsOrdering.airDate);
+      final interleaved = await orderedClient.fetchClientSideEpisodeQueue('show-1');
+      expect(interleaved!.map((e) => e.id), ['ep-1', 'special', 'ep-2']);
+
+      // specialsLast: Specials strictly after the regular seasons (#1952).
+      await SettingsService.instance.write(SettingsService.specialsOrdering, SpecialsOrdering.specialsLast);
+      final specialsApart = await orderedClient.fetchClientSideEpisodeQueue('show-1');
+      expect(specialsApart!.map((e) => e.id), ['ep-1', 'ep-2', 'special']);
     });
 
     test('fetchPersonMedia queries items by person id', () async {

@@ -5,6 +5,7 @@ import 'package:drift/native.dart';
 import 'package:fake_async/fake_async.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:plezy/database/app_database.dart';
+import 'package:plezy/exceptions/media_server_exceptions.dart';
 import 'package:plezy/media/media_backend.dart';
 import 'package:plezy/media/media_item.dart';
 import 'package:plezy/media/media_kind.dart';
@@ -22,9 +23,8 @@ import '../test_helpers/prefs.dart';
 import '../test_helpers/media_items.dart';
 import '../test_helpers/playback_report_fakes.dart';
 
-// Periodic behavior is virtualized with fake_async and the tracker's existing
-// updateInterval seam. Routing, threshold, scrobble, cadence, coalescing,
-// backoff, resume, and disposal are asserted through observable calls.
+// fake_async drives periodic routing, threshold, scrobble, coalescing, backoff,
+// resume, and disposal behavior through observable calls.
 
 /// Fake Player whose state is mutable from the test.
 class _FakePlayer implements Player {
@@ -311,6 +311,23 @@ class _StopMarksWatchedClient extends _FakePlexClient {
   ServerId get serverId => ServerId('srv');
 }
 
+/// Answers one progress report with a server-side termination (#1916) and
+/// records report kinds so the fresh-session re-open is observable.
+class _TerminatingProgressClient extends _FakePlexClient {
+  final List<PlaybackReportKind> reportKinds = [];
+  bool terminateNextProgress = false;
+
+  @override
+  Future<void> onPlaybackReport(PlaybackReportCall call) async {
+    reportKinds.add(call.kind);
+    if (call.kind == PlaybackReportKind.progress && terminateNextProgress) {
+      terminateNextProgress = false;
+      throw PlaybackSessionTerminatedException(code: 2006, reason: 'Admin terminated playback with reason: Go Away');
+    }
+    await super.onPlaybackReport(call);
+  }
+}
+
 const Object _defaultServerId = Object();
 
 MediaItem _meta({
@@ -330,10 +347,6 @@ MediaItem _meta({
 void main() {
   setUp(resetSharedPreferencesForTest);
 
-  // ============================================================
-  // Constructor assertions
-  // ============================================================
-
   group('constructor assertions', () {
     test('offline=true requires offlineWatchService', () {
       expect(
@@ -349,10 +362,6 @@ void main() {
       );
     });
   });
-
-  // ============================================================
-  // sendProgress: short-circuit on duration=0
-  // ============================================================
 
   group('sendProgress: duration guard', () {
     test('does NOT send progress when duration is zero (player not yet ready)', () async {
@@ -442,10 +451,6 @@ void main() {
       expect(client.markWatchedCalls, isEmpty);
     });
   });
-
-  // ============================================================
-  // sendProgress: online routing
-  // ============================================================
 
   group('sendProgress: online', () {
     test('"stopped" awaits the underlying call and reports correct args', () async {
@@ -612,6 +617,32 @@ void main() {
 
       await tracker.sendProgress('stopped');
       expect(client.updateProgressCalls.map((call) => call.state), ['stopped']);
+    });
+
+    test('stoppedReportDelivered gates the TV-suspend retry and overrides survive a reset player (#1911)', () async {
+      final client = _FakePlexClient()..throwOnNextCall = Exception('connect timed out');
+      final player = _FakePlayer(position: const Duration(seconds: 5), duration: const Duration(seconds: 100));
+      final tracker = PlaybackProgressTracker(client: client, metadata: _meta(), player: player, isOffline: false);
+      addTearDown(tracker.dispose);
+
+      await tracker.sendStoppedProgressOnce(positionOverride: const Duration(seconds: 5));
+      expect(tracker.stoppedReportDelivered, isFalse, reason: 'transport failure is not delivery');
+      expect(client.updateProgressCalls, isEmpty);
+
+      // The redelivery runs after stop() released the native pipeline, when
+      // live player state is reset — the report must ride the overrides.
+      player.position = Duration.zero;
+      player.duration = Duration.zero;
+      await tracker.sendProgress(
+        'stopped',
+        positionOverride: const Duration(seconds: 5),
+        durationOverride: const Duration(seconds: 100),
+      );
+
+      expect(tracker.stoppedReportDelivered, isTrue);
+      expect(client.updateProgressCalls.map((call) => call.state), ['stopped']);
+      expect(client.updateProgressCalls.single.time, 5000);
+      expect(client.updateProgressCalls.single.duration, 100000);
     });
 
     test('maps current player tracks to server stream indexes for progress reports', () async {
@@ -791,10 +822,6 @@ void main() {
       expect(client.playbackStreamSelections.single.subtitleStreamIndex, isNull);
     });
   });
-
-  // ============================================================
-  // Threshold gating + scrobble
-  // ============================================================
 
   group('threshold gating', () {
     test('does NOT scrobble when percent < watchedThresholdPercent', () async {
@@ -1397,10 +1424,6 @@ void main() {
     });
   });
 
-  // ============================================================
-  // Offline routing
-  // ============================================================
-
   group('sendProgress: offline', () {
     Future<({OfflineWatchSyncService svc, AppDatabase db, MultiServerManager mgr})> makeOfflineService() async {
       final db = AppDatabase.forTesting(NativeDatabase.memory());
@@ -1515,10 +1538,6 @@ void main() {
       expect(action.shouldMarkWatched, isTrue);
     });
   });
-
-  // ============================================================
-  // WatchStateNotifier emission on 'stopped'
-  // ============================================================
 
   group('WatchStateNotifier event on "stopped"', () {
     test('emits a progress-update event when stopped past position 0', () async {
@@ -1785,6 +1804,104 @@ void main() {
     });
   });
 
+  group('server-side session termination (#1916)', () {
+    test('terminated paused session sends one final stop, goes silent, and re-opens on resume', () {
+      fakeAsync((async) {
+        final client = _TerminatingProgressClient();
+        final player = _FakePlayer(position: const Duration(seconds: 5), duration: const Duration(seconds: 100));
+        var pausedKeepalives = 0;
+        final tracker = PlaybackProgressTracker(
+          client: client,
+          metadata: _meta(),
+          player: player,
+          isOffline: false,
+          updateInterval: const Duration(seconds: 1),
+          onPausedKeepalive: () async => pausedKeepalives++,
+        );
+
+        tracker.startTracking();
+        async.flushMicrotasks();
+        player.playing = false;
+        async.elapse(const Duration(seconds: 1));
+        async.flushMicrotasks();
+        expect(client.updateProgressCalls.map((call) => call.state), ['playing', 'paused']);
+        expect(pausedKeepalives, 1);
+
+        // The server answers the next paused heartbeat with a termination:
+        // the tracker closes the session with one stop at the current
+        // playhead instead of retrying/queueing.
+        client.terminateNextProgress = true;
+        async.elapse(const Duration(seconds: 1));
+        async.flushMicrotasks();
+        expect(client.updateProgressCalls.map((call) => call.state), ['playing', 'paused', 'stopped']);
+        expect(client.updateProgressCalls.last.time, 5000);
+
+        // Continued pause: no heartbeats re-registering the zombie session and
+        // no transcode keepalives. (The keepalive count includes the detection
+        // tick, whose ping raced the not-yet-latched termination.)
+        async.elapse(const Duration(seconds: 5));
+        async.flushMicrotasks();
+        expect(client.updateProgressCalls, hasLength(3));
+        expect(pausedKeepalives, 2);
+
+        // Unpause: real consumption again — a fresh session opens with a new
+        // started report, immediately (a failure-style backoff would skip
+        // this tick).
+        player.playing = true;
+        async.elapse(const Duration(seconds: 1));
+        async.flushMicrotasks();
+        expect(client.reportKinds, [
+          PlaybackReportKind.started,
+          PlaybackReportKind.progress,
+          PlaybackReportKind.progress, // the terminated attempt
+          PlaybackReportKind.stopped,
+          PlaybackReportKind.started, // fresh session
+        ]);
+
+        // The new session pauses normally: heartbeats and keepalives resume.
+        player.playing = false;
+        async.elapse(const Duration(seconds: 1));
+        async.flushMicrotasks();
+        expect(client.updateProgressCalls.last.state, 'paused');
+        expect(pausedKeepalives, 3);
+
+        tracker.dispose();
+      });
+    });
+
+    test('termination is not a report failure: nothing is queued for offline replay', () async {
+      final db = AppDatabase.forTesting(NativeDatabase.memory());
+      final mgr = MultiServerManager();
+      final svc = OfflineWatchSyncService(database: db, serverManager: mgr);
+      addTearDown(() async {
+        svc.dispose();
+        mgr.dispose();
+        await db.close();
+      });
+
+      final client = _TerminatingProgressClient();
+      final player = _FakePlayer(position: const Duration(seconds: 10), duration: const Duration(seconds: 100));
+      final tracker = PlaybackProgressTracker(
+        client: client,
+        metadata: _meta(ratingKey: '42', serverId: ServerId('srv')),
+        player: player,
+        isOffline: false,
+        offlineWatchService: svc,
+        queueOnOnlineFailure: true,
+      );
+      addTearDown(tracker.dispose);
+
+      await tracker.sendProgress('playing');
+      await pumpEventQueue();
+      client.terminateNextProgress = true;
+      await tracker.sendProgress('paused');
+      await pumpEventQueue();
+
+      expect(client.updateProgressCalls.map((call) => call.state), ['playing', 'stopped']);
+      expect(await svc.getPendingSyncCount(), 0);
+    });
+  });
+
   test('resumeAfterStoppedReport opens a fresh reporting session', () async {
     final client = _FakePlexClient();
     final player = _FakePlayer(position: const Duration(seconds: 5), duration: const Duration(seconds: 100));
@@ -1836,10 +1953,6 @@ void main() {
       tracker.dispose();
     });
   });
-
-  // ============================================================
-  // startTracking / stopTracking / dispose lifecycle
-  // ============================================================
 
   group('lifecycle', () {
     test('startTracking + stopTracking is a clean no-op for an inactive player', () async {

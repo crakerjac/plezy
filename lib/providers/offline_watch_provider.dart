@@ -26,7 +26,6 @@ class OfflineWatchProvider extends ChangeNotifier with DisposableChangeNotifierM
   final DownloadProvider _downloadProvider;
 
   OfflineWatchProvider({required this._syncService, required this._downloadProvider}) {
-    // Listen to sync service changes to update UI
     _syncService.addListener(_onSyncServiceChanged);
   }
 
@@ -49,13 +48,11 @@ class OfflineWatchProvider extends ChangeNotifier with DisposableChangeNotifierM
   ///
   /// Returns true if watched, false otherwise.
   Future<bool> isWatched(String globalKey) async {
-    // First check local offline action
     final localStatus = await _syncService.getLocalWatchStatus(globalKey);
     if (localStatus != null) {
       return localStatus;
     }
 
-    // Fall back to cached metadata
     final metadata = _downloadProvider.getMetadata(globalKey);
     if (metadata != null) {
       return metadata.isWatched;
@@ -73,7 +70,6 @@ class OfflineWatchProvider extends ChangeNotifier with DisposableChangeNotifierM
   /// Returns null if no position is available.
   @visibleForTesting
   Future<int?> getViewOffset(String globalKey) async {
-    // First check local offline progress
     final localOffset = await _syncService.getLocalViewOffset(globalKey);
     if (localOffset != null) {
       return localOffset;
@@ -82,14 +78,13 @@ class OfflineWatchProvider extends ChangeNotifier with DisposableChangeNotifierM
     final localStatus = await _syncService.getLocalWatchStatus(globalKey);
     if (localStatus == true) return null;
 
-    // Fall back to cached metadata
     final metadata = _downloadProvider.getMetadata(globalKey);
     return metadata?.viewOffsetMs;
   }
 
-  /// Get sorted episodes for a show: regular seasons first, Specials last,
-  /// then season then episode — the shared [sortEpisodesByWatchOrder] order,
-  /// so the offline watch order matches what "download next N" selects (#1414).
+  /// Get episodes for a show in the shared [sortEpisodesByWatchOrder] order,
+  /// so the offline watch order matches what "download next N" selects
+  /// (#1414/#1416/#1952).
   List<MediaItem> _getSortedEpisodes(String showId) {
     final episodes = _downloadProvider.getDownloadedEpisodesForShow(showId);
     if (episodes.isEmpty) return episodes;
@@ -127,7 +122,6 @@ class OfflineWatchProvider extends ChangeNotifier with DisposableChangeNotifierM
 
     final watchStatuses = await _resolveEpisodeWatchStatuses(episodes);
 
-    // Find first unwatched episode
     for (final episode in episodes) {
       if (!watchStatuses[episode.globalKey]!) {
         return episode;
@@ -208,7 +202,7 @@ class OfflineWatchProvider extends ChangeNotifier with DisposableChangeNotifierM
         .deleteDownload(globalKey)
         .then(
           (_) {
-            showMainSnackBar(t.messages.autoRemovedWatchedDownload(title: meta.title ?? 'Unknown'));
+            showMainSnackBar(t.messages.autoRemovedWatchedDownload(title: meta.title ?? t.common.unknown));
           },
           onError: (e) {
             appLogger.w('Failed to auto-delete locally-watched download $globalKey: $e');

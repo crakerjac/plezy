@@ -36,7 +36,7 @@ env:
     libharfbuzz-dev libepoxy-dev libegl-dev libgl-dev libgnutls28-dev libpipewire-0.3-dev
     libva-dev libvdpau-dev libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev
     libxss-dev libxpresent-dev libxkbcommon-dev libpulse-dev libdbus-1-dev libdrm-dev
-    libgbm-dev libwayland-dev wayland-protocols liblcms2-dev libmujs-dev liblua5.2-dev
+    libdisplay-info-dev libgbm-dev libwayland-dev wayland-protocols liblcms2-dev libmujs-dev liblua5.2-dev
     ruby ruby-dev rubygems build-essential rpm libarchive-tools imagemagick libcurl4-openssl-dev
 
 jobs:
@@ -271,13 +271,11 @@ jobs:
           MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
           KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
         run: |
-          # Create temporary keychain
           KEYCHAIN_PATH=$RUNNER_TEMP/build.keychain
           security create-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
           security set-keychain-settings -lut 21600 $KEYCHAIN_PATH
           security unlock-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
 
-          # Import certificate to keychain
           CERTIFICATE_PATH=$RUNNER_TEMP/certificate.p12
           echo "$MACOS_CERTIFICATE_BASE64" | base64 --decode -o $CERTIFICATE_PATH
           security import $CERTIFICATE_PATH -k $KEYCHAIN_PATH -P "$MACOS_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
@@ -494,6 +492,11 @@ jobs:
             "data/app.so"
             "data/icudtl.dat"
             "data/flutter_assets/NativeAssetsManifest.json"
+            # MSVC runtime bundled by InstallRequiredSystemLibraries in
+            # windows/CMakeLists.txt; without it the app crashes at startup on
+            # machines whose system-wide redist is older than the CI toolset.
+            "msvcp140.dll"
+            "vcruntime140.dll"
           )
           $forbiddenFiles = @(
             "plezy.lib"

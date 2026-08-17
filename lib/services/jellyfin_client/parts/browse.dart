@@ -146,7 +146,7 @@ const _baseMusicTrackRowFields = 'UserData,PremiereDate,OriginalTitle,SortName';
 /// index, watched state, and the air date that drives the watch order.
 /// Title + indices come back without any `Fields` request; we ask for
 /// `UserData` (watched indicator) and `PremiereDate` (air-date sort, so
-/// Specials interleave — see [compareEpisodesByWatchOrder]). Drops
+/// Specials can interleave — see [sortEpisodesByWatchOrder]). Drops
 /// `Overview` etc. so even a thousand-episode shounen show fits in one
 /// response.
 const _baseQueueFields = 'UserData,PremiereDate';
@@ -758,18 +758,37 @@ mixin _JellyfinBrowseMethods on _JellyfinClientInternals {
       return _mapItem(data);
     } on MediaServerHttpException catch (e) {
       if (e.statusCode == 404) return null;
+      // An answered request (401/403/5xx) or a client-side cancellation must
+      // surface as-is. Pure transport failures (dead socket, DNS, connect
+      // timeout) carry no status code — and the HTTP layer wraps them into
+      // [MediaServerHttpException], so they arrive here rather than in the
+      // generic catch below. Apply the documented cache fallback (#1867).
+      if (e.statusCode != null || e.isCancellation) rethrow;
+      appLogger.w('JellyfinClient.fetchItem network call failed', error: e);
+      final cached = await _cachedItemFallback(endpoint);
+      if (cached != null) return cached;
       rethrow;
     } catch (e) {
-      // Transport-layer failure: socket error, DNS, TLS, etc. Try cache.
+      // Non-HTTP failure while handling the response (e.g. mapping). Same
+      // best-effort fallback before surfacing.
       appLogger.w('JellyfinClient.fetchItem network call failed', error: e);
-      try {
-        final cached = await cache.get(ServerId(cacheServerId), endpoint);
-        if (cached is Map<String, dynamic>) return _mapItem(cached);
-      } catch (cacheError, st) {
-        appLogger.w('JellyfinClient.fetchItem cache fallback failed', error: cacheError, stackTrace: st);
-      }
+      final cached = await _cachedItemFallback(endpoint);
+      if (cached != null) return cached;
       rethrow;
     }
+  }
+
+  /// Best-effort cached-row read for [_fetchItemOnce]'s failure fallbacks.
+  /// Returns null on miss or on a cache/mapping error (logged) so the caller
+  /// rethrows its original failure.
+  Future<MediaItem?> _cachedItemFallback(String endpoint) async {
+    try {
+      final cached = await cache.get(ServerId(cacheServerId), endpoint);
+      if (cached is Map<String, dynamic>) return _mapItem(cached);
+    } catch (e, st) {
+      appLogger.w('JellyfinClient.fetchItem cache fallback failed', error: e, stackTrace: st);
+    }
+    return null;
   }
 
   @override
@@ -1200,13 +1219,21 @@ mixin _JellyfinBrowseMethods on _JellyfinClientInternals {
     return _pagedItems(response.data, offset: offset, requestedSize: pageSize, map: _mapItems);
   }
 
-  /// All episodes of a series in the app's **aired watch order** — primarily by
-  /// air date, so Specials interleave between regular episodes the way Plex's
-  /// own play queue does — so the client-side next/previous queue matches
-  /// streaming, downloads, and offline playback (#1416/#1414). The server sort
-  /// ([_episodeOrderQueryParameters]) only keeps paging stable;
-  /// [sortEpisodesByWatchOrder] then orders the assembled list, leaving a single
-  /// definition of "episode order".
+  /// All episodes of a series in the watch order selected by the
+  /// `SettingsService.specialsOrdering` preference:
+  ///
+  /// - `respectServer` — the response order is preserved. `/Shows/{id}/Episodes`
+  ///   ignores `SortBy` (only `Random` is honored) and returns Jellyfin's
+  ///   native watch order: Specials placed into their aired seasons only via
+  ///   explicit `AirsBefore*` metadata (per the server-wide
+  ///   `DisplaySpecialsWithinSeasons` setting), unplaced Specials in a leading
+  ///   season-0 block that never interrupts the regular run (#1952).
+  /// - `airDate` / `specialsLast` — the assembled list is re-sorted by
+  ///   [sortEpisodesByWatchOrder] so online next/prev matches downloads and
+  ///   offline playback (#1416/#1414).
+  ///
+  /// Paging is stable in every mode: the server materializes the full episode
+  /// list before applying `StartIndex`/`Limit`.
   ///
   /// Uses [_queueFields] (`UserData` + `PremiereDate`) instead of the full
   /// browse field set so the response stays small even for shows with thousands
@@ -1251,9 +1278,10 @@ mixin _JellyfinBrowseMethods on _JellyfinClientInternals {
     }
 
     abort?.throwIfAborted();
-    // Server lists Specials first (ParentIndexNumber asc); reorder into the
-    // shared aired watch order so online next/prev matches offline + downloads.
-    sortEpisodesByWatchOrder(all);
+    final ordering = effectiveSpecialsOrdering();
+    if (ordering != SpecialsOrdering.respectServer) {
+      sortEpisodesByWatchOrder(all, ordering: ordering);
+    }
     return all;
   }
 
