@@ -5,6 +5,7 @@ import 'dart:math';
 import 'package:flutter/foundation.dart';
 
 import '../../mpv/mpv.dart';
+import '../../i18n/strings.g.dart';
 import '../../utils/app_logger.dart';
 import '../models/playback_state.dart';
 import '../models/sync_message.dart';
@@ -47,7 +48,7 @@ class WatchTogetherProvider with ChangeNotifier {
   bool _isWaitingForPeers = false;
   List<String> _waitingOnPeerIds = const [];
   PlaybackPhase? _playbackPhase;
-  String _displayName = 'User';
+  String _displayName = t.watchTogether.defaultDisplayName;
   final CurrentPlaybackDispatcher _playbackDispatcher = CurrentPlaybackDispatcher();
 
   // Coalesce rapid-fire notifyListeners() calls into a single rebuild per frame.
@@ -618,6 +619,16 @@ class WatchTogetherProvider with ChangeNotifier {
     _controller?.detachPlayer(exiting: exiting);
   }
 
+  /// Pause a guest's player without pausing the room — see
+  /// [WatchTogetherController.pauseLocallyForSystem]. Returns false when there is no attachment, or
+  /// when this peer is the host and must pause the room the ordinary way, so the caller falls back
+  /// to its own pause.
+  Future<bool> pauseLocallyForSystem() async {
+    final controller = _controller;
+    if (controller == null) return false;
+    return controller.pauseLocallyForSystem();
+  }
+
   /// Suppress sync heartbeats/corrections while the app is backgrounded.
   void setBackgrounded(bool value) {
     _controller?.setBackgrounded(value);
@@ -732,11 +743,18 @@ class WatchTogetherProvider with ChangeNotifier {
 
             // Send our join info back so the new peer adds us to their
             // participant list. Only reply to NEW peers to avoid an
-            // infinite join ping-pong (A→join→B→join→A→...).
+            // infinite join ping-pong (A→join→B→join→A→...). The host's
+            // reply also carries the room's control mode so lobby guests
+            // learn it before any playback state exists.
             if (_peerService != null) {
               _peerService!.sendTo(
                 message.peerId!,
-                SyncMessage.join(peerId: _peerService!.myPeerId!, displayName: _displayName, isHost: isHost),
+                SyncMessage.join(
+                  peerId: _peerService!.myPeerId!,
+                  displayName: _displayName,
+                  isHost: isHost,
+                  controlMode: isHost ? _session?.controlMode : null,
+                ),
               );
             }
           }

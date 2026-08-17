@@ -36,7 +36,7 @@ env:
     libharfbuzz-dev libepoxy-dev libegl-dev libgl-dev libgnutls28-dev libpipewire-0.3-dev
     libva-dev libvdpau-dev libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev
     libxss-dev libxpresent-dev libxkbcommon-dev libpulse-dev libdbus-1-dev libdrm-dev
-    libgbm-dev libwayland-dev wayland-protocols liblcms2-dev libmujs-dev liblua5.2-dev
+    libdisplay-info-dev libgbm-dev libwayland-dev wayland-protocols liblcms2-dev libmujs-dev liblua5.2-dev
     ruby ruby-dev rubygems build-essential rpm libarchive-tools imagemagick libcurl4-openssl-dev
 
 jobs:
@@ -271,13 +271,11 @@ jobs:
           MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
           KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
         run: |
-          # Create temporary keychain
           KEYCHAIN_PATH=$RUNNER_TEMP/build.keychain
           security create-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
           security set-keychain-settings -lut 21600 $KEYCHAIN_PATH
           security unlock-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
 
-          # Import certificate to keychain
           CERTIFICATE_PATH=$RUNNER_TEMP/certificate.p12
           echo "$MACOS_CERTIFICATE_BASE64" | base64 --decode -o $CERTIFICATE_PATH
           security import $CERTIFICATE_PATH -k $KEYCHAIN_PATH -P "$MACOS_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
@@ -466,6 +464,68 @@ jobs:
         shell: pwsh
         run: flutter build windows --release ${{ env.RELEASE_DART_DEFINES }} --dart-define=SENTRY_DIST=github-windows-${{ matrix.arch }} --split-debug-info=debug-info/windows-${{ matrix.arch }}
 
+      - name: Verify Windows bundle contents
+        shell: pwsh
+        run: |
+          $bundleDir = "build/windows/${{ matrix.arch }}/runner/Release"
+          if (-not (Test-Path -LiteralPath $bundleDir -PathType Container)) {
+            throw "Windows bundle directory does not exist: $bundleDir"
+          }
+
+          $bundlePath = (Resolve-Path -LiteralPath $bundleDir).Path
+          $foundFiles = @(
+            Get-ChildItem -LiteralPath $bundlePath -File -Recurse |
+              ForEach-Object {
+                $_.FullName.Substring($bundlePath.Length + 1).Replace('\', '/')
+              } |
+              Sort-Object
+          )
+
+          Write-Host "Files found in ${bundleDir}:"
+          $foundFiles | ForEach-Object { Write-Host "  $_" }
+
+          $requiredFiles = @(
+            "plezy.exe"
+            "flutter_windows.dll"
+            "sqlite3.dll"
+            "libmpv-2.dll"
+            "data/app.so"
+            "data/icudtl.dat"
+            "data/flutter_assets/NativeAssetsManifest.json"
+            # MSVC runtime bundled by InstallRequiredSystemLibraries in
+            # windows/CMakeLists.txt; without it the app crashes at startup on
+            # machines whose system-wide redist is older than the CI toolset.
+            "msvcp140.dll"
+            "vcruntime140.dll"
+          )
+          $forbiddenFiles = @(
+            "plezy.lib"
+            "plezy.exp"
+            "simdutf.lib"
+          )
+
+          $bundleErrors = @()
+          foreach ($file in $requiredFiles) {
+            if ($foundFiles -notcontains $file) {
+              Write-Output "::error::Required Windows bundle file is missing: $file"
+              $bundleErrors += "missing $file"
+            }
+          }
+          foreach ($file in $forbiddenFiles) {
+            if ($foundFiles -contains $file) {
+              Write-Output "::error::Forbidden link by-product is present in the Windows bundle: $file"
+              $bundleErrors += "present $file"
+            }
+          }
+
+          # sentry.dll is the inproc-backend native SDK; crashpad_handler.exe is
+          # intentionally absent (windows/CMakeLists.txt sets
+          # SENTRY_NATIVE_BACKEND=inproc), so do not assert on it here.
+
+          if ($bundleErrors.Count -gt 0) {
+            throw "Windows bundle verification failed: $($bundleErrors -join '; ')"
+          }
+
       - name: Upload symbols to bugs.plezy.app
         if: github.repository == 'edde746/plezy'
         shell: pwsh
@@ -528,6 +588,11 @@ jobs:
       - name: Build installer and portables
         run: .\windows\build-installer.ps1 -X64BuildDir "build-x64" -Arm64BuildDir "build-arm64" -Version "${{ steps.version.outputs.version }}"
 
+      # Unsigned on purpose: the Store re-signs the bundle during
+      # certification. See windows/build-msix.ps1.
+      - name: Build Store package (MSIX)
+        run: .\windows\build-msix.ps1 -X64BuildDir "build-x64" -Arm64BuildDir "build-arm64" -Version "${{ steps.version.outputs.version }}"
+
       - name: Sign installer for WinSparkle (EdDSA)
         if: env.SPARKLE_PRIVATE_KEY != ''
         env:
@@ -558,6 +623,7 @@ jobs:
             plezy-windows-x64-portable.7z
             plezy-windows-arm64-portable.7z
             plezy-windows-installer.exe
+            plezy-windows.msixbundle
 
       - name: Upload x64 portable
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
@@ -579,6 +645,15 @@ jobs:
             plezy-windows-installer.exe
             win-ed-signature.txt
             win-installer-size.txt
+
+      # Deliberately not attached to the GitHub release in create-release: a
+      # Store-identity package cannot be installed without the Store's
+      # certificate, so it is only useful as a Partner Center upload.
+      - name: Upload Store package
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: windows-msix
+          path: plezy-windows.msixbundle
 
   build-linux:
     needs: validate-trusted-ref
@@ -693,14 +768,17 @@ jobs:
           fi
           echo "BUNDLE_DIR=$bundle_dir" >> "$GITHUB_ENV"
 
-      - name: Build Linux Packages
-        shell: bash
-        run: |
-          BUILD_DIR="$BUNDLE_DIR" \
-          ARCH_SUFFIX=${{ matrix.arch }} \
-          OUTPUT_DIR="$GITHUB_WORKSPACE" \
-          python3 linux/packaging/build-packages.py
-
+      # Everything below resolves the bundle *before* packaging, so the packages
+      # and the tarball are cut from one identical tree.
+      #
+      # The plane needs the pinned Wayland-enabled libmpv: a distro libmpv still
+      # plays and still does HDR, but silently drops hwdec to vaapi-copy - which
+      # was measured, not assumed. So libmpv travels with us and no artifact
+      # depends on a host one. That removed the host `mpv` dependency, and with it
+      # the transitive pull of everything libmpv itself needs - libass, pulse,
+      # pipewire, fontconfig and the rest. bundle-libs.sh is what supplies those,
+      # so it has to run before packaging too, or the packages would carry libmpv
+      # and nothing it links.
       - name: Copy libmpv into bundle
         shell: bash
         run: |
@@ -709,7 +787,7 @@ jobs:
           cp -a "$LIBMPV_DIR"/libmpv.so* "$BUNDLE_LIB/"
           cp -a libmpv-prefix/lib/libshaderc_shared.so* "$BUNDLE_LIB/"
 
-      - name: Bundle shared libraries for portable tarball
+      - name: Bundle shared libraries
         shell: bash
         run: bash linux/packaging/bundle-libs.sh "$BUNDLE_DIR"
 
@@ -717,17 +795,43 @@ jobs:
         shell: bash
         run: cp linux/packaging/plezy.sh "$BUNDLE_DIR/plezy.sh"
 
-      - name: Verify no missing dependencies
+      # Same check the package smoke build runs, against the artifact that
+      # actually ships: a library nobody declares is a broken install, and it is
+      # invisible until a user on a clean machine tries to launch.
+      #
+      # This also stands in for the `ldd ./plezy | grep "not found"` step that
+      # used to run after packaging. That one folded ldd's stderr into grep's
+      # input and dropped its exit status, so ldd failing outright - a missing
+      # loader, an exec-format mismatch, no ldd at all - left the match empty and
+      # printed "All dependencies resolved." This guard runs ldd over every
+      # object under lib/ as well as the executable, fails on an unresolved
+      # soname, fails when ldd cannot read an object, and refuses to pass when
+      # the walk found no host libraries at all. Packaging below only reads the
+      # bundle, so a second shell ldd afterwards could only restate a weaker
+      # subset of what this already proved about the very same tree.
+      - name: Verify every unbundled library the bundle needs is declared
+        shell: bash
+        run: python3 linux/packaging/check-bundle-host-deps.py "$BUNDLE_DIR"
+
+      # Last, from the fully resolved tree above. The host-dependency guard is
+      # skipped because the named step above just ran it against this same
+      # bundle; the internal run exists for by-hand packaging outside CI.
+      - name: Build Linux Packages
         shell: bash
         run: |
-          cd "$BUNDLE_DIR"
-          MISSING=$(LD_LIBRARY_PATH=lib ldd ./plezy 2>&1 | grep "not found" || true)
-          if [[ -n "$MISSING" ]]; then
-            echo "ERROR: Unresolved dependencies found:" >&2
-            echo "$MISSING" >&2
-            exit 1
-          fi
-          echo "All dependencies resolved."
+          BUILD_DIR="$BUNDLE_DIR" \
+          ARCH_SUFFIX=${{ matrix.arch }} \
+          OUTPUT_DIR="$GITHUB_WORKSPACE" \
+          PLEZY_SKIP_HOST_DEP_CHECK=1 \
+          python3 linux/packaging/build-packages.py
+
+      # The depends lists reached fpm above; only the packages it wrote can show
+      # they arrived. Same script the smoke build runs, so the two jobs cannot
+      # drift on what counts as declared - and unlike the smoke build, this one
+      # covers arm64 and the artifacts users actually install.
+      - name: Verify the declared dependencies reached the package metadata
+        shell: bash
+        run: python3 linux/packaging/check-package-deps.py "$GITHUB_WORKSPACE" --arch ${{ matrix.arch }}
 
       - name: Create tarball
         shell: bash

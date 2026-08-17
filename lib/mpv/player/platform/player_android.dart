@@ -12,6 +12,8 @@ class PlayerAndroid extends PlayerBase {
   static const _eventChannel = EventChannel('com.plezy/exo_player/events');
 
   int? _bufferSizeBytes;
+  bool _bufferSizeIsAuto = false;
+  String _bufferTier = 'auto';
   bool _tunnelingEnabled = true;
   String _dvConversionMode = 'auto';
   bool _audioNormalizationEnabled = false;
@@ -20,6 +22,12 @@ class PlayerAndroid extends PlayerBase {
   int _downmixCenterBoostDb = 0;
   bool _downmixNormalize = true;
 
+  /// Server-reported frame rate for the next item, or null when unknown.
+  ///
+  /// Rides on `open` rather than a standalone call because it is per-item and
+  /// must be known before the native side settles tunneling for that item.
+  double? _contentFrameRate;
+
   /// The native plugin switched from ExoPlayer to its mpv fallback for this
   /// session. Sticky for the instance lifetime, mirroring the native flag
   /// (which resets only on initialize/dispose).
@@ -27,6 +35,13 @@ class PlayerAndroid extends PlayerBase {
 
   bool get usingMpvFallback => _usingMpvFallback;
 
+  /// Subtitles are hidden through the player's visibility toggle. Sticky
+  /// across media opens, like mpv's global `sub-visibility`, so an episode
+  /// change cannot put them back on screen.
+  bool _subtitlesHidden = false;
+
+  /// Track that un-hiding restores: whatever was selected when subtitles were
+  /// hidden, then whatever was selected for the current media while hidden.
   String? _hiddenSubtitleTrackId;
 
   @override
@@ -100,6 +115,8 @@ class PlayerAndroid extends PlayerBase {
     try {
       final result = await invoke<bool>('initialize', {
         'bufferSizeBytes': _bufferSizeBytes,
+        'bufferSizeAuto': _bufferSizeIsAuto,
+        'bufferTier': _bufferTier,
         'tunnelingEnabled': _tunnelingEnabled,
         'dvConversionMode': _dvConversionMode,
         'audioPassthroughEnabled': _audioPassthroughEnabled,
@@ -191,6 +208,7 @@ class PlayerAndroid extends PlayerBase {
         'hasStartPosition': hasStartPosition,
         'autoPlay': play,
         'isLive': isLive,
+        if (_contentFrameRate != null) 'contentFrameRate': _contentFrameRate,
         if (externalSubtitles != null && externalSubtitles.isNotEmpty)
           'externalSubtitles': externalSubtitles
               .where((s) => s.uri?.isNotEmpty == true)
@@ -246,14 +264,36 @@ class PlayerAndroid extends PlayerBase {
     await invoke('selectAudioTrack', {'trackId': track.id});
   }
 
+  /// ExoPlayer has no renderer-level subtitle visibility switch, so hiding is
+  /// implemented as deselection (see [setProperty]'s `sub-visibility` case).
+  /// A selection arriving while subtitles are hidden — the automatic pass
+  /// after an episode change, or a manual pick — becomes what un-hiding
+  /// restores instead of putting subtitles back on screen, matching how mpv's
+  /// global `sub-visibility` keeps hiding across files (#1779).
   @override
   Future<void> selectSubtitleTrack(SubtitleTrack track) async {
+    if (_subtitlesHidden) {
+      _hiddenSubtitleTrackId = track.id == SubtitleTrack.off.id ? null : track.id;
+      return _selectSubtitleTrackNatively(SubtitleTrack.off);
+    }
+    return _selectSubtitleTrackNatively(track);
+  }
+
+  Future<void> _selectSubtitleTrackNatively(SubtitleTrack track) async {
     await invoke('selectSubtitleTrack', {'trackId': track.id});
   }
 
+  /// A sidecar flagged default must not draw itself onto a hidden renderer
+  /// either; the selection pass that follows the add records it the same way
+  /// [selectSubtitleTrack] does.
   @override
   Future<void> addSubtitleTrack({required String uri, String? title, String? language, bool select = false}) async {
-    await invoke('addSubtitleTrack', {'uri': uri, 'title': title, 'language': language, 'select': select});
+    await invoke('addSubtitleTrack', {
+      'uri': uri,
+      'title': title,
+      'language': language,
+      'select': select && !_subtitlesHidden,
+    });
   }
 
   @override
@@ -287,8 +327,24 @@ class PlayerAndroid extends PlayerBase {
       case 'demuxer-max-bytes':
         _bufferSizeBytes = int.tryParse(value);
         break;
+      // Not an mpv property. The heap tiers Dart derives for mpv's demuxer are the wrong
+      // shape for ExoPlayer's sample allocator, so on Auto the native side sizes its own
+      // LoadControl target instead of reusing `demuxer-max-bytes` (#1618).
+      case 'demuxer-max-bytes-auto':
+        _bufferSizeIsAuto = value != 'no';
+        break;
+      // Not an mpv property. mpv read-ahead is owned by the mpv.conf editor; this tier is
+      // a named ExoPlayer read-ahead depth rather than a duration because the byte cap can
+      // bind first (#1816).
+      case 'exo-buffer-tier':
+        _bufferTier = value;
+        break;
       case 'tunneled-playback':
         _tunnelingEnabled = value != 'no';
+        break;
+      case 'content-frame-rate':
+        final fps = double.tryParse(value);
+        _contentFrameRate = fps != null && fps > 0 ? fps : null;
         break;
       case 'dv-conversion-mode':
         _dvConversionMode = value;
@@ -299,19 +355,21 @@ class PlayerAndroid extends PlayerBase {
         break;
       case 'sub-visibility':
         if (value == 'no') {
+          if (_subtitlesHidden) break;
+          _subtitlesHidden = true;
           final current = state.track.subtitle;
-          if (current != null && current.id != 'no') {
-            _hiddenSubtitleTrackId = current.id;
-            await selectSubtitleTrack(SubtitleTrack.off);
+          _hiddenSubtitleTrackId = current != null && current.id != SubtitleTrack.off.id ? current.id : null;
+          if (_hiddenSubtitleTrackId != null) {
+            await _selectSubtitleTrackNatively(SubtitleTrack.off);
           }
         } else {
+          if (!_subtitlesHidden) break;
+          _subtitlesHidden = false;
           final storedId = _hiddenSubtitleTrackId;
-          if (storedId != null) {
-            _hiddenSubtitleTrackId = null;
-            final track = state.tracks.subtitle.firstWhereOrNull((t) => t.id == storedId);
-            if (track != null) {
-              await selectSubtitleTrack(track);
-            }
+          _hiddenSubtitleTrackId = null;
+          final track = storedId == null ? null : state.tracks.subtitle.firstWhereOrNull((t) => t.id == storedId);
+          if (track != null) {
+            await _selectSubtitleTrackNatively(track);
           }
         }
         break;
@@ -484,6 +542,7 @@ class PlayerAndroid extends PlayerBase {
     int subtitlePosition = 100,
     bool bold = false,
     bool italic = false,
+    bool anchorToScreen = false,
   }) async {
     if (disposed || !initialized) return;
     await invoke('setSubtitleStyle', {
@@ -496,6 +555,7 @@ class PlayerAndroid extends PlayerBase {
       'subtitlePosition': subtitlePosition,
       'bold': bold,
       'italic': italic,
+      'anchorToScreen': anchorToScreen,
     });
   }
 

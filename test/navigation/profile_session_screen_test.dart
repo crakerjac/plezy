@@ -49,6 +49,7 @@ void main() {
       registry: profileRegistry,
       plexHome: plexHome,
       connections: connectionRegistry,
+      profileConnections: profileConnectionRegistry,
       storage: storage,
     );
     final serverManager = MultiServerManager();
@@ -62,9 +63,9 @@ void main() {
     final companionProviders = <CompanionRemoteProvider>[];
     final disposedActiveIds = <String>[];
     final trackerHttpClients = <FakeHttpClient>[];
-    // The probe instantiates TrackersProvider (four eager auth owners); the
-    // separate Trakt provider remains lazy in this reduced shell.
-    const trackerAuthClientsPerProfile = 4;
+    // TrackersProvider owns six eager auth HTTP clients across the five
+    // services (MAL's proxy and token exchange use separate clients).
+    const trackerAuthClientsPerProfile = 6;
     FakeHttpClient trackerHttpClientFactory() {
       final client = FakeHttpClient(200, const <int>[]);
       trackerHttpClients.add(client);

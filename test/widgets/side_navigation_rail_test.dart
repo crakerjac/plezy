@@ -11,6 +11,7 @@ import 'package:plezy/media/media_backend.dart';
 import 'package:plezy/media/media_kind.dart';
 import 'package:plezy/media/media_library.dart';
 import 'package:plezy/navigation/navigation_tabs.dart';
+import 'package:plezy/providers/catalog_sources_provider.dart';
 import 'package:plezy/providers/hidden_libraries_provider.dart';
 import 'package:plezy/providers/libraries_provider.dart';
 import 'package:plezy/providers/multi_server_provider.dart';
@@ -24,6 +25,12 @@ import 'package:provider/provider.dart';
 import '../test_helpers/multi_server_fixtures.dart';
 import '../test_helpers/prefs.dart';
 import '../test_helpers/theme.dart';
+
+/// Minimal source-bearing stand-in: the rail only reads [hasAnySource].
+class _FakeCatalogSourcesProvider extends CatalogSourcesProvider {
+  @override
+  bool get hasAnySource => true;
+}
 
 MediaLibrary _library({
   required String id,
@@ -59,6 +66,12 @@ AnimatedOpacity _railSurfaceOpacity(WidgetTester tester) {
       .singleWhere((widget) => widget.child is ColoredBox);
 }
 
+/// The Libraries header's expand/collapse chevron, matched by the symbol that
+/// only the given state renders.
+Finder _librariesChevron(IconData icon) {
+  return find.descendant(of: find.widgetWithText(NavigationRailItem, 'Libraries'), matching: find.byIcon(icon));
+}
+
 Future<void> _pumpBasicRail(
   WidgetTester tester, {
   GlobalKey<SideNavigationRailState>? sideNavKey,
@@ -68,6 +81,7 @@ Future<void> _pumpBasicRail(
   bool isSidebarFocused = false,
   bool alwaysExpanded = false,
   double? height,
+  CatalogSourcesProvider? catalogSources,
 }) async {
   await SettingsService.getInstance();
 
@@ -102,6 +116,7 @@ Future<void> _pumpBasicRail(
           ChangeNotifierProvider<LibrariesProvider>.value(value: librariesProvider),
           ChangeNotifierProvider<HiddenLibrariesProvider>.value(value: hiddenLibrariesProvider),
           ChangeNotifierProvider<MultiServerProvider>.value(value: multiServerProvider),
+          if (catalogSources != null) ChangeNotifierProvider<CatalogSourcesProvider>.value(value: catalogSources),
         ],
         child: MaterialApp(
           theme: ThemeData(extensions: const [testMonoTokens]),
@@ -293,6 +308,100 @@ void main() {
     final targetRect = tester.getRect(find.text(targetLibrary.title));
     expect(targetRect.top, greaterThanOrEqualTo(railRect.top));
     expect(targetRect.bottom, lessThanOrEqualTo(railRect.bottom));
+  });
+
+  testWidgets('Explore item follows the showExploreTab appearance setting', (tester) async {
+    final catalogSources = _FakeCatalogSourcesProvider();
+    addTearDown(catalogSources.dispose);
+
+    await _pumpBasicRail(tester, alwaysExpanded: true, catalogSources: catalogSources);
+    expect(find.widgetWithText(NavigationRailItem, 'Explore'), findsOneWidget);
+
+    await SettingsService.instance.write(SettingsService.showExploreTab, false);
+    await tester.pumpAndSettle();
+    expect(find.widgetWithText(NavigationRailItem, 'Explore'), findsNothing);
+
+    await SettingsService.instance.write(SettingsService.showExploreTab, true);
+    await tester.pumpAndSettle();
+    expect(find.widgetWithText(NavigationRailItem, 'Explore'), findsOneWidget);
+  });
+
+  testWidgets('collapsing the Libraries section survives a fresh rail', (tester) async {
+    final movies = _library(id: '1', title: 'Movies', serverId: ServerId('server-a'), serverName: 'Server A');
+
+    await _pumpBasicRail(tester, alwaysExpanded: true, libraries: [movies]);
+    expect(_librariesChevron(Symbols.expand_less_rounded), findsOneWidget);
+
+    await tester.tap(find.widgetWithText(NavigationRailItem, 'Libraries'));
+    await tester.pumpAndSettle();
+    expect(_librariesChevron(Symbols.expand_more_rounded), findsOneWidget);
+    expect(SettingsService.instance.read(SettingsService.librariesSectionExpanded), isFalse);
+
+    // Tear the rail down so the next pump builds a brand-new State — the app
+    // restart the session-only flag used to lose (#1896).
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pumpAndSettle();
+
+    await _pumpBasicRail(tester, alwaysExpanded: true, libraries: [movies]);
+    expect(_librariesChevron(Symbols.expand_more_rounded), findsOneWidget);
+  });
+
+  testWidgets('a collapsed Libraries section keeps its rows out of D-pad order', (tester) async {
+    await SettingsService.getInstance();
+    await SettingsService.instance.write(SettingsService.librariesSectionExpanded, false);
+
+    final movies = _library(id: '1', title: 'Movies', serverId: ServerId('server-a'), serverName: 'Server A');
+
+    final librariesProvider = LibrariesProvider();
+    await librariesProvider.updateLibraryOrder([movies]);
+    addTearDown(librariesProvider.dispose);
+
+    final hiddenLibrariesProvider = HiddenLibrariesProvider();
+    await hiddenLibrariesProvider.ensureInitialized();
+    addTearDown(hiddenLibrariesProvider.dispose);
+
+    final manager = MultiServerManager();
+    final multiServerProvider = testMultiServerProvider(manager);
+    addTearDown(multiServerProvider.dispose);
+
+    final sideNavKey = GlobalKey<SideNavigationRailState>();
+    NavigationTabId? selectedTab;
+
+    await tester.pumpWidget(
+      TranslationProvider(
+        child: MultiProvider(
+          providers: [
+            ChangeNotifierProvider<LibrariesProvider>.value(value: librariesProvider),
+            ChangeNotifierProvider<HiddenLibrariesProvider>.value(value: hiddenLibrariesProvider),
+            ChangeNotifierProvider<MultiServerProvider>.value(value: multiServerProvider),
+          ],
+          child: MaterialApp(
+            theme: ThemeData(extensions: const [testMonoTokens]),
+            home: Scaffold(
+              body: SideNavigationRail(
+                key: sideNavKey,
+                selectedTab: NavigationTabId.discover,
+                isSidebarFocused: true,
+                alwaysExpanded: true,
+                onDestinationSelected: (tab) => selectedTab = tab,
+                onLibrarySelected: (_) {},
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    sideNavKey.currentState!.focusActiveItem();
+    await tester.pumpAndSettle();
+
+    // Home -> Libraries -> Search. The Movies row is skipped while collapsed.
+    await _press(tester, LogicalKeyboardKey.arrowDown);
+    await _press(tester, LogicalKeyboardKey.arrowDown);
+    await _press(tester, LogicalKeyboardKey.enter);
+
+    expect(selectedTab, NavigationTabId.search);
   });
 
   testWidgets('reports interaction expansion for shell content push', (tester) async {

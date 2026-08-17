@@ -7,6 +7,7 @@ import 'package:flutter/widgets.dart';
 import 'package:universal_gamepad/universal_gamepad.dart';
 import 'package:window_manager/window_manager.dart';
 
+import '../focus/input_mode_tracker.dart';
 import '../utils/app_logger.dart';
 import '../utils/key_event_simulator.dart' as key_sim;
 import '../utils/platform_detector.dart';
@@ -155,10 +156,6 @@ class GamepadService with WindowListener {
   StreamSubscription<GamepadEvent>? _subscription;
   final GamepadDuplicateInputGuard _duplicateInputGuard;
 
-  /// Callback to switch InputModeTracker to keyboard mode.
-  /// Set by InputModeTracker when it initializes.
-  static VoidCallback? onGamepadInput;
-
   static final Map<Object, ({VoidCallback previous, VoidCallback next, bool Function() isActive})>
   _tabNavigationHandlers = {};
 
@@ -195,25 +192,20 @@ class GamepadService with WindowListener {
     _tabNavigationHandlers.clear();
   }
 
-  // Deadzone for analog sticks (0.0 to 1.0)
   static const double _stickDeadzone = 0.5;
 
-  // Auto-repeat timing for held directional inputs (D-pad / stick)
   static const Duration _repeatInitialDelay = Duration(milliseconds: 400);
   static const Duration _repeatInterval = Duration(milliseconds: 80);
 
   key_sim.KeyEventSimulatorController? _keyEventSimulator;
 
-  // Track stick state to detect deadzone crossings
   bool _leftStickUp = false;
   bool _leftStickDown = false;
   bool _leftStickLeft = false;
   bool _leftStickRight = false;
 
-  // Track button states to prevent repeated events from button holds
   final Set<GamepadButton> _pressedButtons = {};
   final Set<GamepadButton> _suppressedButtons = {};
-  // Whether the app window is currently focused — ignore gamepad input when false
   bool _windowFocused = true;
   bool _nativeKeyHandlerRegistered = false;
   bool _nativeTextInputFocused = false;
@@ -403,8 +395,7 @@ class GamepadService with WindowListener {
 
     // Switch to keyboard mode on any button press
     if (event.pressed) {
-      onGamepadInput?.call();
-      _setTraditionalFocusHighlight();
+      InputModeTracker.reportNonPointerInput();
     }
     // Ensure a frame is scheduled so addPostFrameCallback-based key
     // simulation fires promptly. Without this, key-up events can be
@@ -503,11 +494,10 @@ class GamepadService with WindowListener {
       return;
     }
 
-    // Switch to keyboard mode on significant axis input. Navigation itself
-    // schedules frames only when the stick crosses the real deadzone.
-    if (event.value.abs() > 0.3) {
-      onGamepadInput?.call();
-      _setTraditionalFocusHighlight();
+    // Promotion must fire on the same event that navigates: gating below the
+    // real deadzone would let analog-stick drift hide the desktop cursor.
+    if (event.value.abs() > _stickDeadzone) {
+      InputModeTracker.reportNonPointerInput();
     }
 
     switch (event.axis) {
@@ -597,15 +587,6 @@ class GamepadService with WindowListener {
       if (_leftStickLeft || _leftStickRight) _stopDirectionRepeat();
       _leftStickLeft = false;
       _leftStickRight = false;
-    }
-  }
-
-  // Ensure Material uses traditional (keyboard) focus highlights when navigating
-  // via gamepad. Synthetic key events we dispatch below don't go through the
-  // platform key pipeline, so Flutter won't automatically flip highlight mode.
-  void _setTraditionalFocusHighlight() {
-    if (FocusManager.instance.highlightStrategy != FocusHighlightStrategy.alwaysTraditional) {
-      FocusManager.instance.highlightStrategy = FocusHighlightStrategy.alwaysTraditional;
     }
   }
 }

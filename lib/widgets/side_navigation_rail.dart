@@ -233,7 +233,10 @@ class SideNavigationRail extends StatefulWidget {
 }
 
 class SideNavigationRailState extends State<SideNavigationRail> with MountedSetStateMixin {
-  bool _librariesExpanded = true;
+  /// Libraries section expansion, held in settings rather than widget state so
+  /// it survives relaunch, remount and layout switches (#1896). The rail's
+  /// [ListenableBuilder] below listens to the pref, so the toggle just writes.
+  bool get _librariesExpanded => SettingsService.instance.read(SettingsService.librariesSectionExpanded);
 
   bool _isHovered = false;
   bool _isTouchExpanded = false;
@@ -652,7 +655,7 @@ class SideNavigationRailState extends State<SideNavigationRail> with MountedSetS
     final hasLiveTv = context.watch<MultiServerProvider>().hasLiveTv;
     // Nullable watch: rail tests (and any host without the profile session
     // scope) simply never show the Explore item.
-    final hasExplore = context.watch<CatalogSourcesProvider?>()?.hasAnySource ?? false;
+    final hasExploreSource = context.watch<CatalogSourcesProvider?>()?.hasAnySource ?? false;
     // Nullable watch: rail tests (and any host without the profile session
     // scope) simply never show the Now Playing item. TV-only — it is the
     // way back into the now-playing screen there; desktop already has the
@@ -660,14 +663,18 @@ class SideNavigationRailState extends State<SideNavigationRail> with MountedSetS
     final musicService = context.watch<MusicPlaybackService?>();
     final nowPlayingTrack = widget.isOfflineMode || !PlatformDetector.isTV() ? null : musicService?.currentTrack;
 
-    // Listen to fullscreen + groupLibrariesByServer setting so the rail
-    // rebuilds when the user toggles "Group libraries by server" in Appearance.
+    // Listen to fullscreen + the groupLibrariesByServer / showExploreTab
+    // settings so the rail rebuilds when they are toggled in Appearance, and to
+    // librariesSectionExpanded so the Libraries header toggle repaints.
     return ListenableBuilder(
       listenable: Listenable.merge([
         FullscreenStateManager(),
         SettingsService.instance.listenable(SettingsService.groupLibrariesByServer),
+        SettingsService.instance.listenable(SettingsService.showExploreTab),
+        SettingsService.instance.listenable(SettingsService.librariesSectionExpanded),
       ]),
       builder: (context, _) {
+        final hasExplore = hasExploreSource && SettingsService.instance.read(SettingsService.showExploreTab);
         // Server grouping: only when multi-server AND the user-facing toggle is on.
         final groupByServerSetting = SettingsService.instance.read(SettingsService.groupLibrariesByServer);
         final showServerHeaders = serverIds.length > 1 && groupByServerSetting;
@@ -1020,7 +1027,8 @@ class SideNavigationRailState extends State<SideNavigationRail> with MountedSetS
           ),
           isSelected: isLibrariesTabSelected,
           isCollapsed: isCollapsed,
-          onTap: () => setState(() => _librariesExpanded = !_librariesExpanded),
+          onTap: () =>
+              unawaited(SettingsService.instance.write(SettingsService.librariesSectionExpanded, !_librariesExpanded)),
           focusNode: _focusTracker.get(_kLibraries),
           borderRadius: BorderRadius.circular(tokens(context).radiusMd),
           horizontalPadding: itemHorizontalPadding,

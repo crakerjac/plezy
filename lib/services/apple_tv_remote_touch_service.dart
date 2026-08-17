@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
+import '../focus/focus_navigation_intent.dart';
+import '../focus/input_mode_tracker.dart';
 import '../utils/app_logger.dart';
 import '../utils/key_event_simulator.dart' as key_sim;
 import 'gamepad_service.dart';
@@ -18,11 +20,23 @@ class AppleTvRemotePlayPauseAction {
 
 /// Bridges tvOS touch-surface events from Apple's iOS Remote app into the
 /// focus-tree key events Plezy already handles for D-pad navigation.
+///
+/// Like the native focus engine, the pan distance for one focus step follows
+/// the focused control's on-screen size: small chips traverse quickly, large
+/// cards demand a longer swipe. When no usable geometry exists (a bare focus
+/// scope, the video player's screen-sized catch-all surfaces) the step falls
+/// back to a fixed threshold.
 class AppleTvRemoteTouchService {
   static const String _channelName = 'flutter/gamepadtouchevent';
   static const double defaultSwipeThreshold = 180;
   static const double defaultAxisSwitchDominanceRatio = 1.5;
   static const Duration defaultSwipeRepeatInterval = Duration(milliseconds: 140);
+  // Device-tuned on an Apple TV 4K against native focus feel: UIKit's
+  // indirect-touch acceleration means roughly half an item's extent of
+  // reported travel already reads as "one deliberate swipe".
+  static const double defaultSwipeExtentGain = 0.55;
+  static const double defaultMinSwipeThreshold = 50;
+  static const double defaultMaxSwipeThreshold = 180;
 
   static final AppleTvRemoteTouchService instance = AppleTvRemoteTouchService();
 
@@ -31,11 +45,27 @@ class AppleTvRemoteTouchService {
   final VoidCallback _scheduleFrame;
   final DateTime Function() _now;
   final GamepadDuplicateInputGuard _duplicateInputGuard;
+
+  /// Announces that a pointerless device produced input. Injected so tests can
+  /// observe it without a widget tree; defaults to the app-wide tracker.
+  final void Function() reportNonPointerInput;
   final StreamController<AppleTvRemotePlayPauseAction> _playPauseController =
       StreamController<AppleTvRemotePlayPauseAction>.broadcast();
+
+  /// Fallback step distance when no usable focus geometry exists.
   final double swipeThreshold;
   final double axisSwitchDominanceRatio;
   final Duration swipeRepeatInterval;
+
+  /// Multiplier from the focused control's extent to the pan distance for one
+  /// step. Empirical; see the default constants for the device calibration.
+  final double swipeExtentGain;
+  final double minSwipeThreshold;
+  final double maxSwipeThreshold;
+
+  /// Global rect of the control that prices a focus step, or null when no
+  /// usable geometry exists. Injected so tests can supply fake geometry.
+  final Rect? Function() _focusedItemRect;
 
   bool _listening = false;
   bool _nativeKeyHandlerRegistered = false;
@@ -53,15 +83,23 @@ class AppleTvRemoteTouchService {
     VoidCallback? scheduleFrame,
     DateTime Function()? now,
     GamepadDuplicateInputGuard? duplicateInputGuard,
+    this.reportNonPointerInput = InputModeTracker.reportNonPointerInput,
     Duration duplicateSuppressionWindow = GamepadDuplicateInputGuard.defaultSuppressionWindow,
     this.swipeThreshold = defaultSwipeThreshold,
     this.axisSwitchDominanceRatio = defaultAxisSwitchDominanceRatio,
     this.swipeRepeatInterval = defaultSwipeRepeatInterval,
+    this.swipeExtentGain = defaultSwipeExtentGain,
+    this.minSwipeThreshold = defaultMinSwipeThreshold,
+    this.maxSwipeThreshold = defaultMaxSwipeThreshold,
+    Rect? Function()? focusedItemRect,
   }) : assert(axisSwitchDominanceRatio >= 1),
+       assert(swipeExtentGain > 0),
+       assert(minSwipeThreshold > 0 && minSwipeThreshold <= maxSwipeThreshold),
        _channel = channel ?? const BasicMessageChannel<dynamic>(_channelName, JSONMessageCodec()),
        _simulateKeyPress = simulateKeyPress ?? key_sim.simulateKeyPress,
        _scheduleFrame = scheduleFrame ?? key_sim.scheduleFrameIfIdle,
        _now = now ?? DateTime.now,
+       _focusedItemRect = focusedItemRect ?? _defaultFocusedItemRect,
        _duplicateInputGuard =
            duplicateInputGuard ?? GamepadDuplicateInputGuard(now: now, suppressionWindow: duplicateSuppressionWindow);
 
@@ -167,12 +205,19 @@ class AppleTvRemoteTouchService {
 
     final deltaX = _anchorX - x;
     final deltaY = _anchorY - y;
-    final axis = _resolveSwipeAxis(x: x, y: y, deltaX: deltaX, deltaY: deltaY);
-    if (axis == null) return;
 
     final now = _now();
     final lastSwipeAt = _lastSwipeAt;
     if (lastSwipeAt != null && now.difference(lastSwipeAt) < swipeRepeatInterval) {
+      // Travel during the repeat cooldown never counts toward the next step:
+      // re-anchor on every frame so a fast flick's deceleration tail is
+      // discarded instead of banked. Without this, the first post-cooldown
+      // move frame — even a stationary or lift-drift one — released the
+      // banked delta as a second focus step for a single intentional swipe.
+      // A deliberate continuous drag still repeats because it covers a fresh
+      // swipe threshold after each cooldown expires.
+      _anchorX = x;
+      _anchorY = y;
       final age = now.difference(lastSwipeAt).inMilliseconds;
       _log(
         'suppress swipe reason=repeat-cooldown age=${age}ms dx=${_formatDouble(deltaX)} dy=${_formatDouble(deltaY)}',
@@ -180,47 +225,90 @@ class AppleTvRemoteTouchService {
       return;
     }
 
+    final thresholds = _stepThresholds();
+    final axis = _resolveSwipeAxis(x: x, y: y, deltaX: deltaX, deltaY: deltaY, thresholds: thresholds);
+    if (axis == null) return;
+
     final logicalKey = axis == _SwipeAxis.horizontal
         ? (deltaX >= 0 ? LogicalKeyboardKey.arrowLeft : LogicalKeyboardKey.arrowRight)
         : (deltaY >= 0 ? LogicalKeyboardKey.arrowUp : LogicalKeyboardKey.arrowDown);
 
-    _emitKey(logicalKey, source: 'swipe', detail: 'dx=${_formatDouble(deltaX)} dy=${_formatDouble(deltaY)}');
+    _emitKey(
+      logicalKey,
+      source: 'swipe',
+      detail:
+          'dx=${_formatDouble(deltaX)} dy=${_formatDouble(deltaY)} '
+          'thX=${_formatDouble(thresholds.horizontal)} thY=${_formatDouble(thresholds.vertical)}',
+    );
     _anchorX = x;
     _anchorY = y;
     _lastSwipeAxis = axis;
     _lastSwipeAt = now;
   }
 
+  /// Resolves which axis, if any, crossed its step threshold.
+  ///
+  /// Distances are normalized by the per-axis thresholds so that, like the
+  /// native focus engine, a wide-flat control steps vertically once the finger
+  /// covers the item's height even while the raw horizontal delta is larger.
   _SwipeAxis? _resolveSwipeAxis({
     required double x,
     required double y,
     required double deltaX,
     required double deltaY,
+    required ({double horizontal, double vertical}) thresholds,
   }) {
-    final absX = deltaX.abs();
-    final absY = deltaY.abs();
-    if (absX < swipeThreshold && absY < swipeThreshold) return null;
+    final progressX = deltaX.abs() / thresholds.horizontal;
+    final progressY = deltaY.abs() / thresholds.vertical;
+    if (progressX < 1 && progressY < 1) return null;
 
-    final candidate = absX >= absY ? _SwipeAxis.horizontal : _SwipeAxis.vertical;
+    final candidate = progressX >= progressY ? _SwipeAxis.horizontal : _SwipeAxis.vertical;
     final lastAxis = _lastSwipeAxis;
     if (lastAxis == null || candidate == lastAxis) return candidate;
 
-    final totalX = (_startX - x).abs();
-    final totalY = (_startY - y).abs();
-    final candidateTotal = _axisDistance(candidate, totalX, totalY);
-    final lastAxisTotal = _axisDistance(lastAxis, totalX, totalY);
-    final candidateSegment = _axisDistance(candidate, absX, absY);
-    final lastAxisSegment = _axisDistance(lastAxis, absX, absY);
+    final totalProgressX = (_startX - x).abs() / thresholds.horizontal;
+    final totalProgressY = (_startY - y).abs() / thresholds.vertical;
+    final candidateTotal = _axisValue(candidate, totalProgressX, totalProgressY);
+    final lastAxisTotal = _axisValue(lastAxis, totalProgressX, totalProgressY);
+    final candidateSegment = _axisValue(candidate, progressX, progressY);
+    final lastAxisSegment = _axisValue(lastAxis, progressX, progressY);
     if (candidateTotal >= lastAxisTotal * axisSwitchDominanceRatio &&
         candidateSegment >= lastAxisSegment * axisSwitchDominanceRatio) {
       return candidate;
     }
 
-    return lastAxisSegment >= swipeThreshold ? lastAxis : null;
+    return lastAxisSegment >= 1 ? lastAxis : null;
   }
 
-  double _axisDistance(_SwipeAxis axis, double horizontal, double vertical) {
+  double _axisValue(_SwipeAxis axis, double horizontal, double vertical) {
     return axis == _SwipeAxis.horizontal ? horizontal : vertical;
+  }
+
+  ({double horizontal, double vertical}) _stepThresholds() {
+    final rect = _focusedItemRect();
+    if (rect == null) return (horizontal: swipeThreshold, vertical: swipeThreshold);
+    return (horizontal: _thresholdForExtent(rect.width), vertical: _thresholdForExtent(rect.height));
+  }
+
+  double _thresholdForExtent(double extent) {
+    if (!extent.isFinite || extent <= 0) return swipeThreshold;
+    return (extent * swipeExtentGain).clamp(minSwipeThreshold, maxSwipeThreshold).toDouble();
+  }
+
+  /// Reads the primary focus geometry, rejecting nodes whose rect cannot
+  /// meaningfully price a step: bare scopes (nothing real is focused yet) and
+  /// the player's catch-all [DirectionalShortcutFocusNode] surfaces are
+  /// screen-sized, and a detached or unlaid-out node has no rect at all.
+  static Rect? _defaultFocusedItemRect() {
+    final node = FocusManager.instance.primaryFocus;
+    if (node == null || node is FocusScopeNode || node is DirectionalShortcutFocusNode) return null;
+    final context = node.context;
+    if (context == null) return null;
+    final renderObject = context.findRenderObject();
+    if (renderObject is! RenderBox || !renderObject.attached || !renderObject.hasSize) return null;
+    final rect = node.rect;
+    if (!rect.isFinite || rect.isEmpty) return null;
+    return rect;
   }
 
   bool _emitKey(LogicalKeyboardKey logicalKey, {required String source, String? detail}) {
@@ -229,7 +317,7 @@ class AppleTvRemoteTouchService {
       return false;
     }
 
-    _setTraditionalFocusHighlight();
+    reportNonPointerInput();
     _scheduleFrame();
     _log('emit key=${_keyName(logicalKey)} source=$source${detail == null ? '' : ' $detail'}');
     _simulateKeyPress(logicalKey);
@@ -254,12 +342,6 @@ class AppleTvRemoteTouchService {
     if (!_nativeKeyHandlerRegistered) return;
     HardwareKeyboard.instance.removeHandler(handleNativeKeyEvent);
     _nativeKeyHandlerRegistered = false;
-  }
-
-  void _setTraditionalFocusHighlight() {
-    if (FocusManager.instance.highlightStrategy != FocusHighlightStrategy.alwaysTraditional) {
-      FocusManager.instance.highlightStrategy = FocusHighlightStrategy.alwaysTraditional;
-    }
   }
 
   void _logTouch(String type, Map<dynamic, dynamic> arguments) {

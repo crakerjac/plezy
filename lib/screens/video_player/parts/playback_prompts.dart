@@ -22,7 +22,16 @@ extension _VideoPlayerPlaybackPromptMethods on VideoPlayerScreenState {
     );
     _updateMediaControlsPlaybackState();
     unawaited(DiscordRPCService.instance.pausePlayback());
-    unawaited(TraktScrobbleService.instance.pausePlayback());
+    // The item finished, so real-time trackers get a terminal report now rather
+    // than whenever the screen happens to tear down: a completion prompt or
+    // end-of-video sleep timer can leave it open for minutes, and until then
+    // the service would still show the item as playing. Seed the known duration
+    // first — the position stream can stop a beat short of it on EOF. A later
+    // dispose or in-place reload finds no context and does nothing.
+    if (duration != null && duration.inMilliseconds > 0) {
+      TrackerCoordinator.instance.updatePosition(duration);
+    }
+    unawaited(TrackerCoordinator.instance.stopPlayback());
     if (_autoPipEnabled) {
       unawaited(_updateAutoPipState(isPlaying: false));
     }
@@ -73,7 +82,7 @@ extension _VideoPlayerPlaybackPromptMethods on VideoPlayerScreenState {
       }
 
       // Capture keyboard mode before async gap
-      final isKeyboardMode = PlatformDetector.isTV() && InputModeTracker.isKeyboardMode(context);
+      final isKeyboardMode = PlatformDetector.isTV() && InputModeTracker.isKeyboardMode(context, listen: false);
 
       final settings = await SettingsService.getInstance();
       if (!mounted) return;
@@ -125,6 +134,58 @@ extension _VideoPlayerPlaybackPromptMethods on VideoPlayerScreenState {
     });
   }
 
+  /// Re-present the Play Next prompt after an EOF-driven advance failed on a
+  /// transient server blip (#1867).
+  ///
+  /// The failed reload rolled back to the finished episode's last frame, so
+  /// without a prompt the screen parks black until the device sleeps — while
+  /// a retry seconds later typically succeeds (skipping manually did exactly
+  /// that). [playNextRetryPresentation] owns the decision: only EOF-driven
+  /// advances that failed with [PlaybackFailureReason.serverUnavailable]
+  /// qualify, the auto-play countdown re-fires [_playNext] up to
+  /// [maxPlayNextTransientRetries] times, and after that (with auto-play
+  /// off, or in a Watch Together session) the prompt waits for a manual
+  /// retry.
+  void _presentPlayNextRetryPrompt({required bool wasAtCompletion}) async {
+    if (!mounted || !_canNavigateMediaItems()) return;
+    if (_isLoadingNext || _showPlayNextDialog || _showStillWatchingPrompt) return;
+
+    // Capture keyboard mode before the async gap, same as _onVideoCompleted.
+    final isKeyboardMode = PlatformDetector.isTV() && InputModeTracker.isKeyboardMode(context, listen: false);
+    final settings = await SettingsService.getInstance();
+    if (!mounted || _isLoadingNext || _showPlayNextDialog) return;
+
+    final presentation = playNextRetryPresentation(
+      wasAtCompletion: wasAtCompletion,
+      failureReason: _lastMediaReloadFailureReason,
+      hasNext: _nextEpisode != null,
+      autoPlayEnabled: settings.read(SettingsService.autoPlayNextEpisode),
+      inWatchTogetherSession: _activeWatchTogetherSession() != null,
+      autoRetriesUsed: _playNextTransientRetryCount,
+    );
+    if (presentation == PlayNextRetryPresentation.none) return;
+
+    // The failed reload's rollback reset the latch; re-latch so a duplicate
+    // EOF signal from the parked stream cannot stack a second prompt on top.
+    if (!_completionLatch.triggered) _completionLatch.latch();
+
+    final countdown = presentation == PlayNextRetryPresentation.countdown;
+    if (countdown) _playNextTransientRetryCount++;
+
+    _setPlayerState(() {
+      _showPlayNextDialog = true;
+      _autoPlayCountdown = countdown ? 5 : -1;
+    });
+
+    if (isKeyboardMode) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _playNextConfirmFocusNode.requestFocus();
+      });
+    }
+
+    if (countdown) _startAutoPlayTimer();
+  }
+
   void _cancelAutoPlay() {
     _autoPlayTimer?.cancel();
     _unfocusPlayNextPrompt();
@@ -162,7 +223,7 @@ extension _VideoPlayerPlaybackPromptMethods on VideoPlayerScreenState {
     // Don't show if auto-play dialog is already visible
     if (_showPlayNextDialog) return;
 
-    final isKeyboardMode = PlatformDetector.isTV() && InputModeTracker.isKeyboardMode(context);
+    final isKeyboardMode = PlatformDetector.isTV() && InputModeTracker.isKeyboardMode(context, listen: false);
 
     _setPlayerState(() {
       _showStillWatchingPrompt = true;

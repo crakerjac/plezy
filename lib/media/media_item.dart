@@ -7,9 +7,11 @@ import '../services/settings_service.dart' show EpisodePosterMode;
 import '../utils/global_key_utils.dart';
 import '../utils/json_utils.dart';
 import 'media_backend.dart';
+import 'media_browser_dialect.dart';
 import 'media_kind.dart';
 import 'media_role.dart';
 import 'media_version.dart';
+import 'media_rating.dart';
 
 part 'media_item.freezed.dart';
 part 'media_item.g.dart';
@@ -22,6 +24,10 @@ const double _squareHeroAspectRatio = 1.39;
 /// Backend-neutral media item shape used by UI, providers, persistence, and
 /// playback. Concrete variants retain backend-only fields without forcing the
 /// rest of the app to traffic in Plex/Jellyfin DTOs.
+///
+/// [JellyfinMediaItem] backs both MediaBrowser-family backends: Jellyfin and
+/// Emby return field-identical `BaseItemDto`s, so they share one variant and
+/// carry [JellyfinMediaItem.dialect] to tell them apart.
 @Freezed(unionKey: 'backend', unionValueCase: FreezedUnionCase.none, equal: false, makeCollectionsUnmodifiable: false)
 sealed class MediaItem with _$MediaItem {
   const MediaItem._();
@@ -66,6 +72,7 @@ sealed class MediaItem with _$MediaItem {
     int? addedAt,
     int? updatedAt,
     double? rating,
+    List<MediaRatingSource>? ratings,
     double? userRating,
     bool? isFavorite,
     List<String>? genres,
@@ -128,6 +135,7 @@ sealed class MediaItem with _$MediaItem {
         addedAt: addedAt,
         updatedAt: updatedAt,
         rating: rating,
+        ratings: ratings,
         userRating: userRating,
         isFavorite: isFavorite,
         genres: genres,
@@ -151,7 +159,8 @@ sealed class MediaItem with _$MediaItem {
         backendFolderKey: backendFolderKey,
         raw: raw,
       ),
-      MediaBackend.jellyfin => JellyfinMediaItem(
+      MediaBackend.jellyfin || MediaBackend.emby => JellyfinMediaItem(
+        dialect: backend.dialect!,
         id: id,
         kind: kind,
         guid: guid,
@@ -189,6 +198,7 @@ sealed class MediaItem with _$MediaItem {
         addedAt: addedAt,
         updatedAt: updatedAt,
         rating: rating,
+        ratings: ratings,
         userRating: userRating,
         isFavorite: isFavorite,
         genres: genres,
@@ -257,11 +267,14 @@ sealed class MediaItem with _$MediaItem {
     @JsonKey(fromJson: flexibleInt) int? addedAt,
     @JsonKey(fromJson: flexibleInt) int? updatedAt,
     @JsonKey(fromJson: flexibleDouble) double? rating,
-    @JsonKey(fromJson: flexibleDouble) double? audienceRating,
     @JsonKey(fromJson: flexibleDouble) double? userRating,
+
+    /// Every attributed score the response carried, headline first. Plex
+    /// listings yield one or two (the `rating`/`audienceRating` pair with
+    /// their source images); `/library/metadata/{id}` adds the `Rating[]`
+    /// array, so IMDb and TMDB join Rotten Tomatoes on detail screens.
+    @JsonKey(fromJson: _mediaItemRatingsFromJson) List<MediaRatingSource>? ratings,
     bool? isFavorite,
-    String? ratingImage,
-    String? audienceRatingImage,
     @JsonKey(fromJson: _mediaItemStringList) List<String>? genres,
     @JsonKey(fromJson: _mediaItemStringList) List<String>? directors,
     @JsonKey(fromJson: _mediaItemStringList) List<String>? writers,
@@ -293,10 +306,20 @@ sealed class MediaItem with _$MediaItem {
     @JsonKey(fromJson: _mediaItemRawFromJson) Map<String, Object?>? raw,
   }) = PlexMediaItem;
 
-  /// Backend-tagged concrete subclass for items sourced from a Jellyfin server.
+  /// Backend-tagged concrete subclass for items sourced from a MediaBrowser
+  /// server — Jellyfin or Emby, discriminated by [JellyfinMediaItem.dialect].
   @FreezedUnionValue('jellyfin')
   @JsonSerializable(includeIfNull: false, explicitToJson: true)
   const factory MediaItem.jellyfin({
+    /// Which MediaBrowser dialect produced this item.
+    ///
+    /// Not serialized on its own: [MediaItem.toJson] already writes the
+    /// resolved [backend] id under the union key, and [MediaItem.fromJson]
+    /// restores the dialect from it. Keeping one discriminator on the wire
+    /// avoids the two disagreeing on a stale cache row.
+    @JsonKey(includeToJson: false, includeFromJson: false)
+    @Default(MediaBrowserDialect.jellyfin)
+    MediaBrowserDialect dialect,
     @JsonKey(readValue: readStringField, defaultValue: '') required String id,
     @JsonKey(fromJson: _mediaKindFromJson, toJson: _mediaKindToJson) required MediaKind kind,
     String? guid,
@@ -335,6 +358,10 @@ sealed class MediaItem with _$MediaItem {
     @JsonKey(fromJson: flexibleInt) int? updatedAt,
     @JsonKey(fromJson: flexibleDouble) double? rating,
     @JsonKey(fromJson: flexibleDouble) double? userRating,
+
+    /// `CommunityRating` and the `CriticRating` Tomatometer, in that order.
+    /// Jellyfin exposes no per-source array, so this is at most two entries.
+    @JsonKey(fromJson: _mediaItemRatingsFromJson) List<MediaRatingSource>? ratings,
     bool? isFavorite,
     @JsonKey(fromJson: _mediaItemStringList) List<String>? genres,
     @JsonKey(fromJson: _mediaItemStringList) List<String>? directors,
@@ -364,7 +391,7 @@ sealed class MediaItem with _$MediaItem {
 
   MediaBackend get backend => switch (this) {
     PlexMediaItem() => MediaBackend.plex,
-    JellyfinMediaItem() => MediaBackend.jellyfin,
+    JellyfinMediaItem(:final dialect) => dialect.backend,
   };
 
   /// Restore a [MediaItem] from a [toJson] payload. Missing/unknown backend
@@ -374,13 +401,14 @@ sealed class MediaItem with _$MediaItem {
     return switch (MediaBackend.fromString(json['backend'] as String?)) {
       MediaBackend.plex => _$PlexMediaItemFromJson(json),
       MediaBackend.jellyfin => _$JellyfinMediaItemFromJson(json),
+      MediaBackend.emby => _$JellyfinMediaItemFromJson(json).copyWith(dialect: MediaBrowserDialect.emby),
     };
   }
 
   Map<String, dynamic> toJson() {
     return switch (this) {
       final PlexMediaItem item => {'backend': MediaBackend.plex.id, ..._$PlexMediaItemToJson(item)},
-      final JellyfinMediaItem item => {'backend': MediaBackend.jellyfin.id, ..._$JellyfinMediaItemToJson(item)},
+      final JellyfinMediaItem item => {'backend': item.dialect.backend.id, ..._$JellyfinMediaItemToJson(item)},
     };
   }
 
@@ -745,6 +773,15 @@ List<MediaVersion>? _mediaItemVersionsFromJson(Object? raw) {
       ? [
           for (final version in raw)
             if (version is Map<String, dynamic>) MediaVersion.fromJson(version),
+        ]
+      : null;
+}
+
+List<MediaRatingSource>? _mediaItemRatingsFromJson(Object? raw) {
+  return raw is List
+      ? [
+          for (final rating in raw)
+            if (rating is Map<String, Object?>) ?MediaRatingSource.fromJson(rating),
         ]
       : null;
 }

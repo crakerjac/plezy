@@ -96,7 +96,6 @@ class MpvPlayerCore private constructor(
   // output (#1482).
   private val mpvWriteDispatcher = Dispatchers.IO.limitedParallelism(1)
 
-  // Frame rate matching
   private var frameRateManager: FrameRateManager? = null
   private val handler = Handler(Looper.getMainLooper())
 
@@ -110,7 +109,6 @@ class MpvPlayerCore private constructor(
     if (Looper.myLooper() == Looper.getMainLooper()) block() else mainHandler.post(block)
   }
 
-  // Audio focus
   private var audioFocusManager: AudioFocusManager? = null
 
   @Volatile private var cachedPaused: Boolean = true
@@ -275,7 +273,6 @@ class MpvPlayerCore private constructor(
         Log.d(TAG, "SurfaceView added to content view")
       }
 
-      // Create MpvPlayer on background thread via coroutine
       scope.launch {
         try {
           if (disposing) {
@@ -308,6 +305,12 @@ class MpvPlayerCore private constructor(
             // Pause on the last frame at EOF instead of unloading the file, so a
             // seek after the video ends still works (matches Linux/Windows).
             setOption("keep-open", "yes")
+            // Plezy only ever opens media-server streams and local files, so
+            // mpv's bundled ytdl_hook has nothing to resolve: it costs an
+            // on_load hook per open and, on a failed open, spawns yt-dlp with
+            // the access token in its argv. mpv decides whether to load the
+            // builtin script during mpv_initialize, hence an option here.
+            setOption("ytdl", "no")
           }
           if (displayFpsOverride != null) {
             Log.d(TAG, "Initial display-fps-override=$displayFpsOverride")

@@ -61,10 +61,6 @@ class _AppDatabaseTestSuite {
   }
 
   void _registerSchemaTests() {
-    // ============================================================
-    // Schema sanity
-    // ============================================================
-
     group('schema', () {
       test('all tables are accessible and start empty', () async {
         expect(await db.select(db.downloadedMedia).get(), isEmpty);
@@ -132,6 +128,105 @@ class _AppDatabaseTestSuite {
           names,
           containsAll(['idx_profiles_kind', 'idx_profile_connections_profile_id', 'idx_offline_watch_progress_server']),
         );
+      });
+
+      test('desktop open removes orphaned sidecars when the main database is absent', () async {
+        await db.close();
+        resetSharedPreferencesForTest();
+        final tempDir = await Directory.systemTemp.createTemp('plezy_db_orphaned_sidecars_test_');
+        final file = File('${tempDir.path}/plezy_downloads.db');
+        final wal = File('${file.path}-wal');
+        final shm = File('${file.path}-shm');
+        AppDatabase? opened;
+
+        try {
+          await wal.writeAsBytes([1, 2, 3]);
+          await shm.writeAsBytes([4, 5, 6]);
+          final prefs = await BaseSharedPreferencesService.sharedCache();
+
+          final bootstrap = await AppDatabase.open(
+            isTvos: false,
+            databaseFile: file,
+            preferences: prefs,
+            executorFactory: (_) => NativeDatabase.memory(),
+          );
+          opened = bootstrap.database;
+
+          expect(await wal.exists(), isFalse);
+          expect(await shm.exists(), isFalse);
+        } finally {
+          await opened?.close();
+          if (await tempDir.exists()) {
+            await tempDir.delete(recursive: true);
+          }
+          db = AppDatabase.forTesting(NativeDatabase.memory());
+        }
+      });
+
+      test('desktop open preserves sidecars when the main database exists', () async {
+        await db.close();
+        resetSharedPreferencesForTest();
+        final tempDir = await Directory.systemTemp.createTemp('plezy_db_live_sidecars_test_');
+        final file = File('${tempDir.path}/plezy_downloads.db');
+        final wal = File('${file.path}-wal');
+        final shm = File('${file.path}-shm');
+        AppDatabase? opened;
+
+        try {
+          await file.writeAsBytes([0x50, 0x4c, 0x45, 0x5a, 0x59]);
+          await wal.writeAsBytes([1, 2, 3]);
+          await shm.writeAsBytes([4, 5, 6]);
+          final prefs = await BaseSharedPreferencesService.sharedCache();
+
+          final bootstrap = await AppDatabase.open(
+            isTvos: false,
+            databaseFile: file,
+            preferences: prefs,
+            executorFactory: (_) => NativeDatabase.memory(),
+          );
+          opened = bootstrap.database;
+
+          expect(await wal.readAsBytes(), [1, 2, 3]);
+          expect(await shm.readAsBytes(), [4, 5, 6]);
+        } finally {
+          await opened?.close();
+          if (await tempDir.exists()) {
+            await tempDir.delete(recursive: true);
+          }
+          db = AppDatabase.forTesting(NativeDatabase.memory());
+        }
+      });
+
+      test('retried v14 migration tolerates an existing connections table', () async {
+        await db.close();
+        final tempDir = await Directory.systemTemp.createTemp('plezy_db_existing_connections_test_');
+        final file = File('${tempDir.path}/plezy_downloads.db');
+        AppDatabase? seeded;
+        AppDatabase? reopened;
+
+        try {
+          seeded = AppDatabase.forTesting(NativeDatabase(file));
+          await seeded.select(seeded.apiCache).get();
+          final connectionTableSql =
+              (await seeded
+                      .customSelect("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'connections'")
+                      .getSingle())
+                  .read<String>('sql');
+          await _createSchemaV13Fixture(seeded);
+          await seeded.customStatement(connectionTableSql);
+          await seeded.close();
+          seeded = null;
+
+          reopened = AppDatabase.forTesting(NativeDatabase(file));
+          expect(await reopened.select(reopened.connections).get(), isEmpty);
+        } finally {
+          await reopened?.close();
+          await seeded?.close();
+          if (await tempDir.exists()) {
+            await tempDir.delete(recursive: true);
+          }
+          db = AppDatabase.forTesting(NativeDatabase.memory());
+        }
       });
 
       test('retried v14 migration tolerates existing indices', () async {
@@ -837,13 +932,6 @@ class _AppDatabaseTestSuite {
   }
 
   void _registerLegacyDesktopMigrationTests() {
-    // ============================================================
-    // Legacy desktop DB-file relocation (Documents → AppSupport).
-    // Regression coverage for #1022: cross-drive rename (e.g. OneDrive
-    // Documents on X:, AppData on C:) used to throw an uncaught
-    // FileSystemException out of _openConnection and strand the splash.
-    // ============================================================
-
     group('legacy desktop DB migration', () {
       late Directory tempDir;
 
@@ -1034,10 +1122,6 @@ class _AppDatabaseTestSuite {
   }
 
   void _registerApiCacheTests() {
-    // ============================================================
-    // ApiCache schema defaults and constraints
-    // ============================================================
-
     group('ApiCache', () {
       test('default pinned=false, custom pinned=true is honored', () async {
         await db.into(db.apiCache).insert(ApiCacheCompanion.insert(cacheKey: 'k1', data: 'a'));
@@ -1060,10 +1144,6 @@ class _AppDatabaseTestSuite {
   }
 
   void _registerDownloadedMediaTests() {
-    // ============================================================
-    // DownloadedMedia: persistence, defaults, constraints, and helpers
-    // ============================================================
-
     group('DownloadedMedia', () {
       Future<int> insertMovie({
         String serverId = 'srv1',
@@ -1372,10 +1452,6 @@ class _AppDatabaseTestSuite {
   }
 
   void _registerOfflineWatchProgressTests() {
-    // ============================================================
-    // OfflineWatchProgress helpers
-    // ============================================================
-
     group('OfflineWatchProgress', () {
       Future<int> insertAction({
         String serverId = 's',
@@ -1981,10 +2057,6 @@ class _AppDatabaseTestSuite {
   }
 
   void _registerSyncRulesTests() {
-    // ============================================================
-    // Sync Rules helpers
-    // ============================================================
-
     group('SyncRules', () {
       test('insertSyncRule + getSyncRules round-trip with defaults', () async {
         await db.insertSyncRule(

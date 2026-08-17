@@ -7,6 +7,7 @@ import 'dart:io' show Platform, exit;
 export '../navigation/main_screen_scope.dart'
     show MainScreenFocusScope, MainScreenScopeAspect, SideNavigationBleedBuilder;
 
+import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart'
     show HardwareKeyboard, KeyDownEvent, KeyRepeatEvent, KeyUpEvent, LogicalKeyboardKey;
@@ -77,14 +78,14 @@ import '../watch_together/watch_together.dart';
 // browse rail can import the scope without an import cycle through this file.
 
 @visibleForTesting
-bool shouldHandleMacOsRootEscape({
-  required bool isMacOS,
+bool shouldHandleDesktopRootEscape({
+  required bool isDesktop,
   required bool isPhysicalKeyboardEvent,
   required LogicalKeyboardKey logicalKey,
   required bool isCurrentRoute,
   required bool isHomeTab,
 }) {
-  return isMacOS && isPhysicalKeyboardEvent && logicalKey == LogicalKeyboardKey.escape && isCurrentRoute && isHomeTab;
+  return isDesktop && isPhysicalKeyboardEvent && logicalKey == LogicalKeyboardKey.escape && isCurrentRoute && isHomeTab;
 }
 
 @visibleForTesting
@@ -246,6 +247,7 @@ class _MainScreenState extends State<MainScreen>
   OfflineModeProvider? _offlineModeProvider;
   MultiServerProvider? _multiServerProvider;
   CatalogSourcesProvider? _catalogSourcesProvider;
+  ValueListenable<bool>? _showExploreTabListenable;
   RouteObserver<PageRoute<dynamic>>? _profileRouteObserver;
   bool _lastHasLiveTv = false;
   bool _lastHasExplore = false;
@@ -347,10 +349,14 @@ class _MainScreenState extends State<MainScreen>
       _lastHasLiveTv = false;
     }
     try {
-      _lastHasExplore = context.read<CatalogSourcesProvider>().hasAnySource;
+      _lastHasExplore = context.read<CatalogSourcesProvider>().hasAnySource && _showExploreTabSetting;
     } catch (_) {
       _lastHasExplore = false;
     }
+    // Re-evaluate Explore tab visibility when the appearance toggle flips
+    // mid-session; the catalog-sources listener covers source changes.
+    _showExploreTabListenable = SettingsService.instanceOrNull?.listenable(SettingsService.showExploreTab);
+    _showExploreTabListenable?.addListener(_handleCatalogSourcesChanged);
     _currentTab = _defaultTabForMode(_isOffline);
     _lastOnlineTabId = _isOffline ? null : NavigationTabId.discover;
     _autoSwitchedToDownloads = _isOffline && _currentTab == NavigationTabId.downloads;
@@ -520,7 +526,7 @@ class _MainScreenState extends State<MainScreen>
     }
 
     if (!mounted) return;
-    _fullRefreshContentTabs();
+    _primeContentTabs();
   }
 
   /// Single-shot "resume queued downloads once any client is online" rule,
@@ -887,6 +893,7 @@ class _MainScreenState extends State<MainScreen>
     _offlineModeProvider?.removeListener(_handleOfflineStatusChanged);
     _multiServerProvider?.removeListener(_handleLiveTvChanged);
     _catalogSourcesProvider?.removeListener(_handleCatalogSourcesChanged);
+    _showExploreTabListenable?.removeListener(_handleCatalogSourcesChanged);
     if (_bindingSettleListener != null) {
       _activeProfileForListener?.removeListener(_bindingSettleListener!);
     }
@@ -927,6 +934,19 @@ class _MainScreenState extends State<MainScreen>
 
   @override
   void onWindowClose() {
+    unawaited(_exitOnWindowClose());
+  }
+
+  /// `setPreventClose(true)` hands the window's close button to us, so the app
+  /// has to shut itself down. A bare `exit(0)` killed the process before the
+  /// app-level teardown could run — including the terminal playback report that
+  /// trackers owning their own watched semantics depend on.
+  Future<void> _exitOnWindowClose() async {
+    try {
+      await AppExitService.requestGracefulExit().timeout(const Duration(seconds: 5));
+    } catch (e, st) {
+      appLogger.w('Graceful window close failed; exiting immediately', error: e, stackTrace: st);
+    }
     exit(0);
   }
 
@@ -1065,8 +1085,10 @@ class _MainScreenState extends State<MainScreen>
     }
   }
 
+  bool get _showExploreTabSetting => SettingsService.instanceOrNull?.read(SettingsService.showExploreTab) ?? true;
+
   void _handleCatalogSourcesChanged() {
-    final hasExplore = _catalogSourcesProvider?.hasAnySource ?? false;
+    final hasExplore = (_catalogSourcesProvider?.hasAnySource ?? false) && _showExploreTabSetting;
     if (hasExplore == _lastHasExplore) return;
     _lastHasExplore = hasExplore;
 
@@ -1326,13 +1348,16 @@ class _MainScreenState extends State<MainScreen>
     return KeyEventResult.handled;
   }
 
-  /// On macOS, native fullscreen is window state shared by every route.
-  /// Player Escape therefore leaves it alone; only root Home owns the
-  /// conventional Escape-to-leave-fullscreen behavior.
-  KeyEventResult _handleMacOsRootEscape(KeyEvent event) {
+  /// Desktop physical-keyboard Escape at root Home is reserved for leaving
+  /// window fullscreen; it never arms the press-back-again quit, so an Escape
+  /// aimed at fullscreen can't close the app (#1748). Remotes, gamepad B, and
+  /// system back keep the double-press exit path. On macOS this also keeps
+  /// player Escape away from native fullscreen, which is window state shared
+  /// by every route.
+  KeyEventResult _handleDesktopRootEscape(KeyEvent event) {
     final tabs = _getVisibleTabs(_isOffline);
-    final shouldHandle = shouldHandleMacOsRootEscape(
-      isMacOS: Platform.isMacOS,
+    final shouldHandle = shouldHandleDesktopRootEscape(
+      isDesktop: PlatformDetector.isDesktopOS(),
       isPhysicalKeyboardEvent: event.isPhysicalKeyboardEvent,
       logicalKey: event.logicalKey,
       isCurrentRoute: ModalRoute.of(context)?.isCurrent == true,
@@ -1548,12 +1573,10 @@ class _MainScreenState extends State<MainScreen>
 
     final controller = OverlaySheetController.of(context);
     final groupByServer = SettingsService.instanceOrNull?.read(SettingsService.groupLibrariesByServer) ?? false;
-    final maxHeight = MediaQuery.sizeOf(context).height * 0.62;
 
     controller
         .show<String>(
           showDragHandle: true,
-          constraints: BoxConstraints(maxHeight: maxHeight),
           builder: (sheetContext) {
             return Consumer2<LibrariesProvider, HiddenLibrariesProvider>(
               builder: (context, librariesProvider, hiddenLibrariesProvider, _) {
@@ -1621,14 +1644,25 @@ class _MainScreenState extends State<MainScreen>
     if (_screenKeys[tab]?.currentState case final T state) fn(state);
   }
 
-  /// Full-refresh the primary content tabs. Shared by the online-entry hook
-  /// ([_primeOnlineServices]) and the profile-switch invalidation
-  /// ([_invalidateAllScreens]), which refresh the same set.
+  /// Full-refresh the primary content tabs. Used by the profile-switch
+  /// invalidation ([_invalidateAllScreens]), which must refetch everything for
+  /// the new identity.
   void _fullRefreshContentTabs() {
-    for (final tab in const [NavigationTabId.discover, NavigationTabId.libraries, NavigationTabId.search]) {
+    for (final tab in _contentTabs) {
       _onScreen<FullRefreshable>(tab, (screen) => screen.fullRefresh());
     }
   }
+
+  /// Online-entry variant used by [_primeOnlineServices] on cold start and on
+  /// reconnect-from-offline. Screens that already started their own load skip
+  /// it; see [FullRefreshable.primeRefresh].
+  void _primeContentTabs() {
+    for (final tab in _contentTabs) {
+      _onScreen<FullRefreshable>(tab, (screen) => screen.primeRefresh());
+    }
+  }
+
+  static const _contentTabs = [NavigationTabId.discover, NavigationTabId.libraries, NavigationTabId.search];
 
   Widget _buildBottomNavigationBar(BuildContext context, {required bool hideLabels}) {
     final tabs = _getBottomNavigationTabs(context);
@@ -1719,7 +1753,7 @@ class _MainScreenState extends State<MainScreen>
             canPop: false,
             child: Focus(
               onKeyEvent: (node, event) {
-                final rootEscapeResult = _handleMacOsRootEscape(event);
+                final rootEscapeResult = _handleDesktopRootEscape(event);
                 if (rootEscapeResult == KeyEventResult.handled) return rootEscapeResult;
                 final fullscreenResult = _handleFullscreenShortcut(event);
                 if (fullscreenResult == KeyEventResult.handled) return fullscreenResult;

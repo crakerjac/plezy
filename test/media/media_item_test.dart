@@ -1,8 +1,10 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:plezy/media/media_backend.dart';
+import 'package:plezy/media/media_browser_dialect.dart';
 import 'package:plezy/media/media_item.dart';
 import 'package:plezy/media/media_kind.dart';
 import 'package:plezy/media/media_part.dart';
+import 'package:plezy/media/media_rating.dart';
 import 'package:plezy/media/media_role.dart';
 import 'package:plezy/media/media_version.dart';
 import '../test_helpers/media_items.dart';
@@ -476,9 +478,10 @@ void main() {
         kind: MediaKind.movie,
         title: 'Old',
         editionTitle: 'Director Cut',
-        audienceRating: 8.9,
-        ratingImage: 'rottentomatoes://rating',
-        audienceRatingImage: 'rottentomatoes://audience',
+        ratings: [
+          MediaRatingSource(source: 'rottenTomatoesCritic', value: 9.4),
+          MediaRatingSource(source: 'imdb', value: 8.9, votes: 1200),
+        ],
         subtitleLanguage: 'eng',
         subtitleMode: 1,
         trailerKey: '/library/metadata/1',
@@ -492,9 +495,8 @@ void main() {
 
       expect(copy.title, 'New');
       expect(copy.editionTitle, 'Director Cut');
-      expect(copy.audienceRating, 8.9);
-      expect(copy.ratingImage, 'rottentomatoes://rating');
-      expect(copy.audienceRatingImage, 'rottentomatoes://audience');
+      expect(copy.ratings?.map((rating) => rating.source), ['rottenTomatoesCritic', 'imdb']);
+      expect(copy.ratings?.last.votes, 1200);
       expect(copy.subtitleLanguage, 'eng');
       expect(copy.subtitleMode, 1);
       expect(copy.trailerKey, '/library/metadata/1');
@@ -536,9 +538,10 @@ void main() {
         kind: MediaKind.movie,
         title: 'Movie',
         editionTitle: 'Theatrical',
-        audienceRating: 9.1,
-        ratingImage: 'rottentomatoes://rating',
-        audienceRatingImage: 'rottentomatoes://audience',
+        ratings: [
+          MediaRatingSource(source: 'rottenTomatoesCritic', value: 9.1),
+          MediaRatingSource(source: 'imdb', value: 8.4, votes: 250858),
+        ],
         genres: ['Drama'],
         roles: [MediaRole(id: '1', tag: 'Actor', role: 'Lead', thumbPath: '/photo')],
         mediaVersions: [
@@ -566,9 +569,9 @@ void main() {
       expect(decoded, isA<PlexMediaItem>());
       final plex = decoded as PlexMediaItem;
       expect(plex.editionTitle, 'Theatrical');
-      expect(plex.audienceRating, 9.1);
-      expect(plex.ratingImage, 'rottentomatoes://rating');
-      expect(plex.audienceRatingImage, 'rottentomatoes://audience');
+      expect(plex.ratings?.map((rating) => rating.source), ['rottenTomatoesCritic', 'imdb']);
+      expect(plex.ratings?.first.value, 9.1);
+      expect(plex.ratings?.last.votes, 250858);
       expect(plex.genres, ['Drama']);
       expect(plex.roles?.single.tag, 'Actor');
       expect(plex.mediaVersions?.single.parts.single.streamPath, '/stream');
@@ -636,6 +639,46 @@ void main() {
       expect(decoded.backend, MediaBackend.plex);
       expect(decoded.id, 'legacy');
       expect(decoded.kind, MediaKind.movie);
+    });
+
+    test('an Emby item persists its own backend id and restores the dialect', () {
+      const original = JellyfinMediaItem(
+        dialect: MediaBrowserDialect.emby,
+        // Emby item ids are short numeric strings, not GUIDs.
+        id: '7330',
+        kind: MediaKind.movie,
+        title: 'Movie 001',
+        playlistItemId: 'entry-1',
+      );
+
+      final json = original.toJson();
+      final decoded = MediaItem.fromJson(json);
+
+      // One discriminator on the wire: the union key carries the resolved
+      // backend and the dialect is rebuilt from it.
+      expect(json['backend'], 'emby');
+      expect(json.containsKey('dialect'), isFalse);
+      expect(decoded, isA<JellyfinMediaItem>());
+      expect(decoded.backend, MediaBackend.emby);
+      expect((decoded as JellyfinMediaItem).dialect, MediaBrowserDialect.emby);
+      expect(decoded.playlistItemId, 'entry-1');
+      expect(decoded.id, '7330');
+    });
+
+    test('the compat factory routes both MediaBrowser backends to one variant', () {
+      final emby = MediaItem(id: 'e1', backend: MediaBackend.emby, kind: MediaKind.movie);
+      final jellyfin = MediaItem(id: 'j1', backend: MediaBackend.jellyfin, kind: MediaKind.movie);
+
+      expect(emby, isA<JellyfinMediaItem>());
+      expect(jellyfin, isA<JellyfinMediaItem>());
+      expect(emby.backend, MediaBackend.emby);
+      expect(jellyfin.backend, MediaBackend.jellyfin);
+    });
+
+    test('copyWith preserves the Emby dialect', () {
+      final emby = MediaItem(id: 'e1', backend: MediaBackend.emby, kind: MediaKind.movie) as JellyfinMediaItem;
+
+      expect(emby.copyWith(title: 'renamed').backend, MediaBackend.emby);
     });
   });
 

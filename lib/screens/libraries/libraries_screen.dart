@@ -18,11 +18,9 @@ import '../../providers/multi_server_provider.dart';
 import '../../services/settings_service.dart';
 import '../../widgets/settings_builder.dart';
 import '../../utils/app_logger.dart';
-import '../../utils/library_grouping.dart';
 import '../../utils/platform_detector.dart';
 import '../../utils/content_utils.dart';
 import '../../widgets/app_menu.dart';
-import '../../widgets/backend_badge.dart';
 import '../../widgets/desktop_app_bar.dart';
 import '../../widgets/focusable_tab_chip.dart';
 import '../../widgets/library_management_sheet.dart';
@@ -30,6 +28,7 @@ import '../../services/storage_service.dart';
 import '../../mixins/refreshable.dart';
 import '../../mixins/item_updatable.dart';
 import '../../i18n/strings.g.dart';
+import 'library_server_label.dart';
 import 'state_messages.dart';
 import 'tabs/library_browse_tab.dart';
 import 'tabs/library_recommended_tab.dart';
@@ -62,7 +61,6 @@ class _LibrariesScreenState extends State<LibrariesScreen>
         ItemUpdatable,
         TickerProviderStateMixin,
         TabNavigationMixin {
-  // GlobalKeys for tabs to enable refresh
   final _recommendedTabKey = GlobalKey();
   final _browseTabKey = GlobalKey();
   final _collectionsTabKey = GlobalKey();
@@ -84,7 +82,6 @@ class _LibrariesScreenState extends State<LibrariesScreen>
   /// Key for the library dropdown menu button.
   final _libraryDropdownKey = GlobalKey<AppMenuButtonState<String>>();
 
-  // Dynamic visible tabs and their focus nodes
   List<LibraryTabType> _visibleTabs = LibraryTabType.values;
   List<FocusNode> _tabFocusNodes = List.generate(
     LibraryTabType.values.length,
@@ -94,10 +91,8 @@ class _LibrariesScreenState extends State<LibrariesScreen>
   @override
   List<FocusNode> get tabChipFocusNodes => _tabFocusNodes;
 
-  // App bar action bar
   final _actionBarKey = GlobalKey<FocusableActionBarState>();
 
-  // Scroll controller for the outer CustomScrollView
   final ScrollController _outerScrollController = ScrollController();
 
   /// Reveal the floating header by jumping the outer NestedScrollView back
@@ -153,25 +148,20 @@ class _LibrariesScreenState extends State<LibrariesScreen>
       return;
     }
 
-    // Compute visible libraries for initial load
     final hiddenKeys = hiddenLibrariesProvider.hiddenLibraryKeys;
     final visibleLibraries = allLibraries.where((lib) => !hiddenKeys.contains(lib.globalKey)).toList();
 
-    // Load saved preferences
     final storage = await StorageService.getInstance();
     final savedLibraryKey = storage.getSelectedLibraryKey();
 
-    // Find the library by key in visible libraries
     String? libraryGlobalKeyToLoad;
     if (savedLibraryKey != null) {
-      // Check if saved library exists and is visible
       final libraryExists = visibleLibraries.any((lib) => lib.globalKey == savedLibraryKey);
       if (libraryExists) {
         libraryGlobalKeyToLoad = savedLibraryKey;
       }
     }
 
-    // Fallback to first visible library if saved key not found
     if (libraryGlobalKeyToLoad == null && visibleLibraries.isNotEmpty) {
       libraryGlobalKeyToLoad = visibleLibraries.first.globalKey;
     }
@@ -183,16 +173,12 @@ class _LibrariesScreenState extends State<LibrariesScreen>
 
   @override
   void onTabChanged() {
-    // Save tab name when changed (but not when restoring from storage)
     if (_selectedLibraryGlobalKey != null && !tabController.indexIsChanging) {
-      // Only save if this was a user-initiated tab change, not a restore
       if (!_isRestoringTab) {
         StorageService.getInstance().then((storage) {
           storage.saveLibraryTab(_selectedLibraryGlobalKey!, _visibleTabs[tabController.index].name);
         });
 
-        // Focus first item in the current tab (only for user-initiated changes)
-        // But not when navigating via tab bar (suppressAutoFocus is true)
         if (!suppressAutoFocus) {
           _focusCurrentTab();
         }
@@ -306,15 +292,11 @@ class _LibrariesScreenState extends State<LibrariesScreen>
 
   /// Handle when a tab's data has finished loading
   void _handleTabDataLoaded(int tabIndex) {
-    // Track that this tab has loaded
     _loadedTabs.add(tabIndex);
 
-    // Don't auto-focus if suppressed (e.g., when navigating via tab bar)
     if (suppressAutoFocus) return;
 
-    // Only focus if this is the currently active tab
     if (tabController.index == tabIndex && mounted) {
-      // Use post-frame callback to ensure the widget tree is fully built
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted && tabController.index == tabIndex && !suppressAutoFocus) {
           _focusCurrentTab();
@@ -352,21 +334,17 @@ class _LibrariesScreenState extends State<LibrariesScreen>
   void _updateVisibleTabs(List<LibraryTabType> newTabs) {
     if (listEquals(_visibleTabs, newTabs)) return;
 
-    // Save current tab type before changing
     final currentTabType = _visibleTabs.length > tabController.index ? _visibleTabs[tabController.index] : null;
 
-    // Dispose old focus nodes and controller
     for (final node in _tabFocusNodes) {
       node.dispose();
     }
     disposeTabNavigation();
 
-    // Build new
     _visibleTabs = newTabs;
     _tabFocusNodes = List.generate(newTabs.length, (i) => FocusNode(debugLabel: 'tab_chip_${newTabs[i].name}'));
     initTabNavigation();
 
-    // Restore tab position: find current tab type in new set, default to first
     final newIndex = currentTabType != null ? newTabs.indexOf(currentTabType) : -1;
     if (newIndex > 0) {
       tabController.index = newIndex;
@@ -425,12 +403,6 @@ class _LibrariesScreenState extends State<LibrariesScreen>
         onBack: focusTabBar,
       ),
     };
-  }
-
-  /// Check if libraries come from multiple servers
-  bool _hasMultipleServers(List<MediaLibrary> libraries) {
-    final uniqueServerIds = libraries.where((lib) => lib.serverId != null).map((lib) => lib.serverId).toSet();
-    return uniqueServerIds.length > 1;
   }
 
   /// Notify parent that library order changed
@@ -584,40 +556,14 @@ class _LibrariesScreenState extends State<LibrariesScreen>
     );
   }
 
-  Widget _buildLibraryServerLabel(
-    MediaLibrary library,
-    TextStyle? style, {
-    double badgeSize = 11,
-    bool constrainText = false,
-    String? fallbackServerName,
-  }) {
-    final serverName = library.serverName ?? fallbackServerName;
-    if (serverName == null || serverName.isEmpty) return const SizedBox.shrink();
-
-    final text = Text(serverName, style: style, overflow: .ellipsis);
-    return Row(
-      mainAxisSize: .min,
-      children: [
-        BackendBadge(backend: library.backend, size: badgeSize, color: style?.color),
-        const SizedBox(width: 4),
-        if (constrainText) Flexible(child: text) else text,
-      ],
-    );
-  }
-
   AppMenuHeader<String> _buildLibraryServerHeaderMenuItem(MediaLibrary library, String serverKey) {
-    final style = Theme.of(context).textTheme.labelSmall?.copyWith(
-      fontWeight: .w600,
-      letterSpacing: 0.4,
-      color: Theme.of(context).textTheme.bodySmall?.color?.withValues(alpha: 0.65),
-    );
     return AppMenuHeader<String>(
-      child: _buildLibraryServerLabel(
-        library,
-        style,
-        badgeSize: 12,
-        constrainText: true,
+      child: LibraryServerLabel(
+        library: library,
         fallbackServerName: serverKey,
+        badgeSize: 12,
+        style: libraryServerHeaderStyle(context),
+        constrainText: true,
       ),
     );
   }
@@ -630,44 +576,31 @@ class _LibrariesScreenState extends State<LibrariesScreen>
       label: library.title,
       selected: isSelected,
       subtitleWidget: showServerName
-          ? _buildLibraryServerLabel(
-              library,
-              TextStyle(fontSize: 11, color: Theme.of(context).textTheme.bodySmall?.color?.withValues(alpha: 0.6)),
+          ? LibraryServerLabel(
+              library: library,
               badgeSize: 10,
+              style: TextStyle(
+                fontSize: 11,
+                color: Theme.of(context).textTheme.bodySmall?.color?.withValues(alpha: 0.6),
+              ),
               constrainText: true,
             )
           : null,
     );
   }
 
-  /// Build dropdown menu items with server subtitle when needed for clarity.
+  /// Build dropdown menu entries via the shared server-label policy.
   List<AppMenuEntry<String>> _buildGroupedLibraryMenuItems(
     List<MediaLibrary> visibleLibraries, {
-    required bool showServerHeaders,
+    required bool groupByServer,
   }) {
-    if (!showServerHeaders) {
-      // With multiple servers connected (but not grouped under headers), show the
-      // server name on every library so its origin is always clear — not only when
-      // two libraries happen to share a title.
-      final showServerNames = _hasMultipleServers(visibleLibraries);
-      return visibleLibraries.map((library) {
-        final showServerName = library.serverName != null && showServerNames;
-        return _buildLibraryMenuItem(library, showServerName: showServerName);
-      }).toList();
-    }
-
-    final grouped = groupLibrariesByFirstAppearance(visibleLibraries);
-    final menuItems = <AppMenuEntry<String>>[];
-    for (final serverKey in grouped.serverOrder) {
-      final bucket = grouped.byServer[serverKey]!;
-      if (serverKey.isNotEmpty) {
-        menuItems.add(_buildLibraryServerHeaderMenuItem(bucket.first, serverKey));
-      }
-      for (final library in bucket) {
-        menuItems.add(_buildLibraryMenuItem(library, showServerName: false));
-      }
-    }
-    return menuItems;
+    return buildLibraryServerEntries<AppMenuEntry<String>>(
+      visibleLibraries,
+      groupByServer: groupByServer,
+      buildHeader: _buildLibraryServerHeaderMenuItem,
+      buildItem: (library, {required bool showServerName}) =>
+          _buildLibraryMenuItem(library, showServerName: showServerName),
+    );
   }
 
   /// Build the app bar title - either dropdown on mobile or simple title on desktop
@@ -708,7 +641,6 @@ class _LibrariesScreenState extends State<LibrariesScreen>
         visibleLibraries.where((lib) => lib.globalKey == _selectedLibraryGlobalKey).firstOrNull ??
         visibleLibraries.firstOrNull;
     if (selectedLibrary == null) return Text(t.libraries.title);
-    final showServerHeaders = _hasMultipleServers(visibleLibraries) && groupByServer;
 
     return AppMenuButton<String>(
       key: _libraryDropdownKey,
@@ -716,8 +648,7 @@ class _LibrariesScreenState extends State<LibrariesScreen>
       onSelected: (libraryGlobalKey) {
         _loadLibraryContent(libraryGlobalKey);
       },
-      entriesBuilder: (context) =>
-          _buildGroupedLibraryMenuItems(visibleLibraries, showServerHeaders: showServerHeaders),
+      entriesBuilder: (context) => _buildGroupedLibraryMenuItems(visibleLibraries, groupByServer: groupByServer),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
         child: Row(
@@ -725,18 +656,18 @@ class _LibrariesScreenState extends State<LibrariesScreen>
           children: [
             AppIcon(ContentTypeHelper.getLibraryIcon(selectedLibrary.kind.id), fill: 1, size: 20),
             const SizedBox(width: 8),
-            if (_hasMultipleServers(visibleLibraries) && selectedLibrary.serverName != null)
+            if (librariesSpanMultipleServers(visibleLibraries) && selectedLibrary.serverName != null)
               Column(
                 crossAxisAlignment: .start,
                 mainAxisSize: .min,
                 children: [
                   Text(selectedLibrary.title, style: Theme.of(context).textTheme.titleMedium),
-                  _buildLibraryServerLabel(
-                    selectedLibrary,
-                    Theme.of(context).textTheme.labelSmall?.copyWith(
+                  LibraryServerLabel(
+                    library: selectedLibrary,
+                    badgeSize: 10,
+                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
                       color: Theme.of(context).textTheme.bodySmall?.color?.withValues(alpha: 0.6),
                     ),
-                    badgeSize: 10,
                   ),
                 ],
               )

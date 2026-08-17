@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:plezy/widgets/app_icon.dart';
 import 'package:material_symbols_icons/symbols.dart';
+import '../i18n/strings.g.dart';
 
 import 'overlay_sheet.dart';
 
@@ -67,7 +68,6 @@ class BottomSheetHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     final usesBackButton = leading == null && onBack != null;
 
-    // Determine the leading widget based on priority: leading > onBack > icon
     Widget? resolvedLeading;
     if (leading != null) {
       resolvedLeading = leading;
@@ -103,6 +103,7 @@ class BottomSheetHeader extends StatelessWidget {
               ExcludeFocusTraversal(
                 child: IconButton(
                   focusNode: closeFocusNode,
+                  tooltip: t.common.close,
                   icon: AppIcon(Symbols.close_rounded, fill: 1, color: iconColor),
                   onPressed: onClose ?? () => OverlaySheetController.closeAdaptive(context),
                 ),

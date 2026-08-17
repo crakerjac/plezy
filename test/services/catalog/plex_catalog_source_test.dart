@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:plezy/media/media_kind.dart';
+import 'package:plezy/media/media_rating.dart';
 import 'package:plezy/models/catalog/catalog_item.dart';
 import 'package:plezy/models/catalog/catalog_metadata.dart';
 import 'package:plezy/services/catalog/catalog_source.dart';
@@ -525,8 +526,10 @@ void main() {
       // the caller's offset math survives the cap drift.
       expect(
         requests.map(
-          (request) =>
-              (request.url.queryParameters['X-Plex-Container-Start'], request.url.queryParameters['X-Plex-Container-Size']),
+          (request) => (
+            request.url.queryParameters['X-Plex-Container-Start'],
+            request.url.queryParameters['X-Plex-Container-Size'],
+          ),
         ),
         [('100', '100'), ('100', '25'), ('125', '25'), ('150', '25'), ('175', '25')],
       );
@@ -745,7 +748,7 @@ void main() {
       expect(
         detail.item.ratings,
         contains(
-          isA<CatalogRatingSource>()
+          isA<MediaRatingSource>()
               .having((rating) => rating.source, 'source', 'imdb')
               .having((rating) => rating.value, 'value', 8.5)
               .having((rating) => rating.votes, 'votes', 250858),

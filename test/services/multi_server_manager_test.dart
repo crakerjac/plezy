@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:plezy/media/ids.dart';
+import 'package:plezy/media/media_server_client.dart';
 
 import 'package:drift/native.dart';
 import 'package:fake_async/fake_async.dart';
@@ -103,17 +104,8 @@ class _LoopbackJellyfinServer {
   }
 }
 
-// Coverage includes status and lifecycle changes, endpoint exhaustion,
-// in-place and fresh scoped Plex profile binding, endpoint persistence and
-// promotion ownership, connectivity monitoring/debounce teardown, Jellyfin
-// reuse/update, and selected registered-client health outcomes.
-
 void main() {
   setUp(resetSharedPreferencesForTest);
-
-  // ============================================================
-  // Initial state
-  // ============================================================
 
   group('initial state', () {
     test('a freshly constructed manager has no servers, clients, or status', () {
@@ -134,10 +126,6 @@ void main() {
       expect(m.isServerOnline(ServerId('nope')), isFalse);
     });
   });
-
-  // ============================================================
-  // updateServerStatus + status stream
-  // ============================================================
 
   group('updateServerStatus + statusStream', () {
     test('emits a snapshot when status flips for a tracked server', () async {
@@ -1016,6 +1004,150 @@ void main() {
       expect(persisted.single.isAdministrator, isTrue);
     });
 
+    test('persists a changed profile picture tag discovered during health checks', () async {
+      final persisted = <JellyfinConnection>[];
+      var requestCount = 0;
+      final client = JellyfinClient.forTesting(
+        connection: _jellyfinConnection('user-a').copyWith(primaryImageTag: 'cached-tag'),
+        httpClient: MockClient((request) async {
+          requestCount++;
+          expect(request.url.path, '/Users/Me');
+          return http.Response(
+            '{"Policy":{"IsAdministrator":false},"PrimaryImageTag":"fresh-tag"}',
+            200,
+            headers: {'content-type': 'application/json'},
+          );
+        }),
+      );
+      addTearDown(client.close);
+      final m = MultiServerManager()..onJellyfinConnectionUpdated = persisted.add;
+      addTearDown(m.dispose);
+      m.debugRegisterJellyfinClientForTesting(client);
+
+      final status = await client.checkHealth();
+
+      expect(status, HealthStatus.online);
+      expect(requestCount, 1);
+      expect(persisted, hasLength(1));
+      expect(persisted.single.primaryImageTag, 'fresh-tag');
+    });
+
+    test('clears the cached profile picture tag when the user deletes their avatar', () async {
+      final persisted = <JellyfinConnection>[];
+      var requestCount = 0;
+      final client = JellyfinClient.forTesting(
+        connection: _jellyfinConnection('user-a').copyWith(primaryImageTag: 'cached-tag'),
+        httpClient: MockClient((request) async {
+          requestCount++;
+          expect(request.url.path, '/Users/Me');
+          return http.Response(
+            '{"Policy":{"IsAdministrator":false}}',
+            200,
+            headers: {'content-type': 'application/json'},
+          );
+        }),
+      );
+      addTearDown(client.close);
+      final m = MultiServerManager()..onJellyfinConnectionUpdated = persisted.add;
+      addTearDown(m.dispose);
+      m.debugRegisterJellyfinClientForTesting(client);
+
+      final status = await client.checkHealth();
+
+      expect(status, HealthStatus.online);
+      expect(requestCount, 1);
+      expect(persisted, hasLength(1));
+      expect(persisted.single.primaryImageTag, isNull);
+    });
+
+    test('does not persist when the admin flag and profile picture tag are unchanged', () async {
+      final persisted = <JellyfinConnection>[];
+      var requestCount = 0;
+      final client = JellyfinClient.forTesting(
+        connection: _jellyfinConnection('user-a').copyWith(primaryImageTag: 'same-tag'),
+        httpClient: MockClient((request) async {
+          requestCount++;
+          expect(request.url.path, '/Users/Me');
+          return http.Response(
+            '{"Policy":{"IsAdministrator":false},"PrimaryImageTag":"same-tag"}',
+            200,
+            headers: {'content-type': 'application/json'},
+          );
+        }),
+      );
+      addTearDown(client.close);
+      final m = MultiServerManager()..onJellyfinConnectionUpdated = persisted.add;
+      addTearDown(m.dispose);
+      m.debugRegisterJellyfinClientForTesting(client);
+
+      final status = await client.checkHealth();
+
+      expect(status, HealthStatus.online);
+      expect(requestCount, 1);
+      expect(persisted, isEmpty);
+    });
+
+    test('persists one connection update when the admin flag and profile picture tag both change', () async {
+      final persisted = <JellyfinConnection>[];
+      var requestCount = 0;
+      final client = JellyfinClient.forTesting(
+        connection: _jellyfinConnection('user-a').copyWith(primaryImageTag: 'cached-tag'),
+        httpClient: MockClient((request) async {
+          requestCount++;
+          expect(request.url.path, '/Users/Me');
+          return http.Response(
+            '{"Policy":{"IsAdministrator":true},"PrimaryImageTag":"fresh-tag"}',
+            200,
+            headers: {'content-type': 'application/json'},
+          );
+        }),
+      );
+      addTearDown(client.close);
+      final m = MultiServerManager()..onJellyfinConnectionUpdated = persisted.add;
+      addTearDown(m.dispose);
+      m.debugRegisterJellyfinClientForTesting(client);
+
+      final status = await client.checkHealth();
+
+      expect(status, HealthStatus.online);
+      expect(requestCount, 1);
+      expect(persisted, hasLength(1));
+      expect(persisted.single.isAdministrator, isTrue);
+      expect(persisted.single.primaryImageTag, 'fresh-tag');
+    });
+
+    test('refreshes the profile picture tag when Policy is missing or malformed', () async {
+      final responses = <Map<String, Object?>>[
+        {'PrimaryImageTag': 'fresh-tag'},
+        {'Policy': 'not-a-map', 'PrimaryImageTag': 'fresh-tag'},
+      ];
+
+      for (final responseBody in responses) {
+        final persisted = <JellyfinConnection>[];
+        var requestCount = 0;
+        final client = JellyfinClient.forTesting(
+          connection: _jellyfinConnection('user-a').copyWith(primaryImageTag: 'cached-tag'),
+          httpClient: MockClient((request) async {
+            requestCount++;
+            expect(request.url.path, '/Users/Me');
+            return http.Response(jsonEncode(responseBody), 200, headers: {'content-type': 'application/json'});
+          }),
+        );
+        addTearDown(client.close);
+        final m = MultiServerManager()..onJellyfinConnectionUpdated = persisted.add;
+        addTearDown(m.dispose);
+        m.debugRegisterJellyfinClientForTesting(client);
+
+        final status = await client.checkHealth();
+
+        expect(status, HealthStatus.online, reason: 'response: $responseBody');
+        expect(requestCount, 1, reason: 'response: $responseBody');
+        expect(persisted, hasLength(1), reason: 'response: $responseBody');
+        expect(persisted.single.primaryImageTag, 'fresh-tag', reason: 'response: $responseBody');
+        expect(persisted.single.isAdministrator, isFalse, reason: 'response: $responseBody');
+      }
+    });
+
     test('health remains online when persisting refreshed admin status fails', () async {
       final client = JellyfinClient.forTesting(
         connection: _jellyfinConnection('user-a'),
@@ -1291,10 +1423,6 @@ void main() {
     });
   });
 
-  // ============================================================
-  // addJellyfinConnection reuse
-  // ============================================================
-
   group('addJellyfinConnection reuse', () {
     // The reuse branch is what keeps a passive rebind (re-adding the same
     // persisted connection) from tearing down a live client and aborting its
@@ -1398,10 +1526,6 @@ void main() {
     });
   });
 
-  // ============================================================
-  // removeServer
-  // ============================================================
-
   group('removeServer', () {
     test('removes a tracked server\'s status entry and emits a snapshot', () async {
       final m = MultiServerManager();
@@ -1457,10 +1581,6 @@ void main() {
     });
   });
 
-  // ============================================================
-  // disconnectAll
-  // ============================================================
-
   group('disconnectAll', () {
     test('clears all status and emits an empty snapshot', () async {
       final m = MultiServerManager();
@@ -1496,10 +1616,6 @@ void main() {
       expect(m.getJellyfinClientByCompoundId('jf-machine/user-b'), isNull);
     });
   });
-
-  // ============================================================
-  // dispose
-  // ============================================================
 
   group('dispose', () {
     test('disposing without connectivity monitoring does not throw', () {

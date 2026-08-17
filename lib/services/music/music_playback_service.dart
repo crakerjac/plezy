@@ -46,6 +46,13 @@ abstract class MusicPlaybackService extends ChangeNotifier {
   Duration get position;
   Stream<Duration> get positionStream;
 
+  /// Mirrors `Player.streams.playheadJump`: something is moving the playhead
+  /// discontinuously, to this position, or to somewhere only the backend knows
+  /// when null. Request-time intent, not an observed landing.
+  /// Consumers coalescing their own relative seeks use it to drop a pending
+  /// target something else superseded (#1819).
+  Stream<Duration?> get playheadJumpStream => const Stream<Duration?>.empty();
+
   /// Full queue in playback order (shuffle already applied).
   List<MediaItem> get queue;
 
@@ -73,8 +80,9 @@ abstract class MusicPlaybackService extends ChangeNotifier {
   int get queueSessionRevision;
 
   /// Start a new queue from [tracks], optionally at [startTrack] (defaults
-  /// to the first track). [shuffle] shuffles with the start track anchored
-  /// first.
+  /// to the first track). [shuffle] anchors [startTrack] first and shuffles
+  /// the rest after it; with no [startTrack] the whole list shuffles, so the
+  /// queue opens on a random track rather than always the first one (#1811).
   Future<void> playFromList({
     required List<MediaItem> tracks,
     MediaItem? startTrack,
