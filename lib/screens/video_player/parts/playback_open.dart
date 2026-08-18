@@ -26,8 +26,9 @@ class _FrameRateStartupPlan {
 
   /// Whether the pre-open negotiation already counts as the per-item
   /// switch — keeps the post-first-frame fallback from double-switching
-  /// while a planned follow-up is still pending.
-  bool get countsAsApplied => didPreLoadSwitch || attemptedMpvPreLoad || preOpenExoHandled;
+  /// while a planned follow-up is still pending. A successful mpv pre-load
+  /// switch always implies [attemptedMpvPreLoad].
+  bool get countsAsApplied => attemptedMpvPreLoad || preOpenExoHandled;
 
   /// Subscribe to the first rendered frame *before* open() so the startup
   /// decoder refresh can't miss a synchronously-fast restart event.
@@ -439,11 +440,17 @@ extension _VideoPlayerOpenMethods on VideoPlayerScreenState {
     }
   }
 
-  /// Push the user's subtitle style to the native rendering layer (no-op on
-  /// mpv backends, which style via `sub-*` properties). Must run after
-  /// open() since that's when ExoPlayer initializes its subtitle views.
-  Future<void> _applyNativeSubtitleStyle(Player player, SettingsService settingsService) {
-    return player.setSubtitleStyle(
+  /// Push the user's subtitle style to the native rendering layer. Must run
+  /// after open() since that's when ExoPlayer initializes its subtitle views.
+  /// Only the ExoPlayer backend consumes it — [Player.setSubtitleStyle] is a
+  /// no-op on every mpv backend, which styles via `sub-*` properties — so the
+  /// style settings reads are skipped there. Gated on the same
+  /// configured-backend signal as track_controls/video_settings_sheet; the
+  /// Android mpv fallback keeps playerType 'exoplayer' and still receives the
+  /// call, exactly as before.
+  Future<void> _applyNativeSubtitleStyle(Player player, SettingsService settingsService) async {
+    if (player.playerType != 'exoplayer') return;
+    await player.setSubtitleStyle(
       fontSize: settingsService.read(SettingsService.subtitleFontSize).toDouble(),
       textColor: settingsService.read(SettingsService.subtitleTextColor),
       borderSize: settingsService.read(SettingsService.subtitleBorderSize).toDouble(),

@@ -88,6 +88,44 @@ bool shouldHandleDesktopRootEscape({
   return isDesktop && isPhysicalKeyboardEvent && logicalKey == LogicalKeyboardKey.escape && isCurrentRoute && isHomeTab;
 }
 
+/// Latches whether the app has genuinely left the foreground since the last
+/// `resumed`, and consumes that fact on the next resume so the "ask for a
+/// profile on open" rule can re-apply exactly once per backgrounding.
+///
+/// System overlays (Fire TV Alexa, notification shade, Control Center) only
+/// produce `inactive -> resumed` — the app never left the foreground — so
+/// they must not prompt (#1990). iOS returns from the background as
+/// `hidden -> inactive -> resumed`, so inspecting only the immediately
+/// previous state would miss a real return; latching the deepest state seen
+/// handles both. The startup flow owns the cold open, so a first `resumed`
+/// with no prior backgrounding does not prompt.
+@visibleForTesting
+class ProfileSelectionResumeGate {
+  bool _wasBackgrounded = false;
+
+  /// Whether a genuine backgrounding has been observed since the last resume.
+  bool get wasBackgrounded => _wasBackgrounded;
+
+  /// Feeds one lifecycle transition through the gate. Returns true exactly
+  /// once per backgrounding: on the first `resumed` after the sequence
+  /// reached `hidden`/`paused`/`detached`. Consuming resets the latch.
+  bool consumePromptOn(AppLifecycleState state) {
+    switch (state) {
+      case AppLifecycleState.resumed:
+        final shouldPrompt = _wasBackgrounded;
+        _wasBackgrounded = false;
+        return shouldPrompt;
+      case AppLifecycleState.hidden:
+      case AppLifecycleState.paused:
+      case AppLifecycleState.detached:
+        _wasBackgrounded = true;
+        return false;
+      case AppLifecycleState.inactive:
+        return false;
+    }
+  }
+}
+
 @visibleForTesting
 ({double left, double width}) mainScreenSideNavigationContentLayout({
   required double viewportWidth,
@@ -150,33 +188,6 @@ bool shouldPassTvosMenuToSystem({
       isRouteCurrent &&
       hasVisibleTabs &&
       isCurrentTabRoot;
-}
-
-@visibleForTesting
-class TvosMenuPolicyPublisher {
-  TvosMenuPolicyPublisher(this._compute, this._publish);
-
-  final ValueGetter<bool> _compute;
-  final ValueChanged<bool> _publish;
-  int _transactionDepth = 0;
-
-  void run(VoidCallback transaction) {
-    _transactionDepth++;
-    try {
-      transaction();
-    } finally {
-      _transactionDepth--;
-      if (_transactionDepth == 0) {
-        _publish(_compute());
-      }
-    }
-  }
-
-  void update() {
-    if (_transactionDepth == 0) {
-      _publish(_compute());
-    }
-  }
 }
 
 @visibleForTesting
@@ -263,6 +274,11 @@ class _MainScreenState extends State<MainScreen>
   /// Prevents double-pushing the profile selection screen
   bool _isShowingProfileSelection = false;
 
+  /// Latches a genuine backgrounding so "ask for a profile on open" fires
+  /// exactly once on the next resume, while transient focus losses
+  /// (`inactive`, e.g. the Fire TV Alexa overlay) never prompt.
+  final _profileSelectionResumeGate = ProfileSelectionResumeGate();
+
   late List<Widget> _screens;
 
   /// One [GlobalKey] per tab, so a tab's live [State] can be reached from
@@ -282,7 +298,6 @@ class _MainScreenState extends State<MainScreen>
   bool _isSidebarFocused = false;
   bool _isSidebarInteractionExpanded = false;
   bool _isOverlaySheetOpen = false;
-  late final TvosMenuPolicyPublisher _tvosMenuPolicyPublisher;
 
   /// The binder is now owned by a top-level [Provider] (see main.dart) so
   /// the splash can await its first settle before navigating here. We just
@@ -329,7 +344,6 @@ class _MainScreenState extends State<MainScreen>
   @override
   void initState() {
     super.initState();
-    _tvosMenuPolicyPublisher = TvosMenuPolicyPublisher(() => _shouldPassTvosMenuToSystem, _setTvosMenuPassthrough);
     _isOffline = widget.isOfflineMode;
     _offlineUntilConnected = widget.isOfflineMode;
 
@@ -952,7 +966,8 @@ class _MainScreenState extends State<MainScreen>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed && !_isOffline && !_isShowingProfileSelection) {
+    final shouldPrompt = _profileSelectionResumeGate.consumePromptOn(state);
+    if (shouldPrompt && !_isOffline && !_isShowingProfileSelection) {
       // Only show profile selection on resume for mobile platforms.
       // On desktop, "resumed" fires on every window focus gain (alt-tab, click),
       // which is too frequent — the initial prompt on startup is sufficient.
@@ -1235,13 +1250,9 @@ class _MainScreenState extends State<MainScreen>
     unawaited(TvosSystemNavigationService.setMenuPassthroughEnabled(enabled));
   }
 
-  void _runNavigationTransaction(VoidCallback transaction) {
-    _tvosMenuPolicyPublisher.run(transaction);
-  }
-
   void _updateTvosMenuPassthrough() {
     if (!mounted) return;
-    _tvosMenuPolicyPublisher.update();
+    _setTvosMenuPassthrough(_shouldPassTvosMenuToSystem);
   }
 
   /// Suppress stray back events after a child route pops.
@@ -1553,10 +1564,8 @@ class _MainScreenState extends State<MainScreen>
 
   void _openSettings() {
     if (PlatformDetector.shouldUseSideNavigation(context)) {
-      _runNavigationTransaction(() {
-        _selectTab(NavigationTabId.settings);
-        _focusContent(restorePreviousFocus: false);
-      });
+      _selectTab(NavigationTabId.settings);
+      _focusContent(restorePreviousFocus: false);
       return;
     }
 
@@ -1787,8 +1796,6 @@ class _MainScreenState extends State<MainScreen>
                       );
                       return MainScreenFocusScope(
                         focusSidebar: _focusSidebar,
-                        focusContent: _focusContent,
-                        isSidebarFocused: _isSidebarFocused,
                         sideNavigationWidth: targetContentOffset,
                         reservedSideNavigationWidth: reservedContentOffset,
                         foregroundLeft: contentLayout.left,
@@ -1830,17 +1837,13 @@ class _MainScreenState extends State<MainScreen>
                                     isReconnecting: _isReconnecting,
                                     onInteractionExpandedChanged: _handleSidebarInteractionExpandedChanged,
                                     onDestinationSelected: (tab) {
-                                      _runNavigationTransaction(() {
-                                        final restorePreviousFocus = tab == _currentTab;
-                                        _selectTab(tab);
-                                        _focusContent(restorePreviousFocus: restorePreviousFocus);
-                                      });
+                                      final restorePreviousFocus = tab == _currentTab;
+                                      _selectTab(tab);
+                                      _focusContent(restorePreviousFocus: restorePreviousFocus);
                                     },
                                     onLibrarySelected: (key) {
-                                      _runNavigationTransaction(() {
-                                        _selectLibrary(key);
-                                        _focusContent(restorePreviousFocus: false);
-                                      });
+                                      _selectLibrary(key);
+                                      _focusContent(restorePreviousFocus: false);
                                     },
                                     onNavigateToContent: _focusContent,
                                     onReconnect: _triggerReconnect,

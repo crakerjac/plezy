@@ -10,7 +10,6 @@
 // so it never conflicts with upstream merges.
 
 import 'package:flutter/foundation.dart' show visibleForTesting;
-import '../media/media_backend.dart';
 import '../media/media_item.dart';
 import '../media/media_kind.dart';
 import '../media/media_server_client.dart';
@@ -93,9 +92,8 @@ class PlexSyncerImportService {
       }
 
       final kind = MediaKind.fromString(item.type);
-      final metadata = MediaItem(
+      final metadata = MediaItem.plex(
         id: item.ratingKey,
-        backend: MediaBackend.plex,
         kind: kind,
         title: item.title,
         summary: item.summary,
@@ -119,9 +117,8 @@ class PlexSyncerImportService {
       if (kind == MediaKind.episode) {
         if (item.grandparentRatingKey?.isNotEmpty == true && stubbedParentKeys.add(item.grandparentRatingKey!)) {
           await downloadManager.registerSyncedParentStub(
-            MediaItem(
+            MediaItem.plex(
               id: item.grandparentRatingKey!,
-              backend: MediaBackend.plex,
               kind: MediaKind.show,
               title: item.grandparentTitle,
               thumbPath: item.grandparentThumb,
@@ -134,9 +131,8 @@ class PlexSyncerImportService {
         }
         if (item.parentRatingKey?.isNotEmpty == true && stubbedParentKeys.add(item.parentRatingKey!)) {
           await downloadManager.registerSyncedParentStub(
-            MediaItem(
+            MediaItem.plex(
               id: item.parentRatingKey!,
-              backend: MediaBackend.plex,
               kind: MediaKind.season,
               title: item.parentTitle,
               thumbPath: item.parentThumb ?? item.grandparentThumb,
@@ -161,9 +157,8 @@ class PlexSyncerImportService {
               item.grandparentRatingKey?.isNotEmpty == true &&
               fetchedShowKeys.add(item.grandparentRatingKey!)) {
             await downloadManager.downloadArtworkForMetadata(
-              MediaItem(
+              MediaItem.plex(
                 id: item.grandparentRatingKey!,
-                backend: MediaBackend.plex,
                 kind: MediaKind.show,
                 thumbPath: item.grandparentThumb,
                 artPath: item.grandparentArt,

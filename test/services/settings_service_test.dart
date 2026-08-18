@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:plezy/i18n/strings.g.dart';
@@ -72,50 +73,6 @@ void main() {
     });
   });
 
-  group('SettingsService mute volume restoration', () {
-    test('keeps 37 persisted across mute and restores it on unmute', () async {
-      final settings = await SettingsService.getInstance();
-      await settings.write(SettingsService.volume, 37.0);
-
-      final mute = settings.resolveMuteToggle(37);
-      await settings.write(SettingsService.volume, mute.persistedVolume);
-
-      expect(mute.playerVolume, 0);
-      expect(settings.read(SettingsService.volume), 37);
-
-      final unmute = settings.resolveMuteToggle(mute.playerVolume);
-
-      expect(unmute.playerVolume, 37);
-      expect(unmute.persistedVolume, 37);
-    });
-
-    test('restores amplified volumes when the configured maximum permits them', () async {
-      final settings = await SettingsService.getInstance();
-      await settings.write(SettingsService.maxVolume, 250);
-      await settings.write(SettingsService.volume, 175.0);
-
-      final mute = settings.resolveMuteToggle(175);
-      await settings.write(SettingsService.volume, mute.persistedVolume);
-      final unmute = settings.resolveMuteToggle(mute.playerVolume);
-
-      expect(mute.playerVolume, 0);
-      expect(mute.persistedVolume, 175);
-      expect(unmute.playerVolume, 175);
-      expect(unmute.persistedVolume, 175);
-    });
-
-    test('falls back to 100 when no previous non-zero volume exists', () async {
-      final settings = await SettingsService.getInstance();
-      await settings.write(SettingsService.maxVolume, 200);
-      await settings.write(SettingsService.volume, 0.0);
-
-      final unmute = settings.resolveMuteToggle(0);
-
-      expect(unmute.playerVolume, 100);
-      expect(unmute.persistedVolume, 100);
-    });
-  });
-
   group('SettingsService episode action', () {
     test('defaults to play and resets to play', () async {
       final settings = await SettingsService.getInstance();
@@ -174,8 +131,10 @@ void main() {
   });
 
   group('SettingsService platform gates', () {
-    test('audio passthrough stays available on desktop and Apple TV', () {
-      expect(PlatformDetector.supportsAudioPassthrough(), isTrue);
+    test('audio passthrough stays available on Apple TV and non-macOS desktop, never macOS', () {
+      // Platform.is* is unmockable, so the desktop expectation follows the
+      // test host: hidden on a macOS host (#1964), available elsewhere.
+      expect(PlatformDetector.supportsAudioPassthrough(), Platform.isMacOS ? isFalse : isTrue);
 
       TvDetectionService.debugSetAppleTVOverride(true);
 

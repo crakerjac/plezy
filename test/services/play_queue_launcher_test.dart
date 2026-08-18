@@ -7,6 +7,7 @@ import 'package:plezy/media/media_kind.dart';
 import 'package:plezy/media/media_playlist.dart';
 import 'package:plezy/models/plex/play_queue_response.dart';
 import 'package:plezy/providers/playback_state_provider.dart';
+import 'package:plezy/services/media_list_playback_launcher.dart';
 import 'package:plezy/services/play_queue_launcher.dart';
 import 'package:plezy/services/plex_client.dart';
 
@@ -65,21 +66,12 @@ PlayQueueResponse _queueWith(MediaItem item) {
     playQueueSelectedItemID: 41,
     playQueueShuffled: false,
     playQueueTotalCount: 1,
-    playQueueVersion: 1,
     items: [item],
   );
 }
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
-
-  group('PlayQueueResult', () {
-    test('PlayQueueCancelled is a distinct re-exported result', () {
-      const PlayQueueResult result = PlayQueueCancelled();
-      expect(result, isA<PlayQueueCancelled>());
-      expect(result, isNot(isA<PlayQueueError>()));
-    });
-  });
 
   group('launchShuffledShow pre-flight guard', () {
     testWidgets('returns PlayQueueError when metadata is not a show or season', (tester) async {

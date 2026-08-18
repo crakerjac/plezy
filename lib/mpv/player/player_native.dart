@@ -331,13 +331,20 @@ class PlayerNative extends PlayerBase {
     // header VALUES (`X-Plex-Device: Mac17,9` on Apple hardware), producing a
     // malformed request Plex rejects with 400. `append` takes each item
     // verbatim. Always clear first so a previous open's headers never leak
-    // into header-less media.
-    await command(['change-list', 'http-header-fields', 'clr', '']);
+    // into header-less media. The commands are pipelined — dispatched without
+    // awaiting between sends — because the method channel delivers messages in
+    // send order and the native side executes them in arrival order; awaiting
+    // each round trip serially cost ~12 round trips per open with Plex's
+    // identity headers.
+    final headerCommands = <Future<void>>[
+      command(['change-list', 'http-header-fields', 'clr', '']),
+    ];
     if (media.headers != null && media.headers!.isNotEmpty) {
       for (final entry in media.headers!.entries) {
-        await command(['change-list', 'http-header-fields', 'append', '${entry.key}: ${entry.value}']);
+        headerCommands.add(command(['change-list', 'http-header-fields', 'append', '${entry.key}: ${entry.value}']));
       }
     }
+    await Future.wait(headerCommands);
 
     // 'start' must be set before loadfile. These are playback defaults, not
     // user track selection, and mpv refuses a property write with
@@ -422,6 +429,20 @@ class PlayerNative extends PlayerBase {
 
     await _clearArmedNext();
     if (media == null) return;
+
+    // Let mpv open the armed entry while the current track still plays
+    // (prefetch starts once the current demuxer is fully read) so the
+    // network open never sits on the gapless boundary: with a boundary
+    // open, any server whose connect+probe outlasts the AO's buffered
+    // tail (~0.5s) produces an audible gap on every transition (#1869).
+    // A failed or superseded prefetch is discarded by mpv and the entry
+    // reopens normally at the boundary, so this can only remove latency.
+    // Off for local arms: a prefetch would consume an fdclose:// fd while
+    // playlist-pos still reads 0, breaking _clearArmedNext's "provably
+    // never opened" proof (double close) — and local opens are instant
+    // anyway. Set before the fd claim so a property failure cannot leak it.
+    final networkArm = media.uri.startsWith('http://') || media.uri.startsWith('https://');
+    await setProperty('prefetch-playlist', networkArm ? 'yes' : 'no');
 
     final (loadUri, fd) = await _toPlayableUri(media.uri, strict: true);
 
@@ -852,8 +873,24 @@ class PlayerNative extends PlayerBase {
 
   /// Codecs the platform can take as a bitstream. On iOS/tvOS compressed
   /// audio goes through the system renderer, which only handles Dolby
-  /// Digital (Plus); desktop does real device passthrough for the full list.
+  /// Digital (Plus); Windows and Linux do real device passthrough for the
+  /// full list. Never applied on macOS (PlatformDetector.supportsAudioPassthrough).
+  ///
+  /// Android does not use this list: mpv's audiotrack AO only opens stereo
+  /// IEC 61937 tracks at the 48kHz mixer rate, so naming a codec the route
+  /// cannot carry that way strands playback on a dead audio output (#1991).
+  /// The plugin derives the value from the current audio route instead.
   static final String _passthroughCodecs = Platform.isIOS ? 'ac3,eac3' : 'ac3,eac3,dts,dts-hd,truehd';
+
+  Future<String> _resolvePassthroughCodecs() async {
+    if (!Platform.isAndroid) return _passthroughCodecs;
+    try {
+      return await invoke<String>('getAudioSpdifCodecs') ?? '';
+    } catch (error, stackTrace) {
+      appLogger.w('MPV: audio route inspection failed; decoding instead', error: error, stackTrace: stackTrace);
+      return '';
+    }
+  }
 
   _AudioStateRequest get _requestedAudioState => (
     passthrough: _passthroughRequested,
@@ -989,14 +1026,14 @@ class PlayerNative extends PlayerBase {
   }
 
   Future<void> _applyPassthrough(bool enabled) async {
-    await setProperty('audio-spdif', enabled ? _passthroughCodecs : '');
+    await setProperty('audio-spdif', enabled ? await _resolvePassthroughCodecs() : '');
     if (_nativeCoreUnavailable) return;
 
     // audio-spdif is the authoritative transition. Publish only after mpv
     // accepts it; audio-exclusive below is an independent device-mode hint.
     _passthroughActive = enabled;
-    // audio-exclusive redirects coreaudio to coreaudio_exclusive on macOS
-    // (and exclusive WASAPI on Windows); on iOS/tvOS it is set once at
+    // audio-exclusive claims the device for bitstreaming (exclusive WASAPI on
+    // Windows); on iOS/tvOS it is set once at
     // playback start and must not be clobbered here.
     if (!Platform.isIOS) {
       try {
