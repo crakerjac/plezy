@@ -10,7 +10,6 @@ import '../../focus/dpad_navigator.dart';
 import '../../focus/input_mode_tracker.dart';
 import '../../mixins/tab_navigation_mixin.dart';
 import '../../media/ids.dart';
-import '../../media/media_item.dart';
 import '../../media/media_library.dart';
 import '../../providers/hidden_libraries_provider.dart';
 import '../../providers/libraries_provider.dart';
@@ -26,7 +25,6 @@ import '../../widgets/focusable_tab_chip.dart';
 import '../../widgets/library_management_sheet.dart';
 import '../../services/storage_service.dart';
 import '../../mixins/refreshable.dart';
-import '../../mixins/item_updatable.dart';
 import '../../i18n/strings.g.dart';
 import 'library_server_label.dart';
 import 'state_messages.dart';
@@ -53,14 +51,7 @@ class LibrariesScreen extends StatefulWidget {
 }
 
 class _LibrariesScreenState extends State<LibrariesScreen>
-    with
-        Refreshable,
-        FullRefreshable,
-        FocusableTab,
-        LibraryLoadable,
-        ItemUpdatable,
-        TickerProviderStateMixin,
-        TabNavigationMixin {
+    with Refreshable, FullRefreshable, FocusableTab, LibraryLoadable, TickerProviderStateMixin, TabNavigationMixin {
   final _recommendedTabKey = GlobalKey();
   final _browseTabKey = GlobalKey();
   final _collectionsTabKey = GlobalKey();
@@ -68,7 +59,6 @@ class _LibrariesScreenState extends State<LibrariesScreen>
 
   String? _errorMessage;
   String? _selectedLibraryGlobalKey;
-  bool _isInitialLoad = true;
 
   /// Flag to prevent onTabChanged from focusing when we're programmatically changing tabs
   bool _isRestoringTab = false;
@@ -450,11 +440,6 @@ class _LibrariesScreenState extends State<LibrariesScreen>
       });
     }
 
-    // Mark that initial load is complete
-    if (_isInitialLoad) {
-      _isInitialLoad = false;
-    }
-
     // Save selected library key and restore saved tab (async — safe after state is consistent)
     final storage = await StorageService.getInstance();
     if (!mounted || _selectedLibraryGlobalKey != libraryGlobalKey) return;
@@ -482,11 +467,6 @@ class _LibrariesScreenState extends State<LibrariesScreen>
         _focusCurrentTab();
       }
     });
-  }
-
-  @override
-  void updateItemInLists(String sourceGlobalKey, MediaItem updatedItem) {
-    // Delegate to the active tab — parent doesn't maintain its own item list
   }
 
   // Public method to refresh content (for normal navigation)

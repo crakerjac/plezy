@@ -10,6 +10,10 @@ bool _canUseJellyfinStaticStreamFallback(Object error) {
 }
 
 mixin _JellyfinPlaybackMethods on _JellyfinClientInternals {
+  // Implemented by _JellyfinBrowseMethods (cross-part call, same pattern as
+  // _JellyfinImageDownloadMethods' redeclarations).
+  Future<MediaItem?> fetchItemFreshCacheFirst(String id);
+
   /// Backend-neutral [PlaybackExtras] for [itemId]. Both dialects expose
   /// chapters at the item level (`raw['Chapters']`), while only Jellyfin exposes
   /// native skip segments through `/MediaSegments/{itemId}`. Segment loading is
@@ -22,7 +26,7 @@ mixin _JellyfinPlaybackMethods on _JellyfinClientInternals {
     bool forceChapterFallback = false,
     bool forceRefresh = false,
   }) async {
-    final item = await fetchItem(itemId);
+    final item = await fetchItemFreshCacheFirst(itemId);
     final markers = item == null ? const <MediaMarker>[] : await _fetchMediaSegmentMarkers(itemId);
     return jellyfinPlaybackExtrasFromRaw(
       item?.raw,
@@ -154,6 +158,7 @@ mixin _JellyfinPlaybackMethods on _JellyfinClientInternals {
     }
   }
 
+  @override
   String _withApiKey(String urlOrPath) {
     final uri = JellyfinImageAbsolutizer.joinUri(baseUrl: connection.baseUrl, urlOrPath: urlOrPath);
     final params = Map<String, String>.from(uri.queryParameters)..['api_key'] = connection.accessToken;
@@ -561,13 +566,14 @@ mixin _JellyfinPlaybackMethods on _JellyfinClientInternals {
   /// [sourceId] wins when present because Jellyfin plugins may reorder merged
   /// `MediaSources` between requests. [sourceIndex] is clamped to the valid
   /// range as a fallback to mirror Plex's `parseVideoPlaybackDataFromJson`.
+  @override
   Future<JellyfinPlaybackBundle?> fetchPlaybackBundle(
     String itemId, {
     int sourceIndex = 0,
     String? sourceId,
     String? preferredSignature,
   }) async {
-    final item = await fetchItem(itemId);
+    final item = await fetchItemFreshCacheFirst(itemId);
     final raw = item?.raw;
     if (raw is! Map<String, dynamic>) return null;
     final sources = raw['MediaSources'];
@@ -613,6 +619,7 @@ mixin _JellyfinPlaybackMethods on _JellyfinClientInternals {
   /// item only has a single MediaSource, [mediaSourceId] equals [itemId] and
   /// can be omitted; for items with multiple versions Jellyfin uses the
   /// param to pick which file to serve.
+  @override
   String buildDirectStreamUrl(
     String itemId, {
     String? container,
@@ -637,6 +644,7 @@ mixin _JellyfinPlaybackMethods on _JellyfinClientInternals {
   /// Audio sibling of [buildDirectStreamUrl]: `/Audio/{id}/stream` with the
   /// same `Static=true` + `api_key` + `DeviceId` self-authentication. Used
   /// for track direct-play fallback, downloads, and external players.
+  @override
   String buildAudioDirectStreamUrl(String itemId, {String? container, String? mediaSourceId}) {
     return buildJellyfinDirectStreamUrl(
       baseUrl: connection.baseUrl,
@@ -686,6 +694,7 @@ mixin _JellyfinPlaybackMethods on _JellyfinClientInternals {
   /// [audioProfile] extends the DeviceProfile with music direct-play and
   /// audio→mp3 transcode entries for track playback; the video profiles (and
   /// the request body when false) are untouched either way.
+  @override
   Future<Map<String, dynamic>> getPlaybackInfo(
     String itemId, {
     int? maxStreamingBitrate = 100_000_000,

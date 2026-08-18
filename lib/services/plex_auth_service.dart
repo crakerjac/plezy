@@ -333,7 +333,6 @@ class PlexServer {
   final String? product;
   final String? platform;
   final DateTime? lastSeenAt;
-  final bool presence;
 
   PlexServer({
     required this.name,
@@ -344,7 +343,6 @@ class PlexServer {
     this.product,
     this.platform,
     this.lastSeenAt,
-    this.presence = false,
   });
 
   factory PlexServer.fromJson(Map<String, dynamic> json) {
@@ -389,7 +387,6 @@ class PlexServer {
       product: _optionalScalarString(json['product']),
       platform: _optionalScalarString(json['platform']),
       lastSeenAt: lastSeenAt,
-      presence: flexibleBool(json['presence']),
     );
   }
 
@@ -424,16 +421,15 @@ class PlexServer {
       'product': product,
       'platform': platform,
       'lastSeenAt': lastSeenAt?.toIso8601String(),
-      'presence': presence,
     };
   }
 
-  /// Check if server is online using the presence field
-  bool get isOnline => presence;
-
   /// Find the best working connection by testing them
   /// Returns a Stream that emits connections progressively:
-  /// 1. First emission: The first connection that responds successfully
+  /// 1. First emission: The first connection that responds successfully.
+  ///    Relay is a fallback tier: a relay success is held until every direct
+  ///    candidate has failed, and a cached relay URL gets no head start, so
+  ///    a fast plex.tv relay edge can never beat a working direct endpoint.
   /// 2. Second emission (optional): The best connection after latency testing
   /// Priority: local > remote > relay, then HTTPS > HTTP, then lowest latency
   /// Tests both plex.direct URI and direct IP for each connection
@@ -480,6 +476,7 @@ class PlexServer {
       candidates: candidates,
       preferredUrl: preferredUri,
       candidateForUrl: _candidateForUrl,
+      tierOf: (candidate) => candidate.connection.relay ? 1 : 0,
       urlOf: (candidate) => candidate.url,
       displayTypeOf: (candidate) => candidate.connection.displayType,
       failureLogFields: (candidate, result) => {
@@ -557,7 +554,7 @@ class PlexServer {
       return connection;
     }
 
-    // Otherwise, create a new connection with the directUrl as the uri
+    // Otherwise, create a new connection with the given url as the uri
     return PlexConnection(
       protocol: connection.protocol,
       address: connection.address,
@@ -996,10 +993,6 @@ class PlexConnection {
       'IPv6': ipv6,
     };
   }
-
-  /// Get the direct URL constructed from address and port
-  /// This bypasses plex.direct DNS and connects directly to the IP
-  String get directUrl => '$protocol://$address:$port';
 
   /// Always return an HTTP URL that points directly at the IP/port combo.
   String get httpDirectUrl {
