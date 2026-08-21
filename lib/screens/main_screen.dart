@@ -68,6 +68,7 @@ import 'search_screen.dart';
 import 'downloads/downloads_screen.dart';
 import 'settings/settings_screen.dart';
 import 'profile/profile_switch_screen.dart';
+import 'video_player_screen.dart';
 import 'profile/profile_teardown.dart';
 import '../services/system_shelf_service.dart';
 import '../watch_together/watch_together.dart';
@@ -86,6 +87,31 @@ bool shouldHandleDesktopRootEscape({
   required bool isHomeTab,
 }) {
   return isDesktop && isPhysicalKeyboardEvent && logicalKey == LogicalKeyboardKey.escape && isCurrentRoute && isHomeTab;
+}
+
+/// Whether a lifecycle resume should raise the "ask for a profile on open"
+/// picker.
+///
+/// Mobile-only: on desktop `resumed` fires on every window focus gain
+/// (alt-tab, click), which is far too frequent — the startup prompt is
+/// sufficient there. Never during active video playback: waking the device
+/// mid-stream must resume the stream, not stack the root-navigator picker
+/// over the live player route, whose focus self-heal fights the picker for
+/// the remote (#2034) — the playback session already belongs to the profile
+/// that started it.
+@visibleForTesting
+bool shouldShowProfileSelectionOnResume({
+  required bool resumedFromBackground,
+  required bool isOffline,
+  required bool alreadyShowingProfileSelection,
+  required bool isMobilePlatform,
+  required bool hasActiveVideoPlayback,
+}) {
+  return resumedFromBackground &&
+      !isOffline &&
+      !alreadyShowingProfileSelection &&
+      isMobilePlatform &&
+      !hasActiveVideoPlayback;
 }
 
 /// Latches whether the app has genuinely left the foreground since the last
@@ -296,6 +322,9 @@ class _MainScreenState extends State<MainScreen>
   final FocusScopeNode _sidebarFocusScope = FocusScopeNode(debugLabel: 'Sidebar');
   final FocusScopeNode _contentFocusScope = FocusScopeNode(debugLabel: 'Content');
   bool _isSidebarFocused = false;
+  // Hover/touch rail expansion is an M3E modal overlay: the rail draws over
+  // the content, so this only drives the scrim behind it — never the
+  // content offset.
   bool _isSidebarInteractionExpanded = false;
   bool _isOverlaySheetOpen = false;
 
@@ -966,14 +995,16 @@ class _MainScreenState extends State<MainScreen>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    final shouldPrompt = _profileSelectionResumeGate.consumePromptOn(state);
-    if (shouldPrompt && !_isOffline && !_isShowingProfileSelection) {
-      // Only show profile selection on resume for mobile platforms.
-      // On desktop, "resumed" fires on every window focus gain (alt-tab, click),
-      // which is too frequent — the initial prompt on startup is sufficient.
-      if (Platform.isAndroid || Platform.isIOS) {
-        _showProfileSelectionOnResume();
-      }
+    // Always consume: the gate latches backgrounding on every lifecycle event.
+    final resumedFromBackground = _profileSelectionResumeGate.consumePromptOn(state);
+    if (shouldShowProfileSelectionOnResume(
+      resumedFromBackground: resumedFromBackground,
+      isOffline: _isOffline,
+      alreadyShowingProfileSelection: _isShowingProfileSelection,
+      isMobilePlatform: Platform.isAndroid || Platform.isIOS,
+      hasActiveVideoPlayback: VideoPlayerScreenState.activeGlobalKey != null,
+    )) {
+      _showProfileSelectionOnResume();
     }
   }
 
@@ -1214,11 +1245,6 @@ class _MainScreenState extends State<MainScreen>
     _updateTvosMenuPassthrough();
   }
 
-  void _handleSidebarInteractionExpandedChanged(bool expanded) {
-    if (_isSidebarInteractionExpanded == expanded) return;
-    setState(() => _isSidebarInteractionExpanded = expanded);
-  }
-
   void _handleOverlaySheetOpenChanged(bool open) {
     if (_isOverlaySheetOpen == open) return;
     _isOverlaySheetOpen = open;
@@ -1226,7 +1252,7 @@ class _MainScreenState extends State<MainScreen>
   }
 
   double _sideNavigationWidth(BuildContext context, {required bool alwaysExpanded}) {
-    final isExpanded = alwaysExpanded || _isSidebarFocused || _isSidebarInteractionExpanded;
+    final isExpanded = alwaysExpanded || _isSidebarFocused;
     return isExpanded
         ? SideNavigationRailState.expandedWidth
         : SideNavigationRailState.collapsedWidthForContext(context);
@@ -1771,8 +1797,8 @@ class _MainScreenState extends State<MainScreen>
                 return _handleBackKey(event);
               },
               child: TweenAnimationBuilder<double>(
-                duration: const Duration(milliseconds: 200),
-                curve: Curves.easeOutCubic,
+                duration: SideNavigationRailState.expandDuration,
+                curve: SideNavigationRailState.expandCurve,
                 tween: Tween<double>(end: targetContentOffset),
                 child: FocusScope(
                   node: _contentFocusScope,
@@ -1821,6 +1847,19 @@ class _MainScreenState extends State<MainScreen>
                                   child: contentChild!,
                                 ),
                               ),
+                              // Scrim behind the modal (hover/touch) rail
+                              // overlay; purely visual so content stays
+                              // interactive and hover-out still collapses.
+                              Positioned.fill(
+                                child: IgnorePointer(
+                                  child: AnimatedOpacity(
+                                    opacity: _isSidebarInteractionExpanded ? 1.0 : 0.0,
+                                    duration: SideNavigationRailState.expandDuration,
+                                    curve: SideNavigationRailState.expandCurve,
+                                    child: const ColoredBox(color: Color(0x66000000)),
+                                  ),
+                                ),
+                              ),
                               Positioned(
                                 top: 0,
                                 bottom: 0,
@@ -1835,7 +1874,6 @@ class _MainScreenState extends State<MainScreen>
                                     isSidebarFocused: _isSidebarFocused,
                                     alwaysExpanded: alwaysExpanded,
                                     isReconnecting: _isReconnecting,
-                                    onInteractionExpandedChanged: _handleSidebarInteractionExpandedChanged,
                                     onDestinationSelected: (tab) {
                                       final restorePreviousFocus = tab == _currentTab;
                                       _selectTab(tab);
@@ -1846,6 +1884,10 @@ class _MainScreenState extends State<MainScreen>
                                       _focusContent(restorePreviousFocus: false);
                                     },
                                     onNavigateToContent: _focusContent,
+                                    onInteractionExpandedChanged: (expanded) {
+                                      if (_isSidebarInteractionExpanded == expanded) return;
+                                      setState(() => _isSidebarInteractionExpanded = expanded);
+                                    },
                                     onReconnect: _triggerReconnect,
                                   ),
                                 ),

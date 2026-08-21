@@ -85,6 +85,52 @@ void main() {
     );
   });
 
+  test('video initialize carries the decode intent for the Android vo choice, audio stays bare (#2010)', () async {
+    for (final hardwareDecoding in [true, false]) {
+      final calls = <MethodCall>[];
+      await withMockPlayerChannels(
+        methodChannelName: 'com.plezy/mpv_player',
+        eventChannelName: 'com.plezy/mpv_player/events',
+        methodHandler: (call) async {
+          calls.add(call);
+          if (call.method == 'initialize') return true;
+          return null;
+        },
+        testBody: () async {
+          final player = PlayerNative(hardwareDecoding: hardwareDecoding);
+          try {
+            await player.setLogLevel('warn');
+            final init = calls.singleWhere((call) => call.method == 'initialize');
+            expect(init.arguments, {'hardwareDecoding': hardwareDecoding});
+          } finally {
+            await player.dispose();
+          }
+        },
+      );
+    }
+
+    final audioCalls = <MethodCall>[];
+    await withMockPlayerChannels(
+      methodChannelName: 'com.plezy/mpv_audio_player',
+      eventChannelName: 'com.plezy/mpv_audio_player/events',
+      methodHandler: (call) async {
+        audioCalls.add(call);
+        if (call.method == 'initialize') return true;
+        return null;
+      },
+      testBody: () async {
+        final player = PlayerNative.audio();
+        try {
+          await player.setLogLevel('warn');
+          final init = audioCalls.singleWhere((call) => call.method == 'initialize');
+          expect(init.arguments, isNull);
+        } finally {
+          await player.dispose();
+        }
+      },
+    );
+  });
+
   test('three overlapping players preserve the newest event owner and serialize native release', () async {
     final calls = <MethodCall>[];
     final eventCalls = <MethodCall>[];
@@ -957,9 +1003,9 @@ void main() {
           await expectLater(player.setAudioPassthrough(true), throwsA(isA<PlatformException>()));
 
           expect(propertyWrites.where((write) => write.$1 == 'af').map((write) => write.$2), [
-            'loudnorm=I=-14:TP=-3:LRA=4',
+            'loudnorm=I=-14:TP=-3:LRA=4,format=srate=48000:format=floatp',
             '',
-            'loudnorm=I=-14:TP=-3:LRA=4',
+            'loudnorm=I=-14:TP=-3:LRA=4,format=srate=48000:format=floatp',
           ]);
           expect(player.audioPassthroughActive, isFalse);
         } finally {
