@@ -314,6 +314,8 @@ class Translations$common$en {
 
 	/// en: 'ABC'
 	String get letterKeys => 'ABC';
+
+	late final Translations$common$mediaKind$en mediaKind = Translations$common$mediaKind$en.internal(_root);
 }
 
 // Path: screens
@@ -951,6 +953,12 @@ class Translations$settings$en {
 	/// en: 'Match display refresh rate to video content'
 	String get matchContentFrameRateDescription => 'Match display refresh rate to video content';
 
+	/// en: 'Match Content Resolution'
+	String get matchContentResolution => 'Match Content Resolution';
+
+	/// en: 'Switch the display to the video's native resolution so your TV handles upscaling. Menus and subtitles are upscaled too during playback'
+	String get matchContentResolutionDescription => 'Switch the display to the video\'s native resolution so your TV handles upscaling. Menus and subtitles are upscaled too during playback';
+
 	/// en: 'Match Refresh Rate'
 	String get matchRefreshRate => 'Match Refresh Rate';
 
@@ -1034,6 +1042,18 @@ class Translations$settings$en {
 
 	/// en: 'Strip Dolby Vision RPU/EL layers and present plain HEVC'
 	String get dvConversionHevcStripDescription => 'Strip Dolby Vision RPU/EL layers and present plain HEVC';
+
+	/// en: 'Container Demuxer'
+	String get demuxer => 'Container Demuxer';
+
+	/// en: 'Which demuxer parses direct-played files. Switch to media3 if a file misbehaves.'
+	String get demuxerDescription => 'Which demuxer parses direct-played files. Switch to media3 if a file misbehaves.';
+
+	/// en: 'FFmpeg (Recommended)'
+	String get demuxerFfmpeg => 'FFmpeg (Recommended)';
+
+	/// en: 'media3'
+	String get demuxerMedia3 => 'media3';
 
 	/// en: 'Ask for profile on app open'
 	String get requireProfileSelectionOnOpen => 'Ask for profile on app open';
@@ -2957,6 +2977,9 @@ class Translations$serverSelection$en {
 
 	/// en: 'Failed to load servers: ${error}'
 	String failedToLoadServers({required Object error}) => 'Failed to load servers: ${error}';
+
+	/// en: 'No usable servers were found on this account'
+	String get noValidServers => 'No usable servers were found on this account';
 }
 
 // Path: hubDetail
@@ -3457,6 +3480,8 @@ class Translations$liveTv$en {
 	/// en: 'Record show'
 	String get recordShow => 'Record show';
 
+	late final Translations$liveTv$recordSettings$en recordSettings = Translations$liveTv$recordSettings$en.internal(_root);
+
 	/// en: 'Starting in ${minutes} min'
 	String startingInMinutes({required Object minutes}) => 'Starting in ${minutes} min';
 
@@ -3920,6 +3945,8 @@ class Translations$watchTogether$en {
 
 	/// en: 'User'
 	String get defaultDisplayName => 'User';
+
+	late final Translations$watchTogether$errors$en errors = Translations$watchTogether$errors$en.internal(_root);
 }
 
 // Path: downloads
@@ -4978,6 +5005,9 @@ class Translations$seerr$en {
 	/// en: 'Processing'
 	String get statusProcessing => 'Processing';
 
+	/// en: 'Blocklisted'
+	String get statusBlocklisted => 'Blocklisted';
+
 	/// en: 'Could not reach ${url}: ${error}'
 	String couldNotReach({required Object url, required Object error}) => 'Could not reach ${url}: ${error}';
 
@@ -5149,6 +5179,9 @@ class Translations$addServer$en {
 	/// en: 'The authentication response was not valid JSON'
 	String get authResponseNotJson => 'The authentication response was not valid JSON';
 
+	/// en: 'The sign-in response from the server was incomplete'
+	String get authResponseIncomplete => 'The sign-in response from the server was incomplete';
+
 	/// en: 'Quick Connect was rejected by the server'
 	String get quickConnectRejected => 'Quick Connect was rejected by the server';
 
@@ -5238,6 +5271,51 @@ class Translations$common$ratingSource$en {
 
 	/// en: 'Rotten Tomatoes audience'
 	String get rottenTomatoesAudience => 'Rotten Tomatoes audience';
+}
+
+// Path: common.mediaKind
+class Translations$common$mediaKind$en {
+	Translations$common$mediaKind$en.internal(this._root);
+
+	final Translations _root; // ignore: unused_field
+
+	// Translations
+
+	/// en: 'Movie'
+	String get movie => 'Movie';
+
+	/// en: 'Show'
+	String get show => 'Show';
+
+	/// en: 'Season'
+	String get season => 'Season';
+
+	/// en: 'Episode'
+	String get episode => 'Episode';
+
+	/// en: 'Artist'
+	String get artist => 'Artist';
+
+	/// en: 'Album'
+	String get album => 'Album';
+
+	/// en: 'Track'
+	String get track => 'Track';
+
+	/// en: 'Collection'
+	String get collection => 'Collection';
+
+	/// en: 'Playlist'
+	String get playlist => 'Playlist';
+
+	/// en: 'Clip'
+	String get clip => 'Clip';
+
+	/// en: 'Photo'
+	String get photo => 'Photo';
+
+	/// en: 'Folder'
+	String get folder => 'Folder';
 }
 
 // Path: hotkeys.actions
@@ -5349,6 +5427,9 @@ class Translations$videoControls$pipErrors$en {
 
 	/// en: 'Picture-in-picture failed to start'
 	String get failed => 'Picture-in-picture failed to start';
+
+	/// en: 'Picture-in-picture could not be prepared'
+	String get prepareFailed => 'Picture-in-picture could not be prepared';
 
 	/// en: 'An error occurred: ${error}'
 	String unknown({required Object error}) => 'An error occurred: ${error}';
@@ -5966,6 +6047,39 @@ class Translations$explore$detail$en {
 	String get background => 'Background';
 }
 
+// Path: liveTv.recordSettings
+class Translations$liveTv$recordSettings$en {
+	Translations$liveTv$recordSettings$en.internal(this._root);
+
+	final Translations _root; // ignore: unused_field
+
+	// Translations
+
+	/// en: 'Start early (seconds)'
+	String get startEarly => 'Start early (seconds)';
+
+	/// en: 'End late (seconds)'
+	String get endLate => 'End late (seconds)';
+
+	/// en: 'Only new episodes'
+	String get newOnly => 'Only new episodes';
+
+	/// en: 'Record on any channel'
+	String get anyChannel => 'Record on any channel';
+
+	/// en: 'Record at any time'
+	String get anyTime => 'Record at any time';
+
+	/// en: 'Skip episodes already in the library'
+	String get skipInLibrary => 'Skip episodes already in the library';
+
+	/// en: 'Episodes to keep'
+	String get keepUpTo => 'Episodes to keep';
+
+	/// en: '0 keeps every episode'
+	String get keepUpToHint => '0 keeps every episode';
+}
+
 // Path: music.discography
 class Translations$music$discography$en {
 	Translations$music$discography$en.internal(this._root);
@@ -5982,6 +6096,27 @@ class Translations$music$discography$en {
 
 	/// en: 'Compilations'
 	String get compilations => 'Compilations';
+}
+
+// Path: watchTogether.errors
+class Translations$watchTogether$errors$en {
+	Translations$watchTogether$errors$en.internal(this._root);
+
+	final Translations _root; // ignore: unused_field
+
+	// Translations
+
+	/// en: 'The relay did not respond in time'
+	String get timedOut => 'The relay did not respond in time';
+
+	/// en: 'The connection closed before the session was ready'
+	String get connectionLost => 'The connection closed before the session was ready';
+
+	/// en: 'The relay sent an unexpected response'
+	String get invalidRelayResponse => 'The relay sent an unexpected response';
+
+	/// en: 'The host ended the session'
+	String get sessionEnded => 'The host ended the session';
 }
 
 // Path: downloads.backgroundWarning
@@ -6111,6 +6246,9 @@ class Translations$companionRemote$session$en {
 
 	/// en: 'Minimize'
 	String get minimize => 'Minimize';
+
+	/// en: 'Manual connection address:'
+	String get manualAddressHint => 'Manual connection address:';
 }
 
 // Path: companionRemote.pairing
@@ -6503,6 +6641,18 @@ extension on Translations {
 			'common.notAvailable' => 'N/A',
 			'common.url' => 'URL',
 			'common.letterKeys' => 'ABC',
+			'common.mediaKind.movie' => 'Movie',
+			'common.mediaKind.show' => 'Show',
+			'common.mediaKind.season' => 'Season',
+			'common.mediaKind.episode' => 'Episode',
+			'common.mediaKind.artist' => 'Artist',
+			'common.mediaKind.album' => 'Album',
+			'common.mediaKind.track' => 'Track',
+			'common.mediaKind.collection' => 'Collection',
+			'common.mediaKind.playlist' => 'Playlist',
+			'common.mediaKind.clip' => 'Clip',
+			'common.mediaKind.photo' => 'Photo',
+			'common.mediaKind.folder' => 'Folder',
 			'screens.licenses' => 'Licenses',
 			'screens.switchProfile' => 'Switch Profile',
 			'screens.subtitleStyling' => 'Subtitle Styling',
@@ -6706,6 +6856,8 @@ extension on Translations {
 			'settings.autoPipDescription' => 'Automatically enter picture-in-picture when you leave the app during playback',
 			'settings.matchContentFrameRate' => 'Match Content Frame Rate',
 			'settings.matchContentFrameRateDescription' => 'Match display refresh rate to video content',
+			'settings.matchContentResolution' => 'Match Content Resolution',
+			'settings.matchContentResolutionDescription' => 'Switch the display to the video\'s native resolution so your TV handles upscaling. Menus and subtitles are upscaled too during playback',
 			'settings.matchRefreshRate' => 'Match Refresh Rate',
 			'settings.matchRefreshRateDescription' => 'Match display refresh rate in fullscreen',
 			'settings.matchDynamicRange' => 'Match Dynamic Range',
@@ -6734,6 +6886,10 @@ extension on Translations {
 			'settings.dvConversionNativeDescription' => 'Force native DV7 and suppress DV conversion retry',
 			'settings.dvConversionDv81Description' => 'Force inline RPU conversion to Dolby Vision profile 8.1',
 			'settings.dvConversionHevcStripDescription' => 'Strip Dolby Vision RPU/EL layers and present plain HEVC',
+			'settings.demuxer' => 'Container Demuxer',
+			'settings.demuxerDescription' => 'Which demuxer parses direct-played files. Switch to media3 if a file misbehaves.',
+			'settings.demuxerFfmpeg' => 'FFmpeg (Recommended)',
+			'settings.demuxerMedia3' => 'media3',
 			'settings.requireProfileSelectionOnOpen' => 'Ask for profile on app open',
 			'settings.requireProfileSelectionOnOpenDescription' => 'Show profile selection every time the app is opened',
 			'settings.forceTvMode' => 'Force TV mode',
@@ -6921,6 +7077,8 @@ extension on Translations {
 			'fileInfo.flagOriginal' => 'Original',
 			'fileInfo.channelsMono' => 'Mono',
 			'fileInfo.dolbyVisionProfile' => ({required Object profile}) => 'Profile ${profile}',
+			_ => null,
+		} ?? switch (path) {
 			'mediaMenu.markAsWatched' => 'Mark as Watched',
 			'mediaMenu.markAsUnwatched' => 'Mark as Unwatched',
 			'mediaMenu.removeFromContinueWatching' => 'Remove from Continue Watching',
@@ -6939,8 +7097,6 @@ extension on Translations {
 			'mediaMenu.deleteMovieTitle' => 'Delete this movie?',
 			'mediaMenu.deleteEpisodeConfirm' => 'Delete episode',
 			'mediaMenu.deleteSeasonConfirm' => 'Delete season',
-			_ => null,
-		} ?? switch (path) {
 			'mediaMenu.deleteShowConfirm' => 'Delete show',
 			'mediaMenu.deleteMovieConfirm' => 'Delete movie',
 			'mediaMenu.deleteAnyway' => 'Delete anyway',
@@ -7062,6 +7218,7 @@ extension on Translations {
 			'videoControls.pipErrors.notSupported' => 'Device doesn\'t support picture-in-picture mode',
 			'videoControls.pipErrors.voSwitchFailed' => 'Failed to switch video output for picture-in-picture',
 			'videoControls.pipErrors.failed' => 'Picture-in-picture failed to start',
+			'videoControls.pipErrors.prepareFailed' => 'Picture-in-picture could not be prepared',
 			'videoControls.pipErrors.unknown' => ({required Object error}) => 'An error occurred: ${error}',
 			'videoControls.chapters' => 'Chapters',
 			'videoControls.noChaptersAvailable' => 'No chapters available',
@@ -7382,6 +7539,7 @@ extension on Translations {
 			'about.viewLicensesDescription' => 'View licenses of third-party libraries',
 			'serverSelection.noServersFoundForAccount' => ({required Object username, required Object email}) => 'No servers found for ${username} (${email})',
 			'serverSelection.failedToLoadServers' => ({required Object error}) => 'Failed to load servers: ${error}',
+			'serverSelection.noValidServers' => 'No usable servers were found on this account',
 			'hubDetail.title' => 'Title',
 			'hubDetail.releaseYear' => 'Release Year',
 			'hubDetail.dateAdded' => 'Date Added',
@@ -7433,6 +7591,8 @@ extension on Translations {
 			'explore.rows.watchlist' => 'Watchlist',
 			'explore.rows.recommendedMovies' => 'Recommended Movies',
 			'explore.rows.recommendedShows' => 'Recommended Shows',
+			_ => null,
+		} ?? switch (path) {
 			'explore.rows.trendingMovies' => 'Trending Movies',
 			'explore.rows.trendingShows' => 'Trending Shows',
 			'explore.rows.popularMovies' => 'Popular Movies',
@@ -7453,8 +7613,6 @@ extension on Translations {
 			'explore.characters' => 'Characters',
 			'explore.addToWatchlist' => 'Add to Watchlist',
 			'explore.removeFromWatchlist' => 'Remove from Watchlist',
-			_ => null,
-		} ?? switch (path) {
 			'explore.addedToWatchlist' => 'Added to watchlist',
 			'explore.removedFromWatchlist' => 'Removed from watchlist',
 			'explore.watchlistUpdateFailed' => 'Couldn\'t update watchlist',
@@ -7642,6 +7800,14 @@ extension on Translations {
 			'liveTv.guideReloadRequested' => 'Guide refresh requested',
 			'liveTv.rulesProcessRequested' => 'Rule re-evaluation requested',
 			'liveTv.recordShow' => 'Record show',
+			'liveTv.recordSettings.startEarly' => 'Start early (seconds)',
+			'liveTv.recordSettings.endLate' => 'End late (seconds)',
+			'liveTv.recordSettings.newOnly' => 'Only new episodes',
+			'liveTv.recordSettings.anyChannel' => 'Record on any channel',
+			'liveTv.recordSettings.anyTime' => 'Record at any time',
+			'liveTv.recordSettings.skipInLibrary' => 'Skip episodes already in the library',
+			'liveTv.recordSettings.keepUpTo' => 'Episodes to keep',
+			'liveTv.recordSettings.keepUpToHint' => '0 keeps every episode',
 			'liveTv.startingInMinutes' => ({required Object minutes}) => 'Starting in ${minutes} min',
 			'liveTv.dayAtTime' => ({required Object day, required Object time}) => '${day} at ${time}',
 			'liveTv.invalidPlaybackData' => ({required Object product}) => '${product} returned invalid Live TV playback data',
@@ -7786,6 +7952,10 @@ extension on Translations {
 			'watchTogether.guestSwitchUnavailable' => 'Couldn\'t switch — server unavailable for sync',
 			'watchTogether.guestSwitchFailed' => 'Couldn\'t switch — content not found on this server',
 			'watchTogether.defaultDisplayName' => 'User',
+			'watchTogether.errors.timedOut' => 'The relay did not respond in time',
+			'watchTogether.errors.connectionLost' => 'The connection closed before the session was ready',
+			'watchTogether.errors.invalidRelayResponse' => 'The relay sent an unexpected response',
+			'watchTogether.errors.sessionEnded' => 'The host ended the session',
 			'downloads.title' => 'Downloads',
 			'downloads.manage' => 'Manage',
 			'downloads.tvShows' => 'TV Shows',
@@ -7925,6 +8095,7 @@ extension on Translations {
 			'companionRemote.session.startServer' => 'Start Server',
 			'companionRemote.session.stopServer' => 'Stop Server',
 			'companionRemote.session.minimize' => 'Minimize',
+			'companionRemote.session.manualAddressHint' => 'Manual connection address:',
 			'companionRemote.pairing.discoveryDescription' => 'Plezy devices with the same Plex account appear here',
 			'companionRemote.pairing.hostAddressHint' => '192.168.1.100:48632',
 			'companionRemote.pairing.connecting' => 'Connecting...',
@@ -7934,6 +8105,8 @@ extension on Translations {
 			'companionRemote.pairing.availableDevices' => 'Available Devices',
 			'companionRemote.pairing.manualConnection' => 'Manual Connection',
 			'companionRemote.pairing.cryptoInitFailed' => 'Couldn\'t start secure connection. Sign in to Plex first.',
+			_ => null,
+		} ?? switch (path) {
 			'companionRemote.pairing.validationHostRequired' => 'Please enter host address',
 			'companionRemote.pairing.validationHostFormat' => 'Format must be IP:port (e.g., 192.168.1.100:48632)',
 			'companionRemote.pairing.connectionTimedOut' => 'Connection timed out. Use the same network on both devices.',
@@ -7967,8 +8140,6 @@ extension on Translations {
 			'companionRemote.remote.subtitles' => 'Subtitles',
 			'companionRemote.remote.audio' => 'Audio',
 			'companionRemote.remote.searchHint' => 'Search on desktop...',
-			_ => null,
-		} ?? switch (path) {
 			'companionRemote.errors.noNetworkInterface' => 'No network interface found',
 			'companionRemote.errors.authenticationFailed' => 'Authentication failed',
 			'companionRemote.errors.serverStartFailed' => ({required Object error}) => 'Failed to start remote server: ${error}',
@@ -8192,6 +8363,7 @@ extension on Translations {
 			'seerr.statusPartiallyAvailable' => 'Partially available',
 			'seerr.statusRequested' => 'Requested',
 			'seerr.statusProcessing' => 'Processing',
+			'seerr.statusBlocklisted' => 'Blocklisted',
 			'seerr.couldNotReach' => ({required Object url, required Object error}) => 'Could not reach ${url}: ${error}',
 			'seerr.noInstanceAtUrl' => ({required Object url, required Object status}) => 'No Seerr instance at ${url} (HTTP ${status})',
 			'seerr.notInitialized' => 'This Seerr instance has not completed first-run setup',
@@ -8269,6 +8441,7 @@ extension on Translations {
 			'addServer.borrowFromAnotherProfileSubtitle' => 'Reuse another profile\'s connection. PIN-protected profiles require a PIN.',
 			'addServer.invalidCredentials' => 'Invalid username or password',
 			'addServer.authResponseNotJson' => 'The authentication response was not valid JSON',
+			'addServer.authResponseIncomplete' => 'The sign-in response from the server was incomplete',
 			'addServer.quickConnectRejected' => 'Quick Connect was rejected by the server',
 			'addServer.quickConnectNotJson' => 'The Quick Connect response was not valid JSON',
 			'addServer.quickConnectMissingFields' => 'The Quick Connect response is missing a code or secret',

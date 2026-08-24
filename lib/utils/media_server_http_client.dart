@@ -237,8 +237,8 @@ class MediaServerHttpClient {
   Future<void> closeGracefully({Duration drainTimeout = const Duration(seconds: 2)}) async {
     _closing = true;
     _abortActiveRequests();
-    if (_client case final ManagedHttpClient managed) {
-      await managed.closeGracefully(drainTimeout: drainTimeout);
+    if (_client case final GracefulHttpClient graceful) {
+      await graceful.closeGracefully(drainTimeout: drainTimeout);
     } else {
       _client.close();
     }
@@ -334,8 +334,20 @@ class MediaServerHttpClient {
       );
       return await consume(streamed, scope);
     } catch (e) {
+      // Once this request's abort has fired, any secondary teardown error that
+      // surfaces first (a file sink failing after the stream died, a socket
+      // reset) is still a cancellation to the caller. Timeouts abort the
+      // request themselves before rethrowing and must keep their own type.
+      final wasAborted = requestAbort.isAborted || (abort?.isAborted ?? false);
       requestAbort.abort();
       await onError?.call();
+      if (wasAborted && e is! MediaServerHttpException && e is! TimeoutException) {
+        throw MediaServerHttpException(
+          type: MediaServerHttpErrorType.cancelled,
+          requestUri: uri,
+          message: 'Request aborted: $e',
+        );
+      }
       throw MediaServerHttpException.from(e, uri: uri);
     } finally {
       _activeAborts.remove(requestAbort);

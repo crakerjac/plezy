@@ -15,8 +15,9 @@ class PlayerAndroid extends PlayerBase {
   int? _bufferSizeBytes;
   bool _bufferSizeIsAuto = false;
   String _bufferTier = 'auto';
-  bool _tunnelingEnabled = true;
+  bool _tunnelingEnabled = false;
   String _dvConversionMode = 'auto';
+  String _demuxerMode = 'ffmpeg';
   bool _audioNormalizationEnabled = false;
   bool _audioPassthroughEnabled = false;
   bool _downmixEnabled = false;
@@ -120,6 +121,7 @@ class PlayerAndroid extends PlayerBase {
         'bufferTier': _bufferTier,
         'tunnelingEnabled': _tunnelingEnabled,
         'dvConversionMode': _dvConversionMode,
+        'demuxerMode': _demuxerMode,
         'audioPassthroughEnabled': _audioPassthroughEnabled,
         // Cheap (32-bit) TV boxes run the hardware video path a frame behind a GL
         // subtitle overlay; render the ASS one frame earlier there to realign.
@@ -132,7 +134,7 @@ class PlayerAndroid extends PlayerBase {
       });
       if (disposed) throw StateError('Player was disposed during initialization');
       if (result != true) {
-        throw Exception('Failed to initialize ExoPlayer');
+        throw const PlayerInitializationException();
       }
 
       // Register property observers before flipping `initialized` so partial
@@ -156,7 +158,7 @@ class PlayerAndroid extends PlayerBase {
       initialized = true;
     } catch (e) {
       _initFuture = null;
-      if (!disposed) errorController.add(PlayerError('Initialization failed: $e'));
+      if (!disposed) errorController.add(PlayerError(e.toString(), cause: PlayerError.playerInitFailed));
       rethrow;
     }
   }
@@ -306,6 +308,9 @@ class PlayerAndroid extends PlayerBase {
   @override
   Future<void> setRate(double rate) async {
     await invoke('setRate', {'rate': rate});
+    // The ExoPlayer core emits no `speed` property, so the mirror below is the
+    // only thing that lands the rate in PlayerState — same shape as setVolume.
+    if (!disposed) setRateState(rate);
   }
 
   @override
@@ -353,6 +358,10 @@ class PlayerAndroid extends PlayerBase {
           () => invoke('setDvConversionMode', {'mode': value}),
           () => _dvConversionMode == value,
         );
+        break;
+      case 'demuxer-mode':
+        _demuxerMode = value;
+        await _applyWhenInitialized(() => invoke('setDemuxerMode', {'mode': value}), () => _demuxerMode == value);
         break;
       case 'sub-visibility':
         if (value == 'no') {
@@ -569,6 +578,7 @@ class PlayerAndroid extends PlayerBase {
     int extraDelayMs = 0,
     int videoWidth = 0,
     int videoHeight = 0,
+    bool matchResolution = false,
   }) async {
     if (disposed || !initialized) return false;
     final result = await invoke<bool>('setVideoFrameRate', {
@@ -577,6 +587,7 @@ class PlayerAndroid extends PlayerBase {
       'extraDelayMs': extraDelayMs,
       'videoWidth': videoWidth,
       'videoHeight': videoHeight,
+      'matchResolution': matchResolution,
     });
     return result ?? false;
   }

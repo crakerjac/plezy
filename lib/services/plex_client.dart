@@ -291,6 +291,12 @@ bool? _parsePlexTranscoderVideoCapability(Object? value) {
 
 bool _shouldFallbackPlexItemLookup(Object error) => error is MediaServerHttpException && error.isTransient;
 
+/// One live-TV EPG provider advertised by `/media/providers`: the string
+/// identifier (e.g. `tv.plex.providers.epg.cloud:2`), its grid endpoint, and
+/// the numeric provider id that provider-scoped DVR routes (such as the
+/// subscription mapping endpoint) are mounted under.
+typedef PlexEpgProvider = ({String identifier, String gridEndpoint, String? id});
+
 class _PlexMediaProviderState {
   const _PlexMediaProviderState({
     required this.libraries,
@@ -303,7 +309,7 @@ class _PlexMediaProviderState {
   static const empty = _PlexMediaProviderState(libraries: [], epg: []);
 
   final List<PlexLibraryDto> libraries;
-  final List<({String identifier, String gridEndpoint})> epg;
+  final List<PlexEpgProvider> epg;
   final String? homeHubKey;
   final String? promotedHubKey;
   final String? continueWatchingHubKey;
@@ -433,7 +439,7 @@ class PlexClient
 
   /// EPG providers parsed from /media/providers
   @override
-  List<({String identifier, String gridEndpoint})> _providerEpg = const [];
+  List<PlexEpgProvider> _providerEpg = const [];
   int _profileUpdateGeneration = 0;
 
   /// Server-level preferences fetched from /:/prefs
@@ -539,7 +545,7 @@ class PlexClient
     List<String>? prioritizedEndpoints,
     http.Client Function()? endpointProbeHttpClientFactory,
     VoidCallback? onAllEndpointsExhausted,
-    List<({String identifier, String gridEndpoint})> epgProviders = const [],
+    List<PlexEpgProvider> epgProviders = const [],
     String? homeHubKey,
     String? promotedHubKey,
     String? continueWatchingHubKey,
@@ -609,7 +615,7 @@ class PlexClient
     if (providers == null) return _PlexMediaProviderState.empty;
 
     final libraries = <PlexLibraryDto>[];
-    final epg = <({String identifier, String gridEndpoint})>[];
+    final epg = <PlexEpgProvider>[];
     String? homeHubKey;
     String? promotedHubKey;
     String? continueWatchingHubKey;
@@ -682,8 +688,9 @@ class PlexClient
           if (feature['type'] == 'grid') {
             final gridEndpoint = feature['key'] as String?;
             if (gridEndpoint != null) {
-              epg.add((identifier: identifier, gridEndpoint: gridEndpoint));
-              appLogger.d('Discovered EPG provider: $identifier (grid: $gridEndpoint)');
+              final providerId = provider['id']?.toString();
+              epg.add((identifier: identifier, gridEndpoint: gridEndpoint, id: providerId));
+              appLogger.d('Discovered EPG provider: $identifier (id: $providerId, grid: $gridEndpoint)');
             }
           }
         }
@@ -1333,7 +1340,14 @@ class PlexClient
     }
   }
 
-  /// Wraps an API call that returns a list, returning empty list on error
+  /// Wraps an API call that returns a list.
+  ///
+  /// Contract (matches [_wrapBoolApiCall]):
+  ///   - HTTP 2xx → returns the parsed list.
+  ///   - HTTP 4xx/5xx → throws [MediaServerHttpException] (via
+  ///     [throwIfHttpError]) so callers can show a real error rather than a
+  ///     silent empty list.
+  ///   - Network/IO/parse failure → exception bubbles unchanged.
   @override
   Future<List<T>> _wrapListApiCall<T>(
     Future<MediaServerResponse> Function() apiCall,
@@ -1342,10 +1356,11 @@ class PlexClient
   ) async {
     try {
       final response = await apiCall();
+      throwIfHttpError(response);
       return parseResponse(response);
-    } catch (e) {
-      appLogger.e(errorMessage, error: e);
-      return [];
+    } catch (e, st) {
+      appLogger.e(errorMessage, error: e, stackTrace: st);
+      rethrow;
     }
   }
 
@@ -1907,11 +1922,18 @@ class PlexClient
   /// Get consolidated video playback data in one cache-aware API call.
   /// Request/decode failures throw. Only a valid absent metadata/media/part
   /// shape returns an aggregate without a playable URL.
+  ///
+  /// [forceRefresh] skips the fresh-cache fast path so server-side stream
+  /// changes become observable. Required by pollers (the OpenSubtitles
+  /// download flow watches for a new external stream to appear): without it,
+  /// each successful network fetch re-stamps the shared cache row, so every
+  /// later poll inside the freshness window is served the stale snapshot.
   Future<PlexVideoPlaybackData> getVideoPlaybackData(
     String ratingKey, {
     int mediaIndex = 0,
     String? selectedMediaSourceId,
     String? preferredVersionSignature,
+    bool forceRefresh = false,
   }) async {
     // Fresh-cache-first: the detail screen writes a strict superset of this
     // query shape (includeChapters+includeMarkers+includeOnDeck+checkFiles+
@@ -1921,24 +1943,26 @@ class PlexClient
     // staleness, thin row (getPlaybackExtras' lean fetch overwrites the shared
     // row without includeStreams/checkFiles), or shape failure falls through
     // to the network-first fetch below unchanged.
-    final freshRow = await cache.getIfFresh(
-      ServerId(cacheServerId),
-      '/library/metadata/$ratingKey',
-      maxAge: playbackMetadataCacheFreshness,
-    );
-    if (freshRow != null) {
-      try {
-        final cachedMetadataJson = _validatedPlaybackMetadataJson(freshRow);
-        if (cachedMetadataJson != null && _plexMetadataHasStreamDetail(cachedMetadataJson)) {
-          return parseVideoPlaybackDataFromJson(
-            cachedMetadataJson,
-            mediaIndex: mediaIndex,
-            selectedMediaSourceId: selectedMediaSourceId,
-            preferredVersionSignature: preferredVersionSignature,
-          );
+    if (!forceRefresh) {
+      final freshRow = await cache.getIfFresh(
+        ServerId(cacheServerId),
+        '/library/metadata/$ratingKey',
+        maxAge: playbackMetadataCacheFreshness,
+      );
+      if (freshRow != null) {
+        try {
+          final cachedMetadataJson = _validatedPlaybackMetadataJson(freshRow);
+          if (cachedMetadataJson != null && _plexMetadataHasStreamDetail(cachedMetadataJson)) {
+            return parseVideoPlaybackDataFromJson(
+              cachedMetadataJson,
+              mediaIndex: mediaIndex,
+              selectedMediaSourceId: selectedMediaSourceId,
+              preferredVersionSignature: preferredVersionSignature,
+            );
+          }
+        } on FormatException {
+          // Malformed cached row: the network fetch below overwrites it.
         }
-      } on FormatException {
-        // Malformed cached row: the network fetch below overwrites it.
       }
     }
     final data = await fetchWithCacheFallback<Map<String, dynamic>>(
@@ -2600,38 +2624,32 @@ class PlexClient
   }
 
   /// Get root folders for a library section
-  /// Returns the top-level folder structure for filesystem-based browsing
+  /// Returns the top-level folder structure for filesystem-based browsing.
+  /// Transport/HTTP failures propagate so the folder tree can show a real
+  /// error instead of an empty listing.
   Future<List<PlexMetadataDto>> _getLibraryFolders(String sectionId) async {
-    try {
-      final response = await _getWithFailover(
-        '/library/sections/$sectionId/folder',
-        queryParameters: {'includeCollections': 0},
-      );
-      return _extractMetadataAndDirectories(response, librarySectionID: _librarySectionIdFromString(sectionId));
-    } catch (e) {
-      appLogger.e('Failed to get library folders: $e');
-      return [];
-    }
+    final response = await _getWithFailover(
+      '/library/sections/$sectionId/folder',
+      queryParameters: {'includeCollections': 0},
+    );
+    return _extractMetadataAndDirectories(response, librarySectionID: _librarySectionIdFromString(sectionId));
   }
 
   /// Get children of a specific folder
-  /// Returns files and subfolders within the given folder
+  /// Returns files and subfolders within the given folder.
+  /// Transport/HTTP failures propagate so the folder tree can show a real
+  /// error instead of an empty listing.
   Future<List<PlexMetadataDto>> _getFolderChildren(
     String folderKey, {
     String? librarySectionID,
     String? librarySectionTitle,
   }) async {
-    try {
-      final response = await _getWithFailover(folderKey);
-      return _extractMetadataAndDirectories(
-        response,
-        librarySectionID: _librarySectionIdFromString(folderKey) ?? _librarySectionIdFromString(librarySectionID),
-        librarySectionTitle: librarySectionTitle,
-      );
-    } catch (e) {
-      appLogger.e('Failed to get folder children: $e');
-      return [];
-    }
+    final response = await _getWithFailover(folderKey);
+    return _extractMetadataAndDirectories(
+      response,
+      librarySectionID: _librarySectionIdFromString(folderKey) ?? _librarySectionIdFromString(librarySectionID),
+      librarySectionTitle: librarySectionTitle,
+    );
   }
 
   /// Get library-specific playlists

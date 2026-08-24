@@ -40,6 +40,7 @@ import 'services/fullscreen_state_manager.dart';
 import 'services/settings_service.dart';
 import 'widgets/settings_builder.dart';
 import 'utils/platform_detector.dart';
+import 'utils/pointer_scroll_axis.dart';
 import 'services/apple_tv_remote_touch_service.dart';
 import 'services/discord_rpc_service.dart';
 import 'package:path_provider/path_provider.dart';
@@ -57,6 +58,7 @@ import 'utils/snackbar_helper.dart';
 import 'services/multi_server_manager.dart';
 import 'services/offline_watch_sync_service.dart';
 import 'services/data_aggregation_service.dart';
+import 'services/credential_vault.dart';
 import 'services/server_registry.dart';
 import 'services/download_manager_service.dart';
 import 'services/pip_service.dart';
@@ -127,7 +129,7 @@ void _registerTvosPlatformPlugins() {
 }
 
 void main() {
-  final binding = WidgetsFlutterBinding.ensureInitialized();
+  final binding = PlezyWidgetsBinding.ensureInitialized();
   AndroidExitDiagnostics.markStartupPhase(AndroidStartupPhase.dartMain);
   // Keep the accessibility tree available to Maestro and other UI automation
   // without adding release-build overhead.
@@ -474,6 +476,11 @@ Future<StartupRepairResult> repairStartupStorage(
   final outcome = unreadableKey != null
       ? await BaseSharedPreferencesService.dropUnreadableCredential(unreadableKey)
       : await BaseSharedPreferencesService.repairCorruptStore(reopenSafe: reopenSafe);
+  // The repair replaced or dropped entries in the backing store, so the vault's
+  // memoized key and its ciphertext -> plaintext cache now describe a store
+  // that no longer exists. Drop both before anything reads a credential again,
+  // or a repaired install could keep serving pre-repair plaintext.
+  CredentialVault.invalidateCache();
   final result = outcome.requiresRestart ? StartupRepairResult.restart : StartupRepairResult.retry;
   if (!context.mounted) return result;
 
@@ -615,6 +622,11 @@ class StartupBootstrap<T> extends StatefulWidget {
   /// what the gate may do next. [StartupRepairResult.retry] re-runs
   /// [initialize]; [StartupRepairResult.restart] parks the app on the failure
   /// screen, because nothing may touch preferences until the process restarts.
+  ///
+  /// The context is a descendant of the gate's own bootstrap [MaterialApp]
+  /// (never the gate `State`'s context, which sits above it), so dialogs and
+  /// snackbars can resolve a `Navigator`, `MaterialLocalizations` and
+  /// `ScaffoldMessenger` from it.
   final Future<StartupRepairResult> Function(BuildContext context, StartupFailureRecord record, Object error)? repair;
 
   final ThemeData? lightTheme;
@@ -737,7 +749,12 @@ class _StartupBootstrapState<T> extends State<StartupBootstrap<T>> {
     }
   }
 
-  Future<void> _repair(StartupFailureRecord failure) async {
+  /// [context] must sit below the bootstrap `MaterialApp` — it comes from the
+  /// `home` builder in [_buildBootstrapHome]. The gate `State`'s own context
+  /// is above that `MaterialApp` and has no `Navigator`,
+  /// `MaterialLocalizations` or `ScaffoldMessenger`, so the repair dialogs and
+  /// the failure snackbar would all throw when built from it.
+  Future<void> _repair(BuildContext context, StartupFailureRecord failure) async {
     final repair = widget.repair;
     final error = _failureError;
     if (repair == null || error == null || _repairing || _restartRequired) return;
@@ -747,7 +764,7 @@ class _StartupBootstrapState<T> extends State<StartupBootstrap<T>> {
       result = await repair(context, failure, error);
     } catch (error, stackTrace) {
       appLogger.e('Startup storage repair failed', error: error, stackTrace: stackTrace);
-      if (mounted) showErrorSnackBar(context, t.startup.repairFailed);
+      if (context.mounted) showErrorSnackBar(context, t.startup.repairFailed);
     }
     if (!mounted) return;
     setState(() {
@@ -800,7 +817,7 @@ class _StartupBootstrapState<T> extends State<StartupBootstrap<T>> {
           busy: _initializing || _repairing,
           restartRequired: _restartRequired,
           onRetry: () => unawaited(_initialize()),
-          onRepair: failure.repairable && widget.repair != null ? () => _repair(failure) : null,
+          onRepair: failure.repairable && widget.repair != null ? () => _repair(context, failure) : null,
         ),
       );
     }
@@ -878,7 +895,6 @@ Future<_StartupDependencies> _initializeStartup(SettingsService settings) async 
     await _optionalGatePhase(StartupPhase.locale, () async {
       final savedLocale = settings.read(SettingsService.appLocale);
       await LocaleSettings.setLocale(savedLocale);
-      await initializeDateFormatting(savedLocale.intlLocaleName, null);
     });
     markStartupPhase('locale');
 
@@ -920,12 +936,7 @@ Future<_StartupDependencies> _initializeStartup(SettingsService settings) async 
 
     await _optionalGatePhase(StartupPhase.imageCache, () async => DevicePerformance.applyImageCacheBudget());
 
-    // DownloadManagerService reads this singleton synchronously in MainApp's
-    // initState, but `getArtworkPathSync` already models "not ready" by
-    // returning null and the path re-resolves lazily, so offline artwork is
-    // not a launch requirement.
-    await _optionalGatePhase(StartupPhase.downloadStorage, () => DownloadStorageService.instance.initialize(settings));
-    markStartupPhase('download-storage');
+    markStartupPhase('image-cache');
 
     return _StartupDependencies(
       settings: settings,
@@ -940,13 +951,24 @@ Future<_StartupDependencies> _initializeStartup(SettingsService settings) async 
 }
 
 void _startNonessentialInitialization(SettingsService settings) {
+  // `onCommitted` runs before the rebuild that creates MainApp. Share one
+  // end-of-frame hop so synchronous tasks cannot delay its first frame.
+  final afterFirstAppFrame = WidgetsBinding.instance.endOfFrame;
+
   void bestEffort(String name, FutureOr<void> Function() action) {
     unawaited(
-      Future.sync(action).catchError((Object error, StackTrace stackTrace) {
+      afterFirstAppFrame.then((_) => action()).catchError((Object error, StackTrace stackTrace) {
         appLogger.e('$name startup task failed (${error.runtimeType})', stackTrace: stackTrace);
       }),
     );
   }
+
+  bestEffort(
+    'Date formatting',
+    () => initializeDateFormatting(settings.read(SettingsService.appLocale).intlLocaleName, null),
+  );
+  bestEffort('Download storage', () => DownloadStorageService.instance.initialize(settings));
+  bestEffort('Trackers', TrackerCoordinator.instance.initialize);
 
   bestEffort('Legacy image cache cleanup', () async {
     if (settings.read(SettingsService.cleanedOldImageCache)) return;
@@ -1234,7 +1256,11 @@ class _MainAppState extends State<MainApp> with WidgetsBindingObserver {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
 
-    _startRssWatchdog();
+    // The watchdog's first useful sample is at least 15 seconds away; install
+    // its timer only after the first app frame has completed.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _startRssWatchdog();
+    });
 
     _serverManager = MultiServerManager();
     _aggregationService = DataAggregationService(_serverManager);
@@ -1248,13 +1274,13 @@ class _MainAppState extends State<MainApp> with WidgetsBindingObserver {
       storageService: DownloadStorageService.instance,
       clientResolver: _serverManager.resolveDownloadClient,
     );
-    _downloadManager.recoveryFuture = _downloadManager.recoverInterruptedDownloads();
+    // Keep the awaitable assigned synchronously, but do not let recovery's
+    // Drift/native work compete with SetupScreen's first frame.
+    _downloadManager.recoveryFuture = WidgetsBinding.instance.endOfFrame.then(
+      (_) => _downloadManager.recoverInterruptedDownloads(),
+    );
 
     _offlineWatchSyncService = OfflineWatchSyncService(database: _appDatabase, serverManager: _serverManager);
-
-    // Tracker singletons init once per app; per-profile hydration happens in
-    // the profile-scoped provider subtree's create callbacks.
-    unawaited(TrackerCoordinator.instance.initialize());
 
     _appLifecycleListener = AppLifecycleListener(
       onExitRequested: () async {
@@ -1536,15 +1562,15 @@ class _MainAppState extends State<MainApp> with WidgetsBindingObserver {
         Provider<ProfileConnectionRegistry>(create: (_) => ProfileConnectionRegistry(_appDatabase)),
         Provider<PlexHomeService>(
           create: (context) {
-            // start() resolves StorageService internally — the singleton was
-            // already initialised eagerly during boot, so the await is a
-            // microtask hop in practice.
+            // Hydrate the disk cache eagerly for profile resolution. Live
+            // refresh is started only after MainScreen has settled the
+            // startup offline decision.
             final service = PlexHomeService(
               connections: context.read<ConnectionRegistry>(),
               profileConnections: context.read<ProfileConnectionRegistry>(),
               storage: context.read<StorageService>(),
             );
-            unawaited(service.start());
+            unawaited(service.hydrate());
             return service;
           },
           dispose: (_, s) => s.dispose(),
@@ -2210,7 +2236,6 @@ class _SetupScreenState extends State<SetupScreen> with MountedSetStateMixin {
     if (_serverStatus.isEmpty) return const SizedBox.shrink();
     final textTheme = Theme.of(context).textTheme;
     final dimColor = Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.5);
-    const coralColor = Color(0xFFE5A00D);
     const successColor = Color(0xFF4CAF50);
     const failColor = Color(0xFFEF5350);
 
@@ -2220,11 +2245,7 @@ class _SetupScreenState extends State<SetupScreen> with MountedSetStateMixin {
         final (name, connected) = entry.value;
         final Widget statusIcon;
         if (connected == null) {
-          statusIcon = const SizedBox(
-            width: 12,
-            height: 12,
-            child: CircularProgressIndicator(strokeWidth: 1.5, color: coralColor),
-          );
+          statusIcon = AppIcon(Symbols.circle_rounded, size: 10, color: dimColor);
         } else if (connected) {
           statusIcon = const AppIcon(Symbols.check_circle_rounded, size: 14, color: successColor);
         } else {

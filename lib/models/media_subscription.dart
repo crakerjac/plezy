@@ -13,6 +13,11 @@ List<MediaGrabOperation> _parseGrabOperations(Object? raw) => parseFlexibleJsonL
 
 Map<String, dynamic>? _mapFromJson(Object? raw) => firstFlexibleMap(raw);
 
+/// Rule identifier: `/media/subscriptions` returns it as `key`, while the
+/// provider-scoped mapping endpoint identifies entries by `id` — both name the
+/// same numeric rule id.
+Object? _readSubscriptionKey(Map json, String key) => (json['key'] ?? json['id'])?.toString();
+
 /// Template wrapper returned by `/media/subscriptions/template`.
 @JsonSerializable(createToJson: false)
 class SubscriptionTemplate {
@@ -27,7 +32,13 @@ class SubscriptionTemplate {
 /// A Plex recording/download rule (`MediaSubscription`).
 @JsonSerializable(createToJson: false)
 class MediaSubscription {
-  @JsonKey(defaultValue: '')
+  /// Rule-type vocabulary carried in [type]. Plex puts its metadata-type ints
+  /// on the wire and the recordings UI keys series/episode presentation and
+  /// sort order off them, so the MediaBrowser adapter emits the same codes.
+  static const int typeSeries = 2;
+  static const int typeEpisode = 4;
+
+  @JsonKey(defaultValue: '', readValue: _readSubscriptionKey)
   final String key;
   @JsonKey(fromJson: flexibleInt)
   final int? type;

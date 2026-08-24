@@ -37,10 +37,9 @@ extension _VideoPlayerPlaybackServiceMethods on VideoPlayerScreenState {
   }
 
   Future<void> _markFirstFrameReady(Player currentPlayer, SettingsService settingsService) async {
-    if (!mounted || player != currentPlayer || _hasRenderedFirstFrame || _hasFatalPlaybackError) return;
+    if (!mounted || player != currentPlayer || _firstFrame.rendered || _hasFatalPlaybackError) return;
 
-    _hasRenderedFirstFrame = true;
-    _hasFirstFrame.value = true;
+    _firstFrame.markReady();
     _http503Watchdog.disarm();
     unawaited(Sentry.addBreadcrumb(Breadcrumb(message: 'First frame ready', category: 'player')));
     final progressTracker = _progressTracker;
@@ -48,7 +47,9 @@ extension _VideoPlayerPlaybackServiceMethods on VideoPlayerScreenState {
       unawaited(progressTracker.sendProgress('playing'));
     }
 
-    if (Platform.isAndroid && settingsService.read(SettingsService.matchContentFrameRate)) {
+    if (Platform.isAndroid &&
+        (settingsService.read(SettingsService.matchContentFrameRate) ||
+            settingsService.read(SettingsService.matchContentResolution))) {
       await _applyFrameRateMatching();
     }
 
@@ -82,7 +83,7 @@ extension _VideoPlayerPlaybackServiceMethods on VideoPlayerScreenState {
         lastObservedPositionMs = null;
         final durMs = currentPlayer.state.duration.inMilliseconds;
         final posMs = currentPlayer.state.position.inMilliseconds;
-        if (durMs <= 0 || posMs < durMs - _completionLatch.rearmWindowMs) {
+        if (durMs <= 0 || posMs < durMs - _episode.completionLatch.rearmWindowMs) {
           _rearmCompletionLatch();
         }
       }
@@ -91,7 +92,7 @@ extension _VideoPlayerPlaybackServiceMethods on VideoPlayerScreenState {
       // exit a movie. Intercepted here and not inside _onVideoCompleted
       // because the credits-marker auto-skip legitimately calls
       // _onVideoCompleted from mid-credits positions.
-      if (done && _interceptSpuriousEof(currentPlayer)) return;
+      if (done && _eofRecovery.interceptEof(currentPlayer)) return;
       _onVideoCompleted(done);
     });
 
@@ -122,12 +123,12 @@ extension _VideoPlayerPlaybackServiceMethods on VideoPlayerScreenState {
           final isOnline = statusMap[serverId] == true;
           if (!isOnline) {
             wasOffline = true;
-          } else if (wasOffline && (_isBuffering.value || _spuriousEofRecoveryParked)) {
+          } else if (wasOffline && (_isBuffering.value || _eofRecovery.parked)) {
             wasOffline = false;
-            if (_spuriousEofRecoveryParked) {
+            if (_eofRecovery.parked) {
               // A parked stream is dead server-side; a seek-in-place would
               // land in the drained cache — only a fresh resolve replaces it.
-              unawaited(_retrySpuriousEofRecovery(reason: 'server back online'));
+              unawaited(_eofRecovery.retry(reason: 'server back online'));
             } else {
               _forceStreamReconnect();
             }
@@ -140,8 +141,7 @@ extension _VideoPlayerPlaybackServiceMethods on VideoPlayerScreenState {
       if (!mounted || player != currentPlayer) return;
       _lastLogError = null;
       _fatalHttpStatuses.clear();
-      _live.fallbackLevel = 0;
-      _live.retryFailed = false;
+      _resetLiveLadderOnPlaybackRestart();
       final markFirstFrameReady = _markFirstFrameReady(currentPlayer, settingsService);
       _trackManager?.onPlaybackRestart();
       await markFirstFrameReady;
@@ -156,7 +156,7 @@ extension _VideoPlayerPlaybackServiceMethods on VideoPlayerScreenState {
       // a renderer, so it may infer readiness only after switching to MPV.
       final canInferRenderedFrameFromPosition =
           !(Platform.isAndroid && useExoPlayer) || (currentPlayer is PlayerAndroid && currentPlayer.usingMpvFallback);
-      if (canInferRenderedFrameFromPosition && !_hasRenderedFirstFrame) {
+      if (canInferRenderedFrameFromPosition && !_firstFrame.rendered) {
         if (lastObservedPositionMs != null && position.inMilliseconds != lastObservedPositionMs) {
           unawaited(_markFirstFrameReady(currentPlayer, settingsService));
         }
@@ -166,19 +166,14 @@ extension _VideoPlayerPlaybackServiceMethods on VideoPlayerScreenState {
       // A recovered stream that progressed well past the recovery point
       // proves the reload worked — restore the full spurious-EOF retry
       // budget for the next stream death.
-      final recoveryBaselineMs = _spuriousEofRecoveryBaselineMs;
-      if (recoveryBaselineMs != null &&
-          position.inMilliseconds >= recoveryBaselineMs + VideoPlayerScreenState._spuriousEofProgressResetMs) {
-        _spuriousEofRecoveryAttempts = 0;
-        _spuriousEofRecoveryBaselineMs = null;
-      }
+      _eofRecovery.onPositionAdvanced(position.inMilliseconds);
 
       final duration = activePlayer.state.duration;
-      _completionLatch.classifyPosition(
+      _episode.completionLatch.classifyPosition(
         positionMs: position.inMilliseconds,
         durationMs: duration.inMilliseconds,
-        promptVisible: _showPlayNextDialog,
-        countdownActive: _autoPlayTimer?.isActive == true,
+        promptVisible: _episode.showPlayNextDialog,
+        countdownActive: _episode.autoPlayTimer?.isActive == true,
       );
     });
   }
@@ -264,7 +259,7 @@ extension _VideoPlayerPlaybackServiceMethods on VideoPlayerScreenState {
     _audioFocusFuture = null;
     _playbackDataFuture = null;
     _playbackSession = null;
-    _mediaControlsSuspendedForTvBackground = false;
+    _mediaControls.resetSuspension();
 
     if (progressTracker != null) {
       try {
@@ -280,8 +275,7 @@ extension _VideoPlayerPlaybackServiceMethods on VideoPlayerScreenState {
 
     if (mounted) {
       _isBuffering.value = false;
-      _hasFirstFrame.value = false;
-      _hasRenderedFirstFrame = false;
+      _firstFrame.reset();
       _http503Watchdog.disarm();
     }
   }
@@ -372,8 +366,8 @@ extension _VideoPlayerPlaybackServiceMethods on VideoPlayerScreenState {
         playMethod: effectivePlayMethod,
         playSessionId: playSessionId,
         mediaInfo: mediaInfo,
-        canReportPlayback: () => _hasRenderedFirstFrame && !_hasFatalPlaybackError,
-        hasRenderedPlayback: () => _hasRenderedFirstFrame,
+        canReportPlayback: () => _firstFrame.rendered && !_hasFatalPlaybackError,
+        hasRenderedPlayback: () => _firstFrame.rendered,
         subtitleOffIsDeliberate: () => _playbackSession?.subtitleSelection.declinedPreference == null,
         onPausedKeepalive: mediaClient is PlexClient && effectivePlayMethod == 'Transcode'
             ? () => mediaClient.pingTranscodeSession(_playbackTranscodeSessionId)
@@ -402,8 +396,8 @@ extension _VideoPlayerPlaybackServiceMethods on VideoPlayerScreenState {
         player: currentPlayer,
         isOffline: true,
         offlineWatchService: offlineWatchService,
-        canReportPlayback: () => _hasRenderedFirstFrame && !_hasFatalPlaybackError,
-        hasRenderedPlayback: () => _hasRenderedFirstFrame,
+        canReportPlayback: () => _firstFrame.rendered && !_hasFatalPlaybackError,
+        hasRenderedPlayback: () => _firstFrame.rendered,
       );
       _progressTracker!.startTracking();
     }
@@ -439,11 +433,11 @@ extension _VideoPlayerPlaybackServiceMethods on VideoPlayerScreenState {
       onPlay: () {
         final currentPlayer = player;
         if (currentPlayer == null) return;
-        unawaited(_seekBackForRewind(currentPlayer));
+        unawaited(_mediaControls.seekBackForRewind(currentPlayer));
         unawaited(_playWithPlaybackIntent(currentPlayer));
         _wasPlayingBeforeInactive = false;
         _announceTransportCommand(willPlay: true);
-        _updateMediaControlsPlaybackState();
+        _mediaControls.pushPlaybackState();
       },
       onPause: () {
         final currentPlayer = player;
@@ -454,7 +448,7 @@ extension _VideoPlayerPlaybackServiceMethods on VideoPlayerScreenState {
         }
         unawaited(_pauseWithPlaybackIntent(currentPlayer));
         _announceTransportCommand(willPlay: false);
-        _updateMediaControlsPlaybackState();
+        _mediaControls.pushPlaybackState();
       },
       onTogglePlayPause: () {
         final currentPlayer = player;
@@ -463,12 +457,12 @@ extension _VideoPlayerPlaybackServiceMethods on VideoPlayerScreenState {
           unawaited(_pauseWithPlaybackIntent(currentPlayer));
           _announceTransportCommand(willPlay: false);
         } else {
-          unawaited(_seekBackForRewind(currentPlayer));
+          unawaited(_mediaControls.seekBackForRewind(currentPlayer));
           unawaited(_playWithPlaybackIntent(currentPlayer));
           _wasPlayingBeforeInactive = false;
           _announceTransportCommand(willPlay: true);
         }
-        _updateMediaControlsPlaybackState();
+        _mediaControls.pushPlaybackState();
       },
       onSeek: (position) {
         final currentPlayer = player;
@@ -477,7 +471,7 @@ extension _VideoPlayerPlaybackServiceMethods on VideoPlayerScreenState {
         }
       },
       onNext: () {
-        if (_nextEpisode != null) unawaited(_playNext());
+        if (_episode.next != null) unawaited(_playNext());
       },
       onPrevious: () => unawaited(_restartOrPlayPrevious()),
       onStop: () => unawaited(_handleBackButton()),
@@ -491,7 +485,7 @@ extension _VideoPlayerPlaybackServiceMethods on VideoPlayerScreenState {
 
     // Set up media control event handling
     _mediaControlSubscription = mediaControlsManager.controlEvents.listen((event) {
-      if (_mediaControlsSuspendedForTvBackground) {
+      if (_mediaControls.suspendedForTvBackground) {
         appLogger.d('Media control: ${event.runtimeType} ignored while Android TV background-suspended');
         return;
       }
@@ -523,12 +517,12 @@ extension _VideoPlayerPlaybackServiceMethods on VideoPlayerScreenState {
 
     if (!mounted) return;
 
-    await _syncMediaControlsAvailability();
+    await _mediaControls.syncAvailability();
     if (!mounted || player != currentPlayer || _mediaControlsManager != mediaControlsManager) return;
 
     // Listen to playing state and update media controls
     _mediaControlsPlayingSubscription = currentPlayer.streams.playing.listen((isPlaying) {
-      _updateMediaControlsPlaybackState();
+      _mediaControls.pushPlaybackState();
     });
 
     // Listen to position updates for media controls and Discord
@@ -552,7 +546,7 @@ extension _VideoPlayerPlaybackServiceMethods on VideoPlayerScreenState {
     });
 
     _mediaControlsSeekableSubscription = currentPlayer.streams.seekable.listen((_) {
-      unawaited(_syncMediaControlsAvailability());
+      unawaited(_mediaControls.syncAvailability());
     });
   }
 
@@ -579,7 +573,7 @@ extension _VideoPlayerPlaybackServiceMethods on VideoPlayerScreenState {
       return;
     }
 
-    if (isPlaying && _mediaControlsSuspendedForTvBackground) {
+    if (isPlaying && _mediaControls.suspendedForTvBackground) {
       appLogger.w('Playback started while Android TV background media controls are suspended; pausing');
       Sentry.addBreadcrumb(
         Breadcrumb(message: 'Blocked TV background playback start', category: 'player.media_controls'),
@@ -605,7 +599,7 @@ extension _VideoPlayerPlaybackServiceMethods on VideoPlayerScreenState {
     _progressTracker?.sendProgress(isPlaying ? 'playing' : 'paused');
 
     // Update OS media controls playback state
-    _updateMediaControlsPlaybackState();
+    _mediaControls.pushPlaybackState();
 
     // Update Discord Rich Presence + real-time trackers
     if (isPlaying) {
@@ -664,7 +658,7 @@ extension _VideoPlayerPlaybackServiceMethods on VideoPlayerScreenState {
     } catch (e) {
       appLogger.w('Failed to pause after Apple audio session $reason', error: e);
     } finally {
-      _updateMediaControlsPlaybackState();
+      _mediaControls.pushPlaybackState();
     }
   }
 
@@ -692,7 +686,7 @@ extension _VideoPlayerPlaybackServiceMethods on VideoPlayerScreenState {
     } catch (e) {
       appLogger.w('Failed to resume after Apple audio session $reason', error: e);
     } finally {
-      _updateMediaControlsPlaybackState();
+      _mediaControls.pushPlaybackState();
     }
   }
 
@@ -712,95 +706,4 @@ extension _VideoPlayerPlaybackServiceMethods on VideoPlayerScreenState {
 
   /// Intercept an EOF signal that fired far from the end of the media.
   ///
-  /// The player reports a clean EOF when a network stream dies mid-file
-  /// (#1520) — no libmpv signal distinguishes it from the real end, so
-  /// position vs best-known duration is the only discriminator (see
-  /// [classifyEofSignal]). Returns true when the signal was spurious and
-  /// handled here (recovery started, or playback stays parked); false lets
-  /// the caller run the normal completion flow.
-  bool _interceptSpuriousEof(Player currentPlayer) {
-    // Live EOFs have their own handling, an offline file can't lose its
-    // stream, and in-flight transitions already produce expected EOFs that
-    // _onVideoCompleted ignores — all fall through untouched.
-    if (widget.isLive || _isOfflinePlayback) return false;
-    if (_playbackTransition != _PlaybackTransition.idle) return false;
-    // Already parked: swallow duplicate EOF signals without burning budget
-    // or re-toasting.
-    if (_spuriousEofRecoveryParked) return true;
-
-    final positionMs = currentPlayer.state.position.inMilliseconds;
-    final playerDurationMs = currentPlayer.state.duration.inMilliseconds;
-    final metadataDurationMs = _currentMetadata.durationMs;
-    final signal = classifyEofSignal(
-      positionMs: positionMs,
-      playerDurationMs: playerDurationMs,
-      metadataDurationMs: metadataDurationMs,
-    );
-    if (signal != EofSignalClass.spurious) return false;
-
-    appLogger.w(
-      'Spurious EOF at ${positionMs}ms (playerDuration=${playerDurationMs}ms, '
-      'metadataDuration=${metadataDurationMs}ms, '
-      'cacheEnd=${currentPlayer.state.buffer.inMilliseconds}ms), '
-      'recovery attempt ${_spuriousEofRecoveryAttempts + 1}/'
-      '${VideoPlayerScreenState._maxSpuriousEofRecoveryAttempts}',
-    );
-
-    if (_spuriousEofRecoveryAttempts >= VideoPlayerScreenState._maxSpuriousEofRecoveryAttempts) {
-      _parkAfterFailedRecovery();
-      return true;
-    }
-    _spuriousEofRecoveryAttempts++;
-    _spuriousEofRecoveryBaselineMs = positionMs;
-    unawaited(_recoverFromSpuriousEof(currentPlayer));
-    return true;
-  }
-
-  /// Leave playback parked on the dead stream: no auto-exit — the user keeps
-  /// their place and the snackbar names the actions that actually rebuild the
-  /// stream (play/seek route to [_retrySpuriousEofRecovery] while parked).
-  void _parkAfterFailedRecovery() {
-    _spuriousEofRecoveryParked = true;
-    unawaited(_wakelockController.setEnabled(false));
-    showGlobalErrorSnackBar(t.messages.streamInterrupted);
-  }
-
-  /// Recover from a spurious EOF by re-running the full playback decision in
-  /// place — the same path as the TV background suspend restore, because the
-  /// failure is the same: the server-side stream is gone and only a fresh
-  /// resolve replaces it (a seek-in-place lands inside the dead cache, and a
-  /// same-session transcode seek can hit the reaped session).
-  Future<void> _recoverFromSpuriousEof(Player currentPlayer) async {
-    final outcome = await _reloadMediaInPlace(
-      metadata: _currentMetadata,
-      resumePosition: currentPlayer.state.position,
-      preserveCurrentTrackSelection: true,
-      startPaused: !_playbackIntentShouldPlay,
-      showErrorUi: false,
-      reason: 'spurious EOF recovery',
-    );
-    if (outcome == _MediaReloadOutcome.failed) _parkAfterFailedRecovery();
-    // rejected/superseded: another flow owns the player and will commit
-    // fresh media (clearing any park). opened: recovered — the budget
-    // resets via 30s of progress or an item change.
-  }
-
-  /// Rebuild the dead stream after playback parked on a spurious EOF.
-  /// User actions and the server-online monitor land here; these retries are
-  /// always allowed and never consume the automatic budget.
-  Future<void> _retrySpuriousEofRecovery({required String reason, Duration? resumePosition}) async {
-    final currentPlayer = player;
-    if (currentPlayer == null || _playbackTransition != _PlaybackTransition.idle) return;
-    appLogger.i('Retrying dead-stream recovery ($reason)');
-    _spuriousEofRecoveryParked = false;
-    final outcome = await _reloadMediaInPlace(
-      metadata: _currentMetadata,
-      resumePosition: resumePosition ?? currentPlayer.state.position,
-      preserveCurrentTrackSelection: true,
-      startPaused: !_playbackIntentShouldPlay,
-      showErrorUi: false,
-      reason: 'stream recovery ($reason)',
-    );
-    if (outcome == _MediaReloadOutcome.failed) _parkAfterFailedRecovery();
-  }
 }

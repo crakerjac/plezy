@@ -16,17 +16,18 @@ class MediaGridDelegate {
   /// Resolves the max cross-axis extent for [MediaGridGeometry.resolve],
   /// including the 1.8x widening for 16:9 episode thumbnails. Square cells
   /// keep the poster extent so column counts match the poster grid.
+  ///
+  /// This is the single widening scheme: wide cells widen the max extent
+  /// BEFORE the integral column packing. Nothing multiplies the resolved cell
+  /// afterwards — horizontal rows adopt the packed cell via [wideCellWidth]
+  /// so a hub row and a grid of the same items match at equal width.
   static double _maxCrossAxisExtentFor({
     required BuildContext context,
     required int density,
-    required bool usePaddingAware,
-    required double horizontalPadding,
     required bool useWideAspectRatio,
     CardShape? shape,
   }) {
-    var maxCrossAxisExtent = usePaddingAware
-        ? GridSizeCalculator.getMaxCrossAxisExtentWithPadding(context, density, horizontalPadding)
-        : GridSizeCalculator.getMaxCrossAxisExtent(context, density);
+    var maxCrossAxisExtent = GridSizeCalculator.getMaxCrossAxisExtent(context, density);
 
     // For wide aspect ratio (16:9), increase max extent so items are larger
     // and there are fewer per row (roughly 1.8x wider to maintain similar visual area)
@@ -34,6 +35,21 @@ class MediaGridDelegate {
       maxCrossAxisExtent *= 1.8;
     }
     return maxCrossAxisExtent;
+  }
+
+  /// The cell width the grid formula resolves for a wide (16:9) surface —
+  /// the wide analogue of [GridSizeCalculator.getCellWidth]. Horizontal hub
+  /// rows use this instead of scaling the poster cell so episode rows match
+  /// the episode grid behind their "see all" page (#2039, plan item 3).
+  static double wideCellWidth(BuildContext context, double availableWidth, int density) {
+    final maxCrossAxisExtent = _maxCrossAxisExtentFor(context: context, density: density, useWideAspectRatio: true);
+    final spacing = spacingFor(context: context, useWideAspectRatio: true);
+    final columnCount = GridSizeCalculator.getColumnCount(
+      availableWidth,
+      maxCrossAxisExtent,
+      crossAxisSpacing: spacing,
+    );
+    return GridSizeCalculator.getCellWidthForColumnCount(availableWidth, columnCount, crossAxisSpacing: spacing);
   }
 
   /// Inter-cell gutter for the resolved shape. Square (music) grids get
@@ -108,8 +124,6 @@ class MediaGridGeometry {
     required double crossAxisExtent,
     required int density,
     double? crossAxisExtentForColumnCount,
-    bool usePaddingAware = false,
-    double horizontalPadding = 16,
     bool useWideAspectRatio = false,
     bool fullBleedImage = false,
     CardShape? shape,
@@ -128,8 +142,6 @@ class MediaGridGeometry {
     final maxCrossAxisExtent = MediaGridDelegate._maxCrossAxisExtentFor(
       context: context,
       density: density,
-      usePaddingAware: usePaddingAware,
-      horizontalPadding: horizontalPadding,
       useWideAspectRatio: useWideAspectRatio,
       shape: shape,
     );

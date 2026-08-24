@@ -3005,13 +3005,13 @@ void main() {
       final artistAlbums = captured[2].queryParameters;
       final albumTracks = captured[3].queryParameters;
 
-      expect(albumBrowse['Fields'], 'PremiereDate,OriginalTitle,SortName');
+      expect(albumBrowse['Fields'], 'PremiereDate,OriginalTitle,SortName,DateCreated');
       expect(albumBrowse['EnableUserData'], 'false');
       expect(trackBrowse['Fields'], 'UserData,PremiereDate,OriginalTitle,SortName');
       expect(albumBrowse['IncludeItemTypes'], 'MusicAlbum');
       expect(trackBrowse['IncludeItemTypes'], 'Audio');
       expect(trackBrowse.containsKey('EnableUserData'), isFalse);
-      expect(artistAlbums['Fields'], 'PremiereDate,OriginalTitle,SortName');
+      expect(artistAlbums['Fields'], 'PremiereDate,OriginalTitle,SortName,DateCreated');
       expect(artistAlbums['EnableUserData'], 'false');
       expect(albumTracks['Fields'], 'UserData,PremiereDate,OriginalTitle,SortName');
     });
@@ -4284,6 +4284,17 @@ void main() {
       client.close();
     });
 
+    test('hub see-all rows request DateCreated so the "Date Added" sort has addedAt', () async {
+      // hub_detail_screen sorts see-all rows by MediaItem.addedAt, which is
+      // mapped from DateCreated — a field Jellyfin withholds unless named in
+      // Fields. Without it the sort silently compares nulls.
+      final client = buildClient();
+      await client.fetchMoreHubItems('home.recent', limit: 10);
+
+      expect(captured!.queryParameters['Fields'], 'Overview,DateCreated');
+      client.close();
+    });
+
     test('global "home.continue" hits /UserItems/Resume with userId', () async {
       final client = buildClient();
       await client.fetchMoreHubItems('home.continue');
@@ -4380,8 +4391,9 @@ void main() {
       expect(captured!.queryParameters['ParentId'], 'lib-99');
       expect(captured!.queryParameters['Limit'], '30');
       // Album FOLDER dtos: count/user-data fields would each cost the server
-      // a recursive per-album COUNT query (#1552).
-      expect(captured!.queryParameters['Fields'], 'PremiereDate,OriginalTitle,SortName');
+      // a recursive per-album COUNT query (#1552). DateCreated is a direct dto
+      // property and backs the see-all sheet's "Date Added" sort.
+      expect(captured!.queryParameters['Fields'], 'PremiereDate,OriginalTitle,SortName,DateCreated');
       expect(captured!.queryParameters['EnableUserData'], 'false');
       client.close();
     });
@@ -4543,7 +4555,10 @@ void main() {
       expect(itemsRequest.queryParameters['Limit'], '36');
       expect(itemsRequest.queryParameters['SortBy'], 'SortName');
       expect(itemsRequest.queryParameters['SortOrder'], 'Ascending');
-      expect(itemsRequest.queryParameters['Fields'], 'RecursiveItemCount,ChildCount,OriginalTitle,SortName,Overview');
+      expect(
+        itemsRequest.queryParameters['Fields'],
+        'RecursiveItemCount,ChildCount,OriginalTitle,SortName,Overview,DateCreated',
+      );
       expect(itemsRequest.queryParameters.containsKey('EnableTotalRecordCount'), isFalse);
       expect(itemsRequest.queryParameters['EnableImageTypes'], 'Primary,Backdrop,Logo');
       expect(itemsRequest.queryParameters['ImageTypeLimit'], '3');
