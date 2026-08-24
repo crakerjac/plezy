@@ -21,6 +21,57 @@ extension _VideoPlayerLiveTvMethods on VideoPlayerScreenState {
     });
   }
 
+  /// Advance the fallback ladder and retry — the error path's entry point.
+  void _beginLiveLadderRetry() {
+    _live.fallbackLevel++;
+    _live.retrying = true;
+    appLogger.w('Live stream failed, retrying with fallback level ${_live.fallbackLevel}');
+    unawaited(_retryLiveStream());
+  }
+
+  /// Play pressed while the live stream is dead: reuse the ladder retry
+  /// unless one is already in flight.
+  Future<void> _retryLiveStreamForPlayIntent() {
+    if (_live.retrying) return Future.value();
+    _live.retrying = true;
+    return _retryLiveStream();
+  }
+
+  /// A playback restart proves the current ladder level works; refill it.
+  void _resetLiveLadderOnPlaybackRestart() {
+    _live.fallbackLevel = 0;
+    _live.retryFailed = false;
+  }
+
+  void _suspendLiveTimelineForBackground() {
+    _live.resumeTimelineOnResume = _live.timelineTimer != null;
+    _stopLiveTimelineUpdates();
+  }
+
+  void _resumeLiveTimelineAfterBackgroundIfNeeded() {
+    final shouldResume = _live.resumeTimelineOnResume;
+    _live.resumeTimelineOnResume = false;
+    if (shouldResume && _live.session != null) {
+      _startLiveTimelineUpdates();
+    }
+  }
+
+  /// The TV background policy stopped the tuned session: exit the screen on
+  /// the next resume instead of showing a dead stream.
+  void _stopLiveSessionForTvBackground() {
+    _live.exitOnResume = true;
+    _live.resumeTimelineOnResume = false;
+    _stopLiveTimelineUpdates();
+  }
+
+  /// Whether the background stop asked for an exit-on-resume; consuming the
+  /// flag so the exit runs once.
+  bool _consumeLiveExitOnResume() {
+    if (!_live.exitOnResume) return false;
+    _live.exitOnResume = false;
+    return true;
+  }
+
   void _stopLiveTimelineUpdates() {
     _live.timelineGeneration++;
     _live.timelineTimer?.cancel();
@@ -102,7 +153,7 @@ extension _VideoPlayerLiveTvMethods on VideoPlayerScreenState {
     _liveSeek.cancel();
     final currentPlayer = player;
     if (!mounted || currentPlayer == null) return;
-    final generation = _playbackGeneration;
+    final generation = _transitionGate.generation;
     bool isCurrent() => _isCurrentPlaybackGeneration(generation, currentPlayer);
     final session = _live.session;
     if (session == null) {
@@ -145,6 +196,10 @@ extension _VideoPlayerLiveTvMethods on VideoPlayerScreenState {
         _live.selectedSubtitle = recoveredSubtitle;
         _live.markStreamRestartedAtLiveEdge();
       },
+      // Jellyfin's recover() returns the receiver, so the recovered object can
+      // be the still-current session; the retry helper skips the discard by
+      // identity so a failed retry cannot terminally stop-report it.
+      currentSession: () => _live.session,
       discardSession: _abandonLiveSession,
       reportFailure: (error, stackTrace) {
         appLogger.e('Failed to recover live stream', error: error, stackTrace: stackTrace);
@@ -334,17 +389,16 @@ extension _VideoPlayerLiveTvMethods on VideoPlayerScreenState {
     final currentPlayer = player;
     if (currentPlayer == null) return;
 
-    final transitionLease = _tryAcquirePlaybackTransition(_PlaybackTransition.switchingChannel);
+    final transitionLease = _transitionGate.tryAcquire(PlaybackTransition.switchingChannel);
     if (transitionLease == null) return; // debounce concurrent switches
     bool isCurrentChannelSwitch() =>
         mounted &&
         player == currentPlayer &&
-        _ownsPlaybackTransition(transitionLease, expected: _PlaybackTransition.switchingChannel);
+        _transitionGate.owns(transitionLease, expected: PlaybackTransition.switchingChannel);
     _liveSeek.cancel();
 
     final previousSession = _live.session;
-    final previousHasFirstFrame = _hasFirstFrame.value;
-    final previousHasRenderedFirstFrame = _hasRenderedFirstFrame;
+    final previousFirstFrame = _firstFrame.snapshot();
     final channel = channels[newIndex];
     appLogger.d('Switching to channel: ${channel.displayName} (${channel.key})');
 
@@ -375,8 +429,7 @@ extension _VideoPlayerLiveTvMethods on VideoPlayerScreenState {
       }
 
       _setPlayerState(() {
-        _hasFirstFrame.value = false;
-        _hasRenderedFirstFrame = false;
+        _firstFrame.reset();
       });
       replacementOpenStarted = true;
       await currentPlayer.open(
@@ -420,14 +473,13 @@ extension _VideoPlayerLiveTvMethods on VideoPlayerScreenState {
       if (!isCurrentChannelSwitch()) return;
       if (replacementOpenStarted && mounted && _live.session == previousSession) {
         _setPlayerState(() {
-          _hasFirstFrame.value = previousHasFirstFrame;
-          _hasRenderedFirstFrame = previousHasRenderedFirstFrame;
+          _firstFrame.restore(previousFirstFrame);
         });
       }
       appLogger.e('Failed to switch channel', error: e);
       if (mounted) showErrorSnackBar(context, e.toString());
     } finally {
-      _releasePlaybackTransition(transitionLease);
+      _transitionGate.release(transitionLease);
     }
   }
 

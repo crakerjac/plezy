@@ -1,6 +1,6 @@
 import 'dart:async';
 
-import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart';
 
 import '../connection/connection.dart';
 import '../connection/connection_registry.dart';
@@ -33,7 +33,7 @@ String _localizedRemoteError(Object error, String Function(String details) fallb
   return fallback(error.toString().replaceFirst('Exception: ', ''));
 }
 
-class CompanionRemoteProvider with ChangeNotifier, DisposableChangeNotifierMixin {
+class CompanionRemoteProvider with ChangeNotifier, DisposableChangeNotifierMixin, WidgetsBindingObserver {
   CompanionRemoteProvider() : this._(CompanionRemotePeerService.new, LanDiscoveryService.new);
 
   @visibleForTesting
@@ -43,6 +43,7 @@ class CompanionRemoteProvider with ChangeNotifier, DisposableChangeNotifierMixin
   }) : this._(peerServiceFactory, discoveryServiceFactory);
 
   CompanionRemoteProvider._(this._peerServiceFactory, this._discoveryServiceFactory) {
+    WidgetsBinding.instance.addObserver(this);
     _initializeDeviceInfo();
   }
 
@@ -55,6 +56,9 @@ class CompanionRemoteProvider with ChangeNotifier, DisposableChangeNotifierMixin
   String _deviceName = t.companionRemote.unknownDevice;
   String _platform = 'unknown';
   bool _isPlayerActive = false;
+  // Listen addresses of a running host server (`ip:port`), surfaced so the
+  // host UI can show what a phone's manual connection should target.
+  List<String> _hostServerAddresses = const [];
 
   static const int _maxReconnectAttempts = 5;
 
@@ -62,6 +66,14 @@ class CompanionRemoteProvider with ChangeNotifier, DisposableChangeNotifierMixin
   int _reconnectAttempts = 0;
   Future<void>? _activeReconnect;
   int? _activeReconnectGeneration;
+
+  // Lifecycle-aware reconnect state: Android restricts background network
+  // access, so retries fired while backgrounded are guaranteed failures that
+  // only consume the bounded budget. The cycle is held open instead and
+  // retried on resume.
+  bool _appBackgrounded = false;
+  bool _resumeReconnectPending = false;
+  int _resumeReconnectGeneration = 0;
   int _remoteGeneration = 0;
   final Expando<int> _intentionalDisconnectGeneration = Expando<int>(
     'companion remote intentional disconnect generation',
@@ -110,6 +122,7 @@ class CompanionRemoteProvider with ChangeNotifier, DisposableChangeNotifierMixin
   RemoteDevice? get connectedDevice => _session?.connectedDevice;
   bool get isPlayerActive => _isPlayerActive;
   bool get isHostServerRunning => _peerService?.isServerRunning ?? false;
+  List<String> get hostServerAddresses => _hostServerAddresses;
 
   Future<void> _initializeDeviceInfo() async {
     final identity = await DeviceIdentityService.resolve();
@@ -463,6 +476,7 @@ class CompanionRemoteProvider with ChangeNotifier, DisposableChangeNotifierMixin
     _remoteGeneration++;
     _reconnectTimer?.cancel();
     _reconnectTimer = null;
+    _resumeReconnectPending = false;
 
     final pending = _pendingRemotePeer;
     final current = _session?.isRemote == true ? _peerService : null;
@@ -580,6 +594,7 @@ class CompanionRemoteProvider with ChangeNotifier, DisposableChangeNotifierMixin
     try {
       final contexts = List<RemoteAuthContext>.unmodifiable(_authContexts);
       final result = await _peerService!.createSessionForContexts(_deviceName, _platform, contexts);
+      _hostServerAddresses = result.addresses;
 
       _session = RemoteSession(
         role: RemoteSessionRole.host,
@@ -602,6 +617,7 @@ class CompanionRemoteProvider with ChangeNotifier, DisposableChangeNotifierMixin
       appLogger.d('CompanionRemote: Host server running, broadcasting on LAN');
     } catch (e) {
       appLogger.e('CompanionRemote: Failed to start host server', error: e);
+      _hostServerAddresses = const [];
       _session = RemoteSession(
         role: RemoteSessionRole.host,
         status: RemoteSessionStatus.error,
@@ -623,6 +639,7 @@ class CompanionRemoteProvider with ChangeNotifier, DisposableChangeNotifierMixin
     try {
       await _discoveryService?.stopBroadcasting();
       _discoveryService?.stopListening();
+      _hostServerAddresses = const [];
 
       if (identical(_peerService, peer)) {
         _peerService = null;
@@ -756,14 +773,20 @@ class CompanionRemoteProvider with ChangeNotifier, DisposableChangeNotifierMixin
   /// guards live here so a candidate that lost ownership while joining is
   /// disposed rather than promoted, in exactly one place. Returns true only
   /// when the candidate was promoted.
+  ///
+  /// [isReconnectAttempt] carries the attempt's own intent: a failed reconnect
+  /// reschedules from this captured flag (plus the generation guard) rather
+  /// than from `_session.status`, which the candidate's mirrored status/error
+  /// emissions can overwrite while the join is in flight.
   Future<bool> _runRemoteConnect({
     required int generation,
     required Future<void> Function(CompanionRemotePeerService peer) join,
     required void Function(CompanionRemotePeerService peer) onConnected,
     required String failureLog,
-    required void Function(Object error) onFailure,
+    void Function(Object error)? onFailure,
     bool seedConnectingSession = false,
     bool rethrowOnFailure = false,
+    bool isReconnectAttempt = false,
   }) async {
     final candidate = _peerServiceFactory();
     _pendingRemotePeer = candidate;
@@ -799,7 +822,10 @@ class CompanionRemoteProvider with ChangeNotifier, DisposableChangeNotifierMixin
       _cleanupSubscriptions();
       await _disposePeer(candidate);
       appLogger.e(failureLog, error: error, stackTrace: stackTrace);
-      onFailure(error);
+      onFailure?.call(error);
+      if (isReconnectAttempt && generation == _remoteGeneration) {
+        _scheduleReconnect(generation);
+      }
       if (rethrowOnFailure) rethrow;
       return false;
     }
@@ -863,6 +889,12 @@ class CompanionRemoteProvider with ChangeNotifier, DisposableChangeNotifierMixin
     _errorSubscription = peer.onError.listen((error) {
       if (!_ownsPeer(peer, generation)) return;
       appLogger.e('CompanionRemote: Error: ${error.message}');
+      if (_session?.status == RemoteSessionStatus.reconnecting) {
+        // An active reconnect cycle owns the session: attempt failures surface
+        // through the join future and are rescheduled there. A stale error
+        // from the dying socket must not end the cycle.
+        return;
+      }
       _session = _session?.copyWith(status: RemoteSessionStatus.error, errorMessage: error.message);
       safeNotifyListeners();
     });
@@ -870,6 +902,13 @@ class CompanionRemoteProvider with ChangeNotifier, DisposableChangeNotifierMixin
     _statusSubscription = peer.onConnectionStateChanged.listen((status) {
       if (!_ownsPeer(peer, generation)) return;
       appLogger.d('CompanionRemote: Status changed: $status');
+      if (_session?.status == RemoteSessionStatus.reconnecting && status != RemoteSessionStatus.connected) {
+        // The peer emits a disconnected status right after deviceDisconnected
+        // (and candidates emit connecting/error while a retry is joining);
+        // none of those may knock the session out of an active reconnect
+        // cycle — only a successful connection ends it.
+        return;
+      }
       _session = _session?.copyWith(status: status);
       safeNotifyListeners();
     });
@@ -924,6 +963,14 @@ class CompanionRemoteProvider with ChangeNotifier, DisposableChangeNotifierMixin
 
   void _scheduleReconnect(int generation) {
     if (generation != _remoteGeneration || isDisposed) return;
+    if (_appBackgrounded) {
+      // Hold the cycle instead of burning the bounded budget on retries that
+      // are guaranteed to fail against restricted background networking;
+      // resume retries immediately.
+      _resumeReconnectPending = true;
+      _resumeReconnectGeneration = generation;
+      return;
+    }
     if (_reconnectAttempts >= _maxReconnectAttempts) {
       appLogger.w('CompanionRemote: Max reconnect attempts reached');
       _session = _session?.copyWith(
@@ -944,6 +991,53 @@ class CompanionRemoteProvider with ChangeNotifier, DisposableChangeNotifierMixin
       if (generation != _remoteGeneration || isDisposed) return;
       unawaited(_attemptReconnect());
     });
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    switch (state) {
+      case AppLifecycleState.paused:
+      case AppLifecycleState.hidden:
+        _appBackgrounded = true;
+        _pauseReconnectBackoff();
+      case AppLifecycleState.resumed:
+        _appBackgrounded = false;
+        _handleAppResumed();
+      case AppLifecycleState.inactive:
+      case AppLifecycleState.detached:
+        break;
+    }
+  }
+
+  /// Stop the backoff clock while backgrounded; [_handleAppResumed] restarts
+  /// the cycle the moment the app is visible again.
+  void _pauseReconnectBackoff() {
+    final timer = _reconnectTimer;
+    if (timer == null) return;
+    timer.cancel();
+    _reconnectTimer = null;
+    _resumeReconnectPending = true;
+    _resumeReconnectGeneration = _remoteGeneration;
+  }
+
+  void _handleAppResumed() {
+    if (isDisposed) return;
+    if (_resumeReconnectPending) {
+      _resumeReconnectPending = false;
+      if (_resumeReconnectGeneration == _remoteGeneration && _session?.status == RemoteSessionStatus.reconnecting) {
+        // Fresh budget: failures accumulated around backgrounding say nothing
+        // about reachability now that the network is back.
+        unawaited(retryReconnectNow());
+      }
+      return;
+    }
+    // A remote session that slept through a socket death still looks
+    // connected. A ping forces the dead socket to fail now, feeding the
+    // normal disconnect → reconnect path instead of waiting for user input
+    // to bounce.
+    if (isRemote && isConnected) {
+      _peerService?.sendPing();
+    }
   }
 
   Future<void> _attemptReconnect() {
@@ -1007,11 +1101,10 @@ class CompanionRemoteProvider with ChangeNotifier, DisposableChangeNotifierMixin
         _reconnectAttempts = 0;
       },
       failureLog: 'CompanionRemote: Reconnect failed',
-      onFailure: (_) {
-        if (generation == _remoteGeneration && _session?.status == RemoteSessionStatus.reconnecting) {
-          _scheduleReconnect(generation);
-        }
-      },
+      // Reschedule from the attempt's own intent, not from `_session.status`:
+      // the candidate's status/error emissions overwrite `reconnecting` while
+      // the join is in flight, which used to end the cycle after one failure.
+      isReconnectAttempt: true,
     );
     if (reconnected) {
       appLogger.d('CompanionRemote: Reconnected successfully');
@@ -1061,6 +1154,7 @@ class CompanionRemoteProvider with ChangeNotifier, DisposableChangeNotifierMixin
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _remoteGeneration++;
     _reconnectTimer?.cancel();
     _reconnectTimer = null;

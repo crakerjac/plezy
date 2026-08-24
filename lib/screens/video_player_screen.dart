@@ -36,9 +36,7 @@ import '../mixins/mounted_set_state_mixin.dart';
 import '../providers/download_provider.dart';
 import '../providers/multi_server_provider.dart';
 import '../providers/playback_state_provider.dart';
-import '../models/companion_remote/remote_command.dart';
 import '../providers/companion_remote_provider.dart';
-import '../services/companion_remote/companion_remote_receiver.dart';
 import '../services/fullscreen_state_manager.dart';
 import '../services/car_ux_restrictions_service.dart';
 import '../services/driver_distraction.dart';
@@ -70,7 +68,6 @@ import '../services/ambient_lighting_service.dart';
 import '../services/video_filter_manager.dart';
 import '../services/video_volume_controller.dart';
 import '../services/pip_service.dart';
-import '../models/shader_preset.dart';
 import '../services/shader_service.dart';
 import '../providers/shader_provider.dart';
 import '../providers/user_profile_provider.dart';
@@ -88,15 +85,24 @@ import '../utils/route_visibility.dart';
 import '../utils/video_player_navigation.dart';
 import '../utils/android_exit_diagnostics.dart';
 import 'video_player/completion_latch.dart';
+import 'video_player/episode_session_state.dart';
+import 'video_player/first_frame_gate.dart';
 import 'video_player/frame_rate_matcher.dart';
+import 'video_player/companion_remote_binding.dart';
+import 'video_player/media_controls_screen_controller.dart';
+import 'video_player/media_reload_outcome.dart';
+import 'video_player/spurious_eof_recovery.dart';
 import 'video_player/live_stream_retry.dart';
 import 'video_player/live_timeline_report.dart';
 import 'video_player/wakelock_controller.dart';
 import 'video_player/playback_failure_action.dart';
+import 'video_player/playback_transition_gate.dart';
 import 'video_player/open_http_503_watchdog.dart';
 import 'video_player/live_tv_session_args.dart';
 import 'video_player/live_tv_session_state.dart';
 import 'video_player/tv_background_suspend_policy.dart';
+import 'video_player/tv_background_suspend_state.dart';
+import 'video_player/visual_effects_controller.dart';
 import 'video_player/widgets/player_prompt_overlays.dart';
 import '../widgets/overlay_sheet.dart';
 import '../widgets/video_controls/player_chrome_controller.dart';
@@ -118,11 +124,10 @@ part 'video_player/parts/episode_queue.dart';
 part 'video_player/parts/errors.dart';
 part 'video_player/parts/lifecycle.dart';
 part 'video_player/parts/live_tv.dart';
-part 'video_player/parts/media_controls.dart';
 part 'video_player/parts/pip.dart';
-part 'video_player/parts/shader.dart';
 part 'video_player/parts/playback_open.dart';
 part 'video_player/parts/playback_prompts.dart';
+part 'video_player/parts/playback_reload.dart';
 part 'video_player/parts/playback_services.dart';
 part 'video_player/parts/playback_start.dart';
 part 'video_player/parts/seeking.dart';
@@ -308,48 +313,7 @@ SubtitlePreference? sessionPreferenceForSourceSubtitleChoice(
   return null;
 }
 
-/// The in-place media-source transitions a [VideoPlayerScreenState] can run.
-/// They are mutually exclusive by construction — entry points bail while a
-/// transition is in flight.
-enum _PlaybackTransition { idle, switchingSource, reloadingMedia, switchingChannel }
-
 enum _SubtitleSelectionSlot { primary, secondary }
-
-/// Identity token for one owner of the in-place playback transition lock.
-///
-/// The enum describes what the current owner is doing; it is not itself an
-/// ownership token because a superseded async flow can outlive a newer flow
-/// that has since acquired the same enum value.
-final class _PlaybackTransitionLease {
-  _PlaybackTransitionLease();
-
-  bool _wasSuperseded = false;
-
-  bool get wasSuperseded => _wasSuperseded;
-
-  void _markSuperseded() => _wasSuperseded = true;
-}
-
-/// Outcome of [VideoPlayerScreenState._reloadMediaInPlace].
-enum _MediaReloadOutcome {
-  /// An entry guard refused the attempt (live screen, unmounted, another
-  /// transition in flight). Nothing was touched; safe to retry later.
-  rejected,
-
-  /// A newer playback attempt took ownership mid-reload; its outcome
-  /// governs what is on screen now.
-  superseded,
-
-  /// The replacement media opened and its session committed. A post-open
-  /// step may still have failed (tracks/services were rewired in the
-  /// catch), but the network stream is fresh.
-  opened,
-
-  /// The reload failed before the replacement opened: the previous session
-  /// is still committed, the eagerly-set identity was rolled back, and the
-  /// old (possibly dead — #1520) stream is still loaded.
-  failed,
-}
 
 /// Handle for one playback attempt (initial start or in-place reload).
 /// Async continuations check [isCurrent] after every await while the screen
@@ -470,23 +434,11 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
   Future<void>? _playerInitializationOperation;
   int _playerInitializationGeneration = 0;
   late MediaItem _currentMetadata;
-  MediaItem? _nextEpisode;
-  MediaItem? _previousEpisode;
-  // Retryable sentinel until the fire-and-forget initial adjacency load
-  // commits found, boundary, or unavailable.
-  QueueNavigationStatus _nextEpisodeStatus = QueueNavigationStatus.failed;
-  // globalKey of the adjacent episode whose playback metadata row was last
-  // prefetched into the API cache — see _primeNextEpisodePlaybackMetadata.
-  String? _primedNextEpisodeGlobalKey;
-  bool _isResolvingCompletionAdjacency = false;
-  bool _isLoadingNext = false;
-  bool _isLoadingPrevious = false;
+  final EpisodeSessionState _episode = EpisodeSessionState();
 
   // In-flight media-source transition. At most one can run at a time: reloads
   // and channel switches are mutually exclusive.
-  _PlaybackTransition _playbackTransition = _PlaybackTransition.idle;
-  _PlaybackTransitionLease? _playbackTransitionLease;
-  Completer<void>? _playbackTransitionIdleCompleter;
+  final PlaybackTransitionGate _transitionGate = PlaybackTransitionGate();
   bool _playbackIntentShouldPlay = true;
 
   int _pendingSubtitleCycleCount = 0;
@@ -496,7 +448,6 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
   /// toasted about — the heartbeat retry loop must not re-toast every 2s.
   String? _wtSwitchToastShownForKey;
 
-  bool _showPlayNextDialog = false;
   bool _isPhone = false;
   late int _effectiveSelectedMediaIndex;
 
@@ -534,7 +485,6 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
   // through its own path). The getters below denormalize it for the many
   // existing read sites.
   PlaybackSession? _playbackSession;
-  int _playbackGeneration = 0;
   // Fired in parallel with MPV setup so the OS audio-focus negotiation
   // (~90ms on Android) doesn't sit on the critical path. Awaited before
   // `player.open()` so the semantics are unchanged — we just eat the cost
@@ -629,22 +579,6 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
     onChanged: _onLiveSeekTargetChanged,
   );
 
-  Timer? _autoPlayTimer;
-  int _autoPlayCountdown = 5;
-
-  // Transient episode-transition failure retry (#1867). A failed in-place
-  // reload records the classified reason here so _playNext can distinguish
-  // "server momentarily unreachable" (re-present the Play Next prompt,
-  // optionally with an auto-retry countdown) from terminal failures.
-  // _navigateToEpisode clears the field before each attempt; the counter
-  // resets when a reload succeeds.
-  PlaybackFailureReason? _lastMediaReloadFailureReason;
-  int _playNextTransientRetryCount = 0;
-
-  // End-of-video Play Next latch. Completion comes from the player EOF signal;
-  // position ticks only re-arm once playback is more than 2s from the end.
-  final CompletionLatch _completionLatch = CompletionLatch(rearmWindowMs: 2000);
-
   // Spurious-EOF recovery (#1520): a long pause can get the server-side
   // stream reaped or the idle socket killed; on resume the player drains its
   // cache and signals a clean EOF mid-file. Recovery reloads in place,
@@ -652,21 +586,28 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
   // restores once playback progresses well past the last recovery point or
   // on an item change; user-initiated retries (play/seek) are always allowed
   // and never consume it.
-  static const int _maxSpuriousEofRecoveryAttempts = 2;
-  static const int _spuriousEofProgressResetMs = 30000;
-  int _spuriousEofRecoveryAttempts = 0;
-  int? _spuriousEofRecoveryBaselineMs;
-
-  /// Playback is parked mid-file on a dead stream: automatic recovery failed
-  /// or its budget is spent. Exits: user play/seek (always allowed) or the
-  /// server-status monitor seeing the server come back online.
-  bool _spuriousEofRecoveryParked = false;
+  late final SpuriousEofRecovery _eofRecovery = SpuriousEofRecovery(
+    isLive: widget.isLive,
+    isOffline: () => _isOfflinePlayback,
+    transitionGate: _transitionGate,
+    player: () => player,
+    metadata: () => _currentMetadata,
+    reload: ({required Duration resumePosition, required String reason}) => _reloadMediaInPlace(
+      metadata: _currentMetadata,
+      resumePosition: resumePosition,
+      preserveCurrentTrackSelection: true,
+      startPaused: !_playbackIntentShouldPlay,
+      showErrorUi: false,
+      reason: reason,
+    ),
+    wakelock: _wakelockController,
+  );
 
   late final FocusNode _playNextCancelFocusNode;
   late final FocusNode _playNextConfirmFocusNode;
 
   bool _showStillWatchingPrompt = false;
-  int _stillWatchingCountdown = 30;
+  final ValueNotifier<int> _stillWatchingCountdown = ValueNotifier<int>(30);
   Timer? _stillWatchingTimer;
   late final FocusNode _stillWatchingPauseFocusNode;
   late final FocusNode _stillWatchingContinueFocusNode;
@@ -685,12 +626,23 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
 
   // VLC-style in-player toast controller (rate changes, backend switch, etc.).
   final PlayerToastController _toastController = PlayerToastController();
+
+  late final VisualEffectsController _visualEffects = VisualEffectsController(
+    player: () => player,
+    shaderService: () => _shaderService,
+    ambientLighting: () => _ambientLightingService,
+    filterManager: () => _videoFilterManager,
+    metadata: () => _currentMetadata,
+    shaderProvider: () => context.read<ShaderProvider>(),
+    isMounted: () => mounted,
+    requestRebuild: () => _setPlayerState(() {}),
+    toast: _toastController,
+  );
   bool _reclaimingFocus = false;
 
   // App lifecycle state tracking
   bool _wasPlayingBeforeInactive = false;
   bool _hiddenForBackground = false;
-  bool _mediaControlsSuspendedForTvBackground = false;
   bool _resumeAfterAppleAudioSessionPause = false;
   DateTime? _lastPlaybackPauseAt;
   bool _autoPipEnabled = false;
@@ -703,27 +655,13 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
   String _playerBackendLabel = 'unknown';
 
   /// Android TV: release the native AV pipeline once the app stays
-  /// backgrounded past this grace window. A merely paused player keeps its
+  /// backgrounded past the grace window. A merely paused player keeps its
   /// MediaCodec decoders and (tunneled passthrough) AudioTrack alive, which
   /// on shared-pipeline TV SoCs degrades every other app until Plezy is
   /// force-stopped. The grace absorbs transient hidden/paused blips
   /// (assistant overlay, HDMI-CEC events) so quick app switches don't churn
   /// codecs.
-  static const Duration _tvBackgroundPlayerSuspendGrace = Duration(seconds: 30);
-
-  /// Redelivery schedule for the suspend-time stopped report. Standby entry
-  /// can drop Wi-Fi into power-save and stall exactly that connect, and
-  /// mutations deliberately never fail over ([FailoverHttpClient]), so the
-  /// one report the suspend exists for gets a bounded retry window instead
-  /// of a single fail-fast attempt.
-  static const Duration _tvBackgroundStopReportRetryDelay = Duration(seconds: 10);
-  static const int _tvBackgroundStopReportMaxRetries = 5;
-  Timer? _tvBackgroundPlayerSuspendTimer;
-  bool _playerSuspendedForTvBackground = false;
-  Duration? _tvBackgroundSuspendPosition;
-  AudioTrack? _tvBackgroundSuspendAudioTrack;
-  SubtitleTrack? _tvBackgroundSuspendSubtitleTrack;
-  SubtitleTrack? _tvBackgroundSuspendSecondarySubtitleTrack;
+  final TvBackgroundSuspendState _tvSuspend = TvBackgroundSuspendState();
 
   /// Whether to skip lifecycle actions because PiP is active or about to start.
   /// Apple auto-PiP is system-initiated during the background transition, and
@@ -735,6 +673,26 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
       (Platform.isAndroid && _androidAutoPipTransitionInFlight);
 
   MediaControlsManager? _mediaControlsManager;
+  late final MediaControlsScreenController _mediaControls = MediaControlsScreenController(
+    manager: () => _mediaControlsManager,
+    player: () => player,
+    isMounted: () => mounted,
+    isLive: widget.isLive,
+    shouldSkipForPip: () => _shouldSkipForPip,
+    isPlayerInitialized: () => _isPlayerInitialized,
+    metadata: () => _currentMetadata,
+    client: () => _isOfflinePlayback ? null : _getMediaServerClient(context),
+    isPlaylistActive: () => context.read<PlaybackStateProvider>().isPlaylistActive,
+    canControlPlayback: () => _canControlPlayback(),
+    canNavigateMediaItems: () => _canNavigateMediaItems(),
+    rewindOnResumeSeconds: () => _rewindOnResume,
+    seek: (position) => _seekPlayback(position),
+    play: _playWithPlaybackIntent,
+    wasPlayingBeforeInactive: () => _wasPlayingBeforeInactive,
+    clearWasPlayingBeforeInactive: () => _wasPlayingBeforeInactive = false,
+    wakelock: _wakelockController,
+    recordLifecycle: (state, {action}) => _recordLifecycleState(state, action: action),
+  );
   ({bool canControlPlayback, bool canNavigateMediaItems})? _lastMediaControlAuthority;
   PlaybackProgressTracker? _progressTracker;
   VideoFilterManager? _videoFilterManager;
@@ -750,12 +708,23 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
   int _pinchZoomActivationUpdateCount = 0;
   bool _isPinchZooming = false;
   bool _pinchZoomChanged = false;
-  final EpisodeNavigationService _episodeNavigation = EpisodeNavigationService();
-
   WatchTogetherProvider? _watchTogetherProvider;
 
-  CompanionRemoteProvider? _companionRemoteProvider;
-  VoidCallback? _savedOnHome;
+  late final CompanionRemoteBinding _companionRemote = CompanionRemoteBinding(
+    player: () => player,
+    isMounted: () => mounted,
+    canControlPlayback: () => _canControlPlayback(),
+    volumeController: () => _volumeController,
+    hasNextEpisode: () => _episode.next != null,
+    onStop: () => _handleBackButton(),
+    onPlayNext: () => _playNext(),
+    onPlayPrevious: () => _restartOrPlayPrevious(),
+    seekRelative: (offset) => _seekRelative(offset),
+    onCycleSubtitles: () => _cycleSubtitleTrack(),
+    onCycleAudio: () => _cycleAudioTrack(),
+    onHome: () => _handleHomeButton(),
+    readProvider: () => context.read<CompanionRemoteProvider>(),
+  );
 
   /// Backend-neutral lookup. Returns whichever client (Plex or Jellyfin)
   /// owns this item. Used by the player initialization path.
@@ -801,7 +770,7 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
     _selectedQualityPreset = session.qualityPreset;
     _selectedAudioStreamId = session.audioStreamId;
     // Any freshly opened stream ends a dead-stream park (#1520).
-    _spuriousEofRecoveryParked = false;
+    _eofRecovery.clearPark();
     // Every successful open passes through here (never live TV), making it
     // the chokepoint for the local last-played history. Offline plays are
     // excluded — like version prefs, the history describes online intent.
@@ -821,66 +790,6 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
 
   ScrubFrame? _getThumbnailData(Duration time) => _scrubPreviewSource?.getFrame(time);
 
-  int _beginPlaybackGeneration({bool isMediaReload = false}) {
-    if (!isMediaReload) _forcePlaybackTransitionIdle();
-    return ++_playbackGeneration;
-  }
-
-  _PlaybackTransitionLease? _tryAcquirePlaybackTransition(_PlaybackTransition transition) {
-    assert(transition != _PlaybackTransition.idle);
-    if (_playbackTransition != _PlaybackTransition.idle) return null;
-    final lease = _PlaybackTransitionLease();
-    _playbackTransitionLease = lease;
-    _changePlaybackTransition(transition);
-    return lease;
-  }
-
-  bool _ownsPlaybackTransition(_PlaybackTransitionLease lease, {_PlaybackTransition? expected}) {
-    return identical(_playbackTransitionLease, lease) && (expected == null || _playbackTransition == expected);
-  }
-
-  bool _advancePlaybackTransition(
-    _PlaybackTransitionLease lease,
-    _PlaybackTransition transition, {
-    _PlaybackTransition? expected,
-  }) {
-    assert(transition != _PlaybackTransition.idle);
-    if (!_ownsPlaybackTransition(lease, expected: expected)) return false;
-    _changePlaybackTransition(transition);
-    return true;
-  }
-
-  void _releasePlaybackTransition(_PlaybackTransitionLease lease) {
-    if (!identical(_playbackTransitionLease, lease)) return;
-    _playbackTransitionLease = null;
-    _changePlaybackTransition(_PlaybackTransition.idle);
-  }
-
-  void _forcePlaybackTransitionIdle() {
-    _playbackTransitionLease?._markSuperseded();
-    _playbackTransitionLease = null;
-    _changePlaybackTransition(_PlaybackTransition.idle);
-  }
-
-  void _changePlaybackTransition(_PlaybackTransition transition) {
-    if (_playbackTransition == transition) return;
-    _playbackTransition = transition;
-    if (transition == _PlaybackTransition.idle) {
-      final completer = _playbackTransitionIdleCompleter;
-      _playbackTransitionIdleCompleter = null;
-      if (completer != null && !completer.isCompleted) completer.complete();
-    } else {
-      _playbackTransitionIdleCompleter ??= Completer<void>();
-    }
-  }
-
-  Future<void> _waitForPlaybackTransitionIdle() async {
-    while (mounted && _playbackTransition != _PlaybackTransition.idle) {
-      _playbackTransitionIdleCompleter ??= Completer<void>();
-      await _playbackTransitionIdleCompleter!.future;
-    }
-  }
-
   /// Start a new playback attempt: invalidates automatic track selection,
   /// bumps the generation, and captures the owning player so async
   /// continuations can check [_PlaybackAttempt.isCurrent] uniformly instead of
@@ -890,14 +799,14 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
     final trackMutationDrain = _trackManager?.invalidatePendingSelection() ?? Future<void>.value();
     return _PlaybackAttempt._(
       this,
-      _beginPlaybackGeneration(isMediaReload: isMediaReload),
+      _transitionGate.beginGeneration(isMediaReload: isMediaReload),
       currentPlayer,
       trackMutationDrain,
     );
   }
 
   bool _isCurrentPlaybackGeneration(int generation, Player currentPlayer) {
-    return mounted && player == currentPlayer && _playbackGeneration == generation;
+    return mounted && player == currentPlayer && _transitionGate.generation == generation;
   }
 
   Future<void> _playWithPlaybackIntent(Player currentPlayer) {
@@ -908,15 +817,13 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
     }
     _playbackIntentShouldPlay = true;
     if (widget.isLive && _live.retryFailed) {
-      if (_live.retrying) return Future.value();
-      _live.retrying = true;
-      return _retryLiveStream();
+      return _retryLiveStreamForPlayIntent();
     }
-    if (_spuriousEofRecoveryParked && _playbackTransition == _PlaybackTransition.idle) {
+    if (_eofRecovery.parked && _transitionGate.transition == PlaybackTransition.idle) {
       // Parked on a dead stream: play/pause on a drained cache is a no-op
       // (mpv doesn't even flip `pause` on EOF), so any press means "get my
       // video back" — rebuild the stream instead (#1520).
-      return _retrySpuriousEofRecovery(reason: 'play pressed');
+      return _eofRecovery.retry(reason: 'play pressed');
     }
     return currentPlayer.play();
   }
@@ -934,20 +841,16 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
     if (widget.isLive && _live.retryFailed) {
       return _playWithPlaybackIntent(currentPlayer);
     }
-    if (_spuriousEofRecoveryParked && _playbackTransition == _PlaybackTransition.idle) {
+    if (_eofRecovery.parked && _transitionGate.transition == PlaybackTransition.idle) {
       _playbackIntentShouldPlay = true;
-      return _retrySpuriousEofRecovery(reason: 'play/pause pressed');
+      return _eofRecovery.retry(reason: 'play/pause pressed');
     }
     _playbackIntentShouldPlay = !currentPlayer.state.playing;
     return currentPlayer.playOrPause();
   }
 
   final ValueNotifier<bool> _isBuffering = ValueNotifier<bool>(false);
-  final ValueNotifier<bool> _hasFirstFrame = ValueNotifier<bool>(false);
-  // UI readiness may be forced true to hide the loading spinner after a
-  // startup failure. Reporting readiness is stricter: only a renderer event
-  // (or the established non-ExoPlayer position fallback) sets this latch.
-  bool _hasRenderedFirstFrame = false;
+  final FirstFrameGate _firstFrame = FirstFrameGate();
   bool _hasFatalPlaybackError = false;
 
   final ValueNotifier<bool> _isExiting = ValueNotifier<bool>(false);
@@ -959,6 +862,11 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
   /// with, rather than a controller the test seeded itself.
   @visibleForTesting
   PlayerChromeController get chromeController => _chromeController;
+
+  /// Lets reload-failure coverage assert the progress tracker was rebuilt and
+  /// which item it is bound to; the tracker itself is private screen state.
+  @visibleForTesting
+  PlaybackProgressTracker? get debugProgressTrackerForTesting => _progressTracker;
 
   late final PlayerNavigationCoordinator _playerNavigationCoordinator;
 
@@ -973,10 +881,10 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
 
     _playerNavigationCoordinator = PlayerNavigationCoordinator(
       chromeController: _chromeController,
-      isPromptOpen: () => _showPlayNextDialog || _showStillWatchingPrompt,
+      isPromptOpen: () => _episode.showPlayNextDialog || _showStillWatchingPrompt,
       dismissPrompt: _dismissPlaybackPromptForBack,
       isChromePresented: () =>
-          _isPlayerInitialized && player != null && _hasFirstFrame.value && _chromeController.controlsPresented,
+          _isPlayerInitialized && player != null && _firstFrame.uiReady.value && _chromeController.controlsPresented,
       // On phones a Back must exit the player even with the controls up
       // (#1938); the staged chrome handling is TV/desktop behavior (#4443b761
       // applied it to the phone system-back path too, so back stopped
@@ -1080,7 +988,7 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
       CarUxRestrictionsService.instance.listenable.addListener(_handleCarRestrictionsChanged);
     }
 
-    _setupCompanionRemoteCallbacks();
+    _companionRemote.bind();
     _setupAppleTvRemotePlaybackActions();
 
     _sleepTimerSubscription = SleepTimerService().onPrompt.listen((_) {
@@ -1193,8 +1101,8 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
           break;
         }
         // We don't support background playback
-        if (_shouldSuspendMediaControlsForTvBackground) {
-          unawaited(_suspendMediaControlsForTvBackground('paused'));
+        if (_mediaControls.shouldSuspendForTvBackground) {
+          unawaited(_mediaControls.suspendForTvBackground('paused'));
         } else {
           unawaited(_mediaControlsManager?.clear());
         }
@@ -1266,7 +1174,7 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
   }
 
   Future<void> _disposePlayerInitializationAttempt(Player attemptPlayer) async {
-    _playbackGeneration++;
+    _transitionGate.bumpGeneration();
     _disposeVolumeControllerForPlayer(attemptPlayer);
     if (identical(player, attemptPlayer)) {
       player = null;
@@ -1413,6 +1321,7 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
         final tunneledPlayback = settingsService.read(SettingsService.tunneledPlayback);
         await currentPlayer.setProperty('tunneled-playback', tunneledPlayback ? 'yes' : 'no');
         await currentPlayer.setProperty('exo-buffer-tier', playbackBufferTier.nativeValue);
+        await currentPlayer.setProperty('demuxer-mode', settingsService.read(SettingsService.demuxerMode).nativeValue);
       }
       if ((Platform.isAndroid && useExoPlayer) || Platform.isIOS || Platform.isMacOS) {
         final dvConversionMode = settingsService.read(SettingsService.dvConversionMode);
@@ -1854,7 +1763,7 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
   /// Handle back button press
   /// For non-host participants in Watch Together, shows leave session confirmation
   Future<void> _handleBackButton({bool navigateHome = false}) async {
-    if (!navigateHome && (_showPlayNextDialog || _showStillWatchingPrompt)) {
+    if (!navigateHome && (_episode.showPlayNextDialog || _showStillWatchingPrompt)) {
       _dismissPlaybackPromptForBack();
       return;
     }
@@ -1900,7 +1809,7 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
       return;
     }
 
-    final onHome = _savedOnHome;
+    final onHome = _companionRemote.savedOnHome;
     navigator.popUntil((route) => route.isFirst);
     onHome?.call();
   }
@@ -1955,11 +1864,9 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
     WidgetsBinding.instance.removeObserver(this);
     CarUxRestrictionsService.instance.listenable.removeListener(_handleCarRestrictionsChanged);
 
-    final transitionCompleter = _playbackTransitionIdleCompleter;
-    _playbackTransitionIdleCompleter = null;
-    if (transitionCompleter != null && !transitionCompleter.isCompleted) transitionCompleter.complete();
+    _transitionGate.completeIdleWaiters();
 
-    _cleanupCompanionRemoteCallbacks();
+    _companionRemote.unbind();
 
     // Notify Watch Together guests that host is exiting the player.
     // Use stored reference since context.read() may fail in dispose.
@@ -1974,7 +1881,7 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
     _detachFromWatchTogetherSession();
 
     _isBuffering.dispose();
-    _hasFirstFrame.dispose();
+    _firstFrame.dispose();
     _isExiting.dispose();
     _chromeController.dispose();
     _toastController.dispose();
@@ -2013,11 +1920,12 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
     _sleepTimerSubscription?.cancel();
     _trackManager?.dispose();
 
-    _autoPlayTimer?.cancel();
-    _tvBackgroundPlayerSuspendTimer?.cancel();
+    _episode.dispose();
+    _tvSuspend.dispose();
     _http503Watchdog.disarm();
 
     _stillWatchingTimer?.cancel();
+    _stillWatchingCountdown.dispose();
 
     _liveSeek.dispose();
 
@@ -2131,7 +2039,7 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
     primePlayerNavigationFocusForEvent(
       event,
       focusNode: _screenFocusNode,
-      playerReady: _isPlayerInitialized && player != null && _hasFirstFrame.value,
+      playerReady: _isPlayerInitialized && player != null && _firstFrame.uiReady.value,
       isCurrentRoute: isRouteChainCurrent(context),
       isAppleTV: PlatformDetector.isAppleTV(),
     );
@@ -2198,7 +2106,7 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
 
     try {
       if (resumes) {
-        await _seekBackForRewind(currentPlayer);
+        await _mediaControls.seekBackForRewind(currentPlayer);
         if (!mounted || player != currentPlayer) return;
       }
       await switch (command) {
@@ -2218,12 +2126,20 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen> with WidgetsBindin
   Future<void> _handleControlsTransport(TransportCommand command) async {
     final currentPlayer = player;
     if (currentPlayer == null) return;
-    await switch (command) {
-      TransportCommand.play => _playWithPlaybackIntent(currentPlayer),
-      TransportCommand.pause => _pauseWithPlaybackIntent(currentPlayer),
-      TransportCommand.toggle => _playOrPauseWithPlaybackIntent(currentPlayer),
-    };
-    _announceTransportCommand(willPlay: _playbackIntentShouldPlay);
+    try {
+      await switch (command) {
+        TransportCommand.play => _playWithPlaybackIntent(currentPlayer),
+        TransportCommand.pause => _pauseWithPlaybackIntent(currentPlayer),
+        TransportCommand.toggle => _playOrPauseWithPlaybackIntent(currentPlayer),
+      };
+      _announceTransportCommand(willPlay: _playbackIntentShouldPlay);
+    } catch (e, st) {
+      // Same tolerance as _remoteTransport above: a transport tap races
+      // player teardown (NOT_INITIALIZED) and mpv's event queue
+      // (SET_PROPERTY_FAILED), and this path is invoked unawaited — an
+      // uncaught PlatformException here was a recurring production crash.
+      appLogger.w('controls play/pause failed', error: e, stackTrace: st);
+    }
   }
 
   String? _lastLogError;

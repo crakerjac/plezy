@@ -58,6 +58,9 @@ LibraryPage<T> _pagedItems<T>(
 ///  - `RecursiveItemCount`/`ChildCount` for series leaf count
 ///  - `OriginalTitle`/`SortName` for sort + alphabetised display
 ///  - `Overview` so list rows can show their description
+///  - `DateCreated` so `addedAt` is populated — unlike year/rating, Jellyfin
+///    gates it behind `ItemFields`, and recency ordering ("Date Added" sorts,
+///    [MediaItem.recencySortKey]) degrades to `addedAt` for never-played rows
 ///
 /// Heavier fields (`MediaSources`, `People`, `Genres`, `Tags`, `Studios`,
 /// `Taglines`, `ProviderIds`, `Chapters`) stay in [_detailFields] — together
@@ -68,12 +71,14 @@ LibraryPage<T> _pagedItems<T>(
 /// `CommaDelimitedCollectionModelBinder` drops them element-by-element and
 /// they never did anything. `UserData` is governed by `EnableUserData`
 /// (default true) and `dto.PremiereDate` is set unconditionally.
-const _baseBrowseFields = 'RecursiveItemCount,ChildCount,OriginalTitle,SortName,Overview';
+const _baseBrowseFields = 'RecursiveItemCount,ChildCount,OriginalTitle,SortName,Overview,DateCreated';
 
 /// Field set for the home / per-library hub rows (Recently Added, Continue
 /// Watching, Next Up). Poster cards render artwork, title, year and the
-/// watch badge; only `Overview` needs asking for, to feed the mobile hero
-/// (`discover_screen`) and the TV spotlight blurb.
+/// watch badge; `Overview` feeds the mobile hero (`discover_screen`) and the
+/// TV spotlight blurb, and `DateCreated` backs the `addedAt` recency keys
+/// (hub see-all "Date Added" sorting, [MediaItem.recencySortKey]) — Jellyfin
+/// withholds it unless named in `Fields`.
 ///
 /// Crucially this drops `RecursiveItemCount`/`ChildCount`. `/Items/Latest`
 /// groups a TV library by series, so those rows are Series FOLDER dtos and
@@ -87,7 +92,7 @@ const _baseBrowseFields = 'RecursiveItemCount,ChildCount,OriginalTitle,SortName,
 /// (`Folder.FillUserDataDtoValues`), and [MediaItem.unwatchedCount] falls back
 /// to `UserData.UnplayedItemCount`. Only the season progress bar needs real
 /// leaf totals, and seasons never appear on a hub row.
-const _baseHubRowFields = 'Overview';
+const _baseHubRowFields = 'Overview,DateCreated';
 
 /// How far back `/Shows/NextUp` looks for a series to resume, mirroring
 /// Jellyfin web's `maxDaysForNextUp` default. Without it the server's
@@ -132,8 +137,12 @@ const _baseFolderRowFields = 'SortName';
 /// count fields are needed; queried with `EnableUserData=false` like the
 /// filesystem folder rows. Trade-off: fully played albums lose the watched
 /// checkmark on this row (Jellyfin web's latest-albums row shows no play
-/// state either).
-const _baseMusicAlbumRowFields = 'PremiereDate,OriginalTitle,SortName';
+/// state either). `DateCreated` stays in the set despite the slimness goal:
+/// it is a direct dto property (no COUNT query), and the Latest Albums
+/// see-all sheet offers the "Date Added" sort, whose [MediaItem.recencySortKey]
+/// degrades to null-comparing no-ops without it — the same gap #1552's
+/// DateCreated work closed for catalog and hub rows.
+const _baseMusicAlbumRowFields = 'PremiereDate,OriginalTitle,SortName,DateCreated';
 
 /// Played-track hub rows (Recently Played / Most Played): Audio LEAF dtos.
 /// Keeps `UserData` — a cheap direct lookup on leaves that drives the

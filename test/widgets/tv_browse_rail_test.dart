@@ -350,19 +350,26 @@ void main() {
         child: InputModeTracker(
           child: MaterialApp(
             theme: monoTheme(dark: true),
-            home: Scaffold(
-              body: SizedBox(
-                width: 1280,
-                height: 720,
-                child: TvBrowseRail(
-                  focusMemory: focusMemory,
-                  hubs: [hub],
-                  autofocus: true,
-                  iconForHub: (_, _) => Icons.movie_rounded,
-                  onActivateItem: (_, item) {
-                    activatedItemId = item.id;
-                    return true;
-                  },
+            home: Builder(
+              // The semantic selection proxy is gated on accessibleNavigation:
+              // it only exists while an accessibility service is attached.
+              builder: (context) => MediaQuery(
+                data: MediaQuery.of(context).copyWith(accessibleNavigation: true),
+                child: Scaffold(
+                  body: SizedBox(
+                    width: 1280,
+                    height: 720,
+                    child: TvBrowseRail(
+                      focusMemory: focusMemory,
+                      hubs: [hub],
+                      autofocus: true,
+                      iconForHub: (_, _) => Icons.movie_rounded,
+                      onActivateItem: (_, item) {
+                        activatedItemId = item.id;
+                        return true;
+                      },
+                    ),
+                  ),
                 ),
               ),
             ),
@@ -422,15 +429,22 @@ void main() {
         child: InputModeTracker(
           child: MaterialApp(
             theme: monoTheme(dark: true),
-            home: Scaffold(
-              body: SizedBox(
-                width: 1280,
-                height: 720,
-                child: TvBrowseRail(
-                  focusMemory: focusMemory,
-                  hubs: hubs,
-                  autofocus: true,
-                  iconForHub: (_, _) => Icons.movie_rounded,
+            home: Builder(
+              // The semantic selection proxy is gated on accessibleNavigation:
+              // it only exists while an accessibility service is attached.
+              builder: (context) => MediaQuery(
+                data: MediaQuery.of(context).copyWith(accessibleNavigation: true),
+                child: Scaffold(
+                  body: SizedBox(
+                    width: 1280,
+                    height: 720,
+                    child: TvBrowseRail(
+                      focusMemory: focusMemory,
+                      hubs: hubs,
+                      autofocus: true,
+                      iconForHub: (_, _) => Icons.movie_rounded,
+                    ),
+                  ),
                 ),
               ),
             ),
@@ -737,6 +751,92 @@ void main() {
 
     // The newly focused hub's card still carries the overlay glow.
     expect(find.byType(CompositedTransformFollower), findsOneWidget);
+  });
+
+  testWidgets('glow stays hidden while the rail animates an UP hub move, returns after settling', (tester) async {
+    await SettingsService.instanceOrNull!.write(SettingsService.tvFullCardLayout, true);
+
+    TvDetectionService.debugSetAppleTVOverride(true);
+    tester.view.devicePixelRatio = 1.0;
+    tester.view.physicalSize = const Size(1280, 720);
+    addTearDown(() {
+      TvDetectionService.debugSetAppleTVOverride(null);
+      tester.view.resetDevicePixelRatio();
+      tester.view.resetPhysicalSize();
+    });
+
+    final serverManager = MultiServerManager();
+    final firstMovie = testMediaItem(
+      id: 'movie_1',
+      backend: MediaBackend.plex,
+      kind: MediaKind.movie,
+      title: 'Movie 1',
+    );
+    final secondMovie = testMediaItem(
+      id: 'movie_2',
+      backend: MediaBackend.plex,
+      kind: MediaKind.movie,
+      title: 'Movie 2',
+    );
+    final firstHub = MediaHub(id: 'movies_1', title: 'Movies 1', type: 'movie', items: [firstMovie], size: 1);
+    final secondHub = MediaHub(id: 'movies_2', title: 'Movies 2', type: 'movie', items: [secondMovie], size: 1);
+
+    await tester.pumpWidget(
+      ChangeNotifierProvider<MultiServerProvider>(
+        create: (_) => testMultiServerProvider(serverManager),
+        child: InputModeTracker(
+          child: MaterialApp(
+            theme: monoTheme(dark: true),
+            home: Scaffold(
+              body: SizedBox(
+                width: 1280,
+                height: 720,
+                child: TvBrowseRail(
+                  focusMemory: focusMemory,
+                  hubs: [firstHub, secondHub],
+                  autofocus: true,
+                  iconForHub: (_, _) => Icons.movie_rounded,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    // Move DOWN and settle so the second hub's card carries a visible glow.
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.arrowDown);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pumpAndSettle();
+    expect(find.byType(CompositedTransformFollower), findsOneWidget);
+
+    // Move UP: focus flips to the first hub's card immediately, but the glow
+    // must stay hidden for the whole 250 ms vertical scroll — otherwise it
+    // paints (via the root overlay, unclipped by the rail viewport) over the
+    // artwork above while the target row is still offscreen.
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.arrowUp);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.arrowUp);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 16));
+    await tester.pump(const Duration(milliseconds: 100)); // partway through the 250 ms scroll
+
+    // Hidden means either the portal is gone or its fade opacity is held at 0
+    // (any surviving follower is the old card's overlay fading out to 0).
+    final midScrollOpacities = find
+        .descendant(of: find.byType(CompositedTransformFollower), matching: find.byType(AnimatedOpacity))
+        .evaluate()
+        .map((element) => (element.widget as AnimatedOpacity).opacity);
+    expect(midScrollOpacities.every((opacity) => opacity == 0.0), isTrue);
+
+    // Once the scroll settles the glow fades back in on the focused card.
+    await tester.pumpAndSettle();
+    final settledFollower = find.byType(CompositedTransformFollower);
+    expect(settledFollower, findsOneWidget);
+    final settledOpacity = tester.widget<AnimatedOpacity>(
+      find.descendant(of: settledFollower, matching: find.byType(AnimatedOpacity)),
+    );
+    expect(settledOpacity.opacity, 1.0);
   });
 
   testWidgets('detailed card focus border hugs the poster, captions outside', (tester) async {
@@ -1370,7 +1470,6 @@ void main() {
       metrics: metrics,
       viewportWidth: position.viewportDimension,
       maxScrollExtent: position.maxScrollExtent,
-      scale: scale,
     );
 
     expect(activeHubIds.last, episodeHub.id);
@@ -1886,7 +1985,6 @@ void main() {
       metrics: metrics,
       viewportWidth: position.viewportDimension,
       maxScrollExtent: position.maxScrollExtent,
-      scale: scale,
     );
     expect(position.pixels, closeTo(expectedOffset, 0.1));
   });
@@ -1981,7 +2079,6 @@ void main() {
       metrics: metrics,
       viewportWidth: position.viewportDimension,
       maxScrollExtent: position.maxScrollExtent,
-      scale: scale,
     );
     expect(position.pixels, closeTo(expectedOffset, 0.1));
   });
@@ -2360,6 +2457,106 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(focusedItemIds.last, episode2.id);
+  });
+
+  // The horizontal rail moved from `itemExtentBuilder` to a constant
+  // `itemExtent`, which is what makes sliver layout math O(1) per realized
+  // child instead of O(n). That only holds while the trailing slot occupies a
+  // card-sized cell, so pin both halves of the contract.
+  test('rail layout uses one uniform extent for media and trailing cells', () {
+    final items = List.generate(
+      12,
+      (index) =>
+          testMediaItem(id: 'movie_$index', backend: MediaBackend.plex, kind: MediaKind.movie, title: 'Movie $index'),
+    );
+    final hub = MediaHub(id: 'movies', title: 'Movies', type: 'movie', items: items, size: items.length, more: true);
+    final metrics = TvBrowseRailLayout.metricsForHub(
+      hub: hub,
+      availableWidth: 1280,
+      density: LibraryDensity.defaultValue,
+      episodePosterMode: EpisodePosterMode.episodeThumbnail,
+      scale: 1.0,
+    );
+    final expectedExtent = metrics.cardWidth + metrics.itemGap;
+
+    // Every index, including the trailing "View All" cell at items.length.
+    for (var index = 0; index <= items.length; index++) {
+      expect(
+        TvBrowseRailLayout.itemExtentForIndex(index: index, metrics: metrics),
+        expectedExtent,
+        reason: 'index $index must use the uniform extent',
+      );
+    }
+
+    final expectedMax = ((metrics.railEdgePadding * 2) + ((items.length + 1) * expectedExtent) - 1280).clamp(
+      0.0,
+      double.infinity,
+    );
+    expect(
+      TvBrowseRailLayout.estimatedMaxScrollExtent(hub: hub, metrics: metrics, viewportWidth: 1280, hasTrailing: true),
+      closeTo(expectedMax, 0.001),
+    );
+  });
+
+  test('rail centers a mid-row cell and clamps the trailing cell to the end', () {
+    final items = List.generate(
+      12,
+      (index) =>
+          testMediaItem(id: 'movie_$index', backend: MediaBackend.plex, kind: MediaKind.movie, title: 'Movie $index'),
+    );
+    final hub = MediaHub(id: 'movies', title: 'Movies', type: 'movie', items: items, size: items.length, more: true);
+    final metrics = TvBrowseRailLayout.metricsForHub(
+      hub: hub,
+      availableWidth: 1280,
+      density: LibraryDensity.defaultValue,
+      episodePosterMode: EpisodePosterMode.episodeThumbnail,
+      scale: 1.0,
+    );
+    final extent = metrics.cardWidth + metrics.itemGap;
+    final maxScrollExtent = TvBrowseRailLayout.estimatedMaxScrollExtent(
+      hub: hub,
+      metrics: metrics,
+      viewportWidth: 1280,
+      hasTrailing: true,
+    );
+
+    expect(
+      TvBrowseRailLayout.scrollOffsetForIndex(
+        hub: hub,
+        index: 4,
+        metrics: metrics,
+        viewportWidth: 1280,
+        maxScrollExtent: maxScrollExtent,
+        hasTrailing: true,
+      ),
+      closeTo((metrics.railEdgePadding + (4.5 * extent) - 640).clamp(0.0, maxScrollExtent), 0.001),
+    );
+
+    // The trailing cell stays reachable and lands at the end of the row.
+    expect(
+      TvBrowseRailLayout.scrollOffsetForIndex(
+        hub: hub,
+        index: items.length,
+        metrics: metrics,
+        viewportWidth: 1280,
+        maxScrollExtent: maxScrollExtent,
+        hasTrailing: true,
+      ),
+      maxScrollExtent,
+    );
+
+    // An index past the end clamps instead of overscrolling.
+    expect(
+      TvBrowseRailLayout.scrollOffsetForIndex(
+        hub: hub,
+        index: 999,
+        metrics: metrics,
+        viewportWidth: 1280,
+        maxScrollExtent: maxScrollExtent,
+        hasTrailing: true,
+      ),
+      maxScrollExtent,
+    );
   });
 }
 

@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:collection/collection.dart';
-import 'package:flutter/foundation.dart' show protected, visibleForTesting;
+import 'package:flutter/foundation.dart' show listEquals, protected, visibleForTesting;
 import 'package:flutter/services.dart';
 
 import '../../media/media_display_criteria.dart';
@@ -366,13 +366,18 @@ abstract class PlayerBase with PlayerStreamControllersMixin implements Player {
           if (nowMs - _lastCacheStateMs < 250) break;
           _lastCacheStateMs = nowMs;
           final buffer = Duration(milliseconds: bufferMs);
-          _state = _state.copyWith(buffer: buffer);
+          final rangeStart = _state.position;
+          final previousRanges = _state.bufferRanges;
+          final rangesChanged =
+              previousRanges.length != 1 ||
+              previousRanges.first.start != rangeStart ||
+              previousRanges.first.end != buffer;
+          final ranges = rangesChanged ? [BufferRange(start: rangeStart, end: buffer)] : previousRanges;
+          _state = _state.copyWith(buffer: buffer, bufferRanges: ranges);
           bufferController.add(buffer);
-          // Synthesize a single range for players without demuxer-cache-state (ExoPlayer).
-          // ExoPlayer only buffers ahead of the current position, so use position as start.
-          final ranges = [BufferRange(start: _state.position, end: buffer)];
-          _state = _state.copyWith(bufferRanges: ranges);
-          bufferRangesController.add(ranges);
+          if (rangesChanged) {
+            bufferRangesController.add(ranges);
+          }
         }
         break;
 
@@ -390,8 +395,7 @@ abstract class PlayerBase with PlayerStreamControllersMixin implements Player {
       case 'speed':
         final rate = _finiteDouble(value);
         if (rate != null) {
-          _state = _state.copyWith(rate: rate);
-          rateController.add(rate);
+          setRateState(rate);
         }
         break;
 
@@ -413,6 +417,12 @@ abstract class PlayerBase with PlayerStreamControllersMixin implements Player {
           }
           if (result.selectedSubtitleId != null) {
             updateSelectedSubtitleTrack(result.selectedSubtitleId);
+          }
+          // Deselection still arrives through the secondary-sid observation
+          // ('no'), which stays the clearing path; track-list only ever
+          // asserts a selection it can attribute via main-selection.
+          if (result.selectedSecondarySubtitleId != null) {
+            updateSelectedSecondarySubtitleTrack(result.selectedSecondarySubtitleId);
           }
         }
         break;
@@ -468,22 +478,19 @@ abstract class PlayerBase with PlayerStreamControllersMixin implements Player {
 
     // Extract cache-end for the single buffer duration (replaces demuxer-cache-time)
     final cacheEndMs = _millisecondsFromSeconds(cacheState['cache-end']);
-    if (cacheEndMs != null) {
-      final buffer = Duration(milliseconds: cacheEndMs);
-      _state = _state.copyWith(buffer: buffer);
-      bufferController.add(buffer);
-    }
+    final buffer = cacheEndMs == null ? _state.buffer : Duration(milliseconds: cacheEndMs);
 
     // Extract seekable-ranges array
+    List<BufferRange>? parsedRanges;
     final seekableRanges = cacheState['seekable-ranges'];
     if (seekableRanges is List) {
-      final ranges = <BufferRange>[];
+      parsedRanges = <BufferRange>[];
       for (final range in seekableRanges) {
         if (range is! Map) continue;
         final startMs = _millisecondsFromSeconds(range['start']);
         final endMs = _millisecondsFromSeconds(range['end']);
         if (startMs != null && endMs != null) {
-          ranges.add(
+          parsedRanges.add(
             BufferRange(
               start: Duration(milliseconds: startMs),
               end: Duration(milliseconds: endMs),
@@ -491,7 +498,21 @@ abstract class PlayerBase with PlayerStreamControllersMixin implements Player {
           );
         }
       }
-      _state = _state.copyWith(bufferRanges: ranges);
+    }
+
+    var ranges = _state.bufferRanges;
+    var rangesChanged = false;
+    if (parsedRanges != null && !listEquals(ranges, parsedRanges)) {
+      ranges = parsedRanges;
+      rangesChanged = true;
+    }
+    if (cacheEndMs == null && !rangesChanged) return;
+
+    _state = _state.copyWith(buffer: buffer, bufferRanges: ranges);
+    if (cacheEndMs != null) {
+      bufferController.add(buffer);
+    }
+    if (rangesChanged) {
       bufferRangesController.add(ranges);
     }
   }
@@ -586,11 +607,13 @@ abstract class PlayerBase with PlayerStreamControllersMixin implements Player {
     };
   }
 
-  ({Tracks tracks, String? selectedAudioId, String? selectedSubtitleId}) parseTrackList(List trackList) {
+  ({Tracks tracks, String? selectedAudioId, String? selectedSubtitleId, String? selectedSecondarySubtitleId})
+  parseTrackList(List trackList) {
     final audioTracks = <AudioTrack>[];
     final subtitleTracks = <SubtitleTrack>[];
     String? selectedAudioId;
     String? selectedSubtitleId;
+    String? selectedSecondarySubtitleId;
     final containerMetadataIndexes = <String, int>{};
 
     for (final track in trackList) {
@@ -624,7 +647,18 @@ abstract class PlayerBase with PlayerStreamControllersMixin implements Player {
           ),
         );
       } else if (type == 'sub') {
-        if (selected) selectedSubtitleId = id;
+        if (selected) {
+          // mpv marks both the `sid` and the `--secondary-sid` track as
+          // selected; `main-selection` (0 = primary, 1 = secondary) tells them
+          // apart. Backends that never report it (ExoPlayer) keep the plain
+          // selected-means-primary reading.
+          final mainSelection = _finiteInt(track['main-selection']);
+          if (mainSelection == null || mainSelection == 0) {
+            selectedSubtitleId = id;
+          } else if (mainSelection == 1) {
+            selectedSecondarySubtitleId = id;
+          }
+        }
         final rawCodec = track['codec'];
         final codec = rawCodec is String ? rawCodec : null;
         final rawTitle = track['title'];
@@ -674,6 +708,7 @@ abstract class PlayerBase with PlayerStreamControllersMixin implements Player {
       tracks: Tracks(audio: audioTracks, subtitle: subtitleTracks),
       selectedAudioId: selectedAudioId,
       selectedSubtitleId: selectedSubtitleId,
+      selectedSecondarySubtitleId: selectedSecondarySubtitleId,
     );
   }
 
@@ -746,6 +781,13 @@ abstract class PlayerBase with PlayerStreamControllersMixin implements Player {
     if (_state.volume == volume) return;
     _state = _state.copyWith(volume: volume);
     volumeController.add(volume);
+  }
+
+  @protected
+  void setRateState(double rate) {
+    if (_state.rate == rate) return;
+    _state = _state.copyWith(rate: rate);
+    rateController.add(rate);
   }
 
   @protected
@@ -1072,6 +1114,7 @@ abstract class PlayerBase with PlayerStreamControllersMixin implements Player {
     int extraDelayMs = 0,
     int videoWidth = 0,
     int videoHeight = 0,
+    bool matchResolution = false,
   }) async => false;
 
   @override
