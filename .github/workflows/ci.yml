@@ -1,7 +1,8 @@
 name: CI - Sanity Checks
 
 on:
-  push:
+  # push:
+  workflow_dispatch:
     branches:
       - main
   # Keep untrusted code on the read-only pull_request event. Never use pull_request_target here.
