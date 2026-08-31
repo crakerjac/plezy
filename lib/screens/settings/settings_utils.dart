@@ -25,6 +25,12 @@ String themeModeLabel(settings.ThemeMode mode) => switch (mode) {
   settings.ThemeMode.oled => t.settings.oledTheme,
 };
 
+/// Rebuilds the app from the root route after a setting that cannot be
+/// applied in place (language, TV mode, visual effects tier).
+void restartApp(BuildContext context) {
+  Navigator.of(context, rootNavigator: true).pushNamedAndRemoveUntil('/', (route) => false);
+}
+
 /// Model for option selection dialogs.
 class DialogOption<T> {
   final T value;
@@ -160,14 +166,18 @@ class _SettingsInputDialogState extends State<_SettingsInputDialog> {
 
 /// Shows a selection dialog with focusable rows for dpad/keyboard navigation.
 /// Used for settings with 5+ options (language, buffer size, etc.).
-Future<T?> showSelectionDialog<T>({
+///
+/// Returns the picked option, or null when the dialog was dismissed — the
+/// wrapper keeps a picked null *value* (e.g. a "same as default" option)
+/// distinguishable from dismissal.
+Future<DialogOption<T>?> showSelectionDialog<T>({
   required BuildContext context,
   required String title,
   required List<DialogOption<T>> options,
   required T currentValue,
 }) {
   final focusFirstItem = InputModeTracker.isKeyboardMode(context, listen: false);
-  return showScopedDialog<T>(
+  return showScopedDialog<DialogOption<T>>(
     context: context,
     builder: (dialogContext) => AlertDialog(
       title: Text(title),
@@ -187,7 +197,7 @@ Future<T?> showSelectionDialog<T>({
               subtitle: option.subtitle != null ? Text(option.subtitle!) : null,
               selected: selected,
               autofocus: focusFirstItem && selected,
-              onTap: () => Navigator.pop(dialogContext, option.value),
+              onTap: () => Navigator.pop(dialogContext, option),
             );
           }).toList(),
         ),

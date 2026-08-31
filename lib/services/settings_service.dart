@@ -19,7 +19,17 @@ import 'sensitive_prefs.dart';
 import 'device_performance.dart';
 import 'shortcut_action.dart';
 export 'base_shared_preferences_service.dart'
-    show Pref, BoolPref, IntPref, DoublePref, StringPref, NullableStringPref, StringListPref, EnumPref, JsonPref;
+    show
+        Pref,
+        BoolPref,
+        IntPref,
+        DoublePref,
+        StringPref,
+        NullableStringPref,
+        StringListPref,
+        EnumPref,
+        NullableEnumPref,
+        JsonPref;
 import '../models/audio_quality_preset.dart';
 import '../models/transcode_quality_preset.dart';
 import '../navigation/navigation_tabs.dart';
@@ -39,6 +49,28 @@ class LibraryDensity {
 
   /// Returns a 0.0–1.0 factor for interpolation (0 = most compact, 1 = most comfortable).
   static double factor(int density) => (density.clamp(min, max) - min) / (max - min);
+}
+
+/// Gap between cards in media grids (#2083, #1597). [tight] is the
+/// pre-setting look, so nothing moves on update.
+enum GridSpacing { tight, normal, spacious }
+
+extension GridSpacingMetrics on GridSpacing {
+  /// Inter-card gutter fed to the grid delegate's cross/main axis spacing.
+  double get gridGap => switch (this) {
+    GridSpacing.tight => 0,
+    GridSpacing.normal => 6,
+    GridSpacing.spacious => 12,
+  };
+
+  /// Vertical gap between the poster and the title inside a standard grid
+  /// card. Only grid cells (Expanded poster) apply this; fixed-height hub-row
+  /// cards keep the legacy 2px because their text band cannot absorb more.
+  double get posterTitleGap => switch (this) {
+    GridSpacing.tight => 2,
+    GridSpacing.normal => 4,
+    GridSpacing.spacious => 6,
+  };
 }
 
 enum ViewMode { grid, list }
@@ -113,17 +145,6 @@ extension DvConversionModePreferenceNativeValue on DvConversionModePreference {
   };
 }
 
-/// Which demuxer parses direct-played files on Android. Wire values are read
-/// natively by `FfmpegDemuxerPolicy`; unknown values resolve to FFmpeg there.
-enum DemuxerPreference { ffmpeg, media3 }
-
-extension DemuxerPreferenceNativeValue on DemuxerPreference {
-  String get nativeValue => switch (this) {
-    DemuxerPreference.ffmpeg => 'ffmpeg',
-    DemuxerPreference.media3 => 'media3',
-  };
-}
-
 enum PlaybackBufferTier { auto, large, extraLarge }
 
 extension PlaybackBufferTierNativeValue on PlaybackBufferTier {
@@ -135,24 +156,11 @@ extension PlaybackBufferTierNativeValue on PlaybackBufferTier {
 }
 
 const String _bufferSizeMigratedKey = 'buffer_size_migrated_to_auto';
+const String _legacyBufferSizeKey = 'buffer_size';
+const String _legacyDemuxerModeKey = 'demuxer_mode';
 const String _legacyUseSeasonPosterKey = 'use_season_poster';
 const String _legacyMpvConfigEntriesKey = 'mpv_config_entries';
-
-/// One-time auto-reset migration for buffer size.
-class _BufferSizePref extends IntPref {
-  const _BufferSizePref() : super('buffer_size');
-
-  @override
-  int readFrom(BaseSharedPreferencesService svc) {
-    // SharedPreferences updates in-memory cache synchronously, so the
-    // unawaited disk-flush futures are safe here (idempotent if re-run).
-    if (svc.readNullableBool(_bufferSizeMigratedKey) != true) {
-      svc.prefs.remove(key);
-      svc.prefs.setBool(_bufferSizeMigratedKey, true);
-    }
-    return super.readFrom(svc);
-  }
-}
+const String _legacyUseExoPlayerKey = 'use_exoplayer';
 
 /// Migrates from the legacy enum-string format and clamps to 1..5.
 class _LibraryDensityPref extends Pref<int> {
@@ -282,12 +290,16 @@ class _AudioPassthroughPref extends Pref<bool> {
   bool readFrom(BaseSharedPreferencesService svc) {
     final stored = svc.readNullableBool(key);
     if (stored != null) return stored;
-    // Android TV on ExoPlayer defaults to bitstreaming AC3/EAC3/DTS to the TV/AVR
-    // (Media3 picks bitstream vs PCM via AudioCapabilities), preserving surround.
-    // Scoped to ExoPlayer — the mpv backend force-sets audio-spdif with no decode
-    // fallback. (#1458)
+    // Android TV defaults to bitstreaming Dolby/DTS to the TV/AVR, preserving
+    // surround. Both backends decide from the same source — the sink's
+    // advertised capabilities: Media3 via AudioCapabilities, mpv via the
+    // route-probed audio-spdif list (supportedMpvSpdifCodecs), which names
+    // only codecs the live route accepts rather than forcing the whole set.
+    // That probe is the only safety net on the mpv path: ao_audiotrack fails
+    // the open outright when a route lied about a format, with no decode
+    // fallback behind it (#1458, #1703).
     // TODO: Default Apple TV to on once the #1300 Atmos sink is hardware-verified.
-    return Platform.isAndroid && PlatformDetector.isTV() && svc.read(SettingsService.useExoPlayer);
+    return Platform.isAndroid && PlatformDetector.isTV();
   }
 
   @override
@@ -424,8 +436,6 @@ class SettingsService extends BaseSharedPreferencesService {
     values: HdrToneMapping.values,
     defaultValue: HdrToneMapping.compositor,
   );
-  static const preferredVideoCodec = StringPref('preferred_video_codec', defaultValue: 'auto');
-  static const preferredAudioCodec = StringPref('preferred_audio_codec', defaultValue: 'auto');
   static const viewMode = EnumPref<ViewMode>('view_mode', values: ViewMode.values, defaultValue: ViewMode.grid);
   static const seekTimeSmall = IntPref('seek_time_small', defaultValue: 10);
   static const seekTimeLarge = IntPref('seek_time_large', defaultValue: 30);
@@ -506,15 +516,18 @@ class SettingsService extends BaseSharedPreferencesService {
     values: DvConversionModePreference.values,
     defaultValue: DvConversionModePreference.auto,
   );
-  static const demuxerMode = EnumPref<DemuxerPreference>(
-    'demuxer_mode',
-    values: DemuxerPreference.values,
-    defaultValue: DemuxerPreference.ffmpeg,
-  );
   static const defaultQualityPreset = EnumPref<TranscodeQualityPreset>(
     'default_quality_preset',
     values: TranscodeQualityPreset.values,
     defaultValue: TranscodeQualityPreset.original,
+  );
+
+  /// Startup quality cap applied instead of [defaultQualityPreset] when the
+  /// device is on a cellular-only connection. Null = follow
+  /// [defaultQualityPreset].
+  static const cellularQualityPreset = NullableEnumPref<TranscodeQualityPreset>(
+    'cellular_quality_preset',
+    values: TranscodeQualityPreset.values,
   );
   static const musicQualityPreset = EnumPref<AudioQualityPreset>(
     'music_quality_preset',
@@ -526,7 +539,31 @@ class SettingsService extends BaseSharedPreferencesService {
   /// [volume] so desktop music listening levels don't drag video loudness
   /// around.
   static const musicVolume = DoublePref('music_volume', defaultValue: 100.0);
+
+  /// Restore the last music session parked-paused on launch (#2148).
+  static const resumeMusicOnLaunch = BoolPref('resume_music_on_launch', defaultValue: true);
   static const autoPlayNextEpisode = BoolPref('auto_play_next_episode', defaultValue: true);
+
+  /// Seconds the Play Next prompt counts down before auto-advancing (#1827).
+  /// 0 skips the prompt entirely and starts the next episode immediately.
+  /// Only consulted while [autoPlayNextEpisode] is on.
+  static final playNextCountdown = IntPref('play_next_countdown', defaultValue: 5, transform: (v) => v.clamp(0, 30));
+
+  /// Touch gestures on the player surface (#1810). Each defaults on; the
+  /// edge swipes gate [MobileEdgeAdjustmentTracker] tracking and the zoom
+  /// pref gates the pinch recognizer in the player screen.
+  static const gestureBrightnessSwipe = BoolPref('gesture_brightness_swipe', defaultValue: true);
+  static const gestureVolumeSwipe = BoolPref('gesture_volume_swipe', defaultValue: true);
+  static const gesturePinchToZoom = BoolPref('gesture_pinch_to_zoom', defaultValue: true);
+
+  /// Deinterlace interlaced video via mpv's `deinterlace=auto` (#2149).
+  /// mpv-only by design: ExoPlayer has no filter chain.
+  static const deinterlace = BoolPref('deinterlace');
+
+  /// Remembered state of the player's always-on-top toggle (#931). The window
+  /// flag itself is only held while a player is open; this pref re-applies it
+  /// on the next playback (including autoplay episode transitions).
+  static const playerAlwaysOnTop = BoolPref('player_always_on_top');
 
   /// Where Specials (season 0) land in the episode watch order (#1416/#1952).
   /// Consumed by [sortEpisodesByWatchOrder] (Jellyfin online queue, offline
@@ -537,7 +574,16 @@ class SettingsService extends BaseSharedPreferencesService {
     values: SpecialsOrdering.values,
     defaultValue: SpecialsOrdering.respectServer,
   );
-  static const useExoPlayer = BoolPref('use_exoplayer', defaultValue: true);
+
+  /// mpv is the Android backend; ExoPlayer stays selectable as the escape
+  /// hatch while it still ships.
+  ///
+  /// Deliberately a different key from the `use_exoplayer` it replaces. That
+  /// key only ever holds an explicit pick made while ExoPlayer was the
+  /// default, and honoring those picks would leave the devices that most
+  /// need the new backend on the old one. Dropping it ([onInit]) puts every
+  /// install on mpv; choosing ExoPlayer again writes this key and sticks.
+  static const useExoPlayer = BoolPref('android_use_exoplayer');
   static const startupSection = EnumPref<NavigationTabId>(
     'startup_section',
     values: NavigationTabId.values,
@@ -647,13 +693,17 @@ class SettingsService extends BaseSharedPreferencesService {
   static const startInFullscreen = BoolPref('start_in_fullscreen');
   static const exitFullscreenOnPlayerClose = BoolPref('exit_fullscreen_on_player_close');
 
-  static const bufferSize = _BufferSizePref();
   static const playbackBufferTier = EnumPref<PlaybackBufferTier>(
     'playback_buffer_tier',
     values: PlaybackBufferTier.values,
     defaultValue: PlaybackBufferTier.auto,
   );
   static const libraryDensity = _LibraryDensityPref();
+  static const gridSpacing = EnumPref<GridSpacing>(
+    'grid_spacing',
+    values: GridSpacing.values,
+    defaultValue: GridSpacing.tight,
+  );
   static const automotiveUiScale = _AutomotiveUiScalePref();
   static const tvCornerSpotlightBackdrop = BoolPref('tv_corner_spotlight_backdrop');
   static const episodePosterMode = _EpisodePosterModePref();
@@ -799,6 +849,9 @@ class SettingsService extends BaseSharedPreferencesService {
 
     const legacyRecentRoomsKey = 'watch_together_recent_rooms';
     await prefs.remove(legacyRecentRoomsKey);
+    // One-way move to the mpv default: the pre-`android_use_exoplayer` pick is
+    // dropped rather than carried over, and nothing reads the old key.
+    await prefs.remove(_legacyUseExoPlayerKey);
 
     final storedRelay = readNullableString(customRelayUrl.key);
     if (storedRelay == null) return;
@@ -1037,8 +1090,6 @@ class SettingsService extends BaseSharedPreferencesService {
     enableHardwareDecoding,
     enableHDR,
     hdrToneMapping,
-    preferredVideoCodec,
-    preferredAudioCodec,
     viewMode,
     seekTimeSmall,
     seekTimeLarge,
@@ -1071,11 +1122,17 @@ class SettingsService extends BaseSharedPreferencesService {
     tunneledPlayback,
     dvConversionMode,
     musicVolume,
+    resumeMusicOnLaunch,
     autoPlayNextEpisode,
+    playNextCountdown,
+    gestureBrightnessSwipe,
+    gestureVolumeSwipe,
+    gesturePinchToZoom,
+    deinterlace,
+    playerAlwaysOnTop,
     specialsOrdering,
     useExoPlayer,
     startupSection,
-    demuxerMode,
     showExploreTab,
     alwaysKeepSidebarOpen,
     librariesSectionExpanded,
@@ -1109,9 +1166,9 @@ class SettingsService extends BaseSharedPreferencesService {
     scopedPlayerPrefValues,
     themeMode,
     videoPlayerNavigationEnabled,
-    bufferSize,
     playbackBufferTier,
     libraryDensity,
+    gridSpacing,
     automotiveUiScale,
     tvCornerSpotlightBackdrop,
     episodePosterMode,
@@ -1147,6 +1204,7 @@ class SettingsService extends BaseSharedPreferencesService {
     creditsPattern,
     autoRemoveWatchedDownloads,
     defaultQualityPreset,
+    cellularQualityPreset,
     musicQualityPreset,
     liveTvDefaultFavorites,
     matchRefreshRate,
@@ -1186,6 +1244,8 @@ class SettingsService extends BaseSharedPreferencesService {
       // Legacy migration sentinels — removed alongside the keys they guarded.
       prefs.remove(_legacyUseSeasonPosterKey),
       prefs.remove(_legacyMpvConfigEntriesKey),
+      prefs.remove(_legacyBufferSizeKey),
+      prefs.remove(_legacyDemuxerModeKey),
       prefs.remove(_bufferSizeMigratedKey),
     ]);
     refreshListenables();

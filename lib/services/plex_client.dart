@@ -335,6 +335,8 @@ mixin _PlexClientInternals on MediaServerCacheMixin {
     bool allowEndpointFailover = true,
   });
 
+  Future<MediaServerResponse> _postWithFailover(String path, {Map<String, dynamic>? queryParameters});
+
   Map<String, dynamic>? _getMediaContainer(MediaServerResponse response);
 
   Map<String, dynamic> _buildPaginationParams(int? start, int? size);
@@ -520,7 +522,6 @@ class PlexClient
       defaultHeaders: config.headers,
       connectTimeout: MediaServerTimeouts.connect,
       receiveTimeout: MediaServerTimeouts.receive,
-      usePlexApiClient: true,
       client: httpClient,
       logLabel: 'Plex',
       prioritizedEndpoints: prioritizedEndpoints ?? const [],
@@ -600,6 +601,17 @@ class PlexClient
       abort: abort,
       allowEndpointFailover: allowEndpointFailover,
     );
+    throwIfHttpError(response);
+    return response;
+  }
+
+  /// POST twin of [_getWithFailover] for the rare replay-safe mutation (see
+  /// [FailoverHttpClient]'s class doc): the same endpoint failover and non-2xx
+  /// throw policy, opted into per call site because replaying most POSTs
+  /// risks double-application.
+  @override
+  Future<MediaServerResponse> _postWithFailover(String path, {Map<String, dynamic>? queryParameters}) async {
+    final response = await _http.post(path, queryParameters: queryParameters, allowEndpointFailover: true);
     throwIfHttpError(response);
     return response;
   }
@@ -1842,16 +1854,48 @@ class PlexClient
               parseResponse: parseResponse,
             );
       final metadataJson = _getFirstMetadataJsonFromData(data);
-      return _parsePlaybackExtrasFromMetadataJson(
+      final extras = _parsePlaybackExtrasFromMetadataJson(
         metadataJson,
         introPattern: introPattern,
         creditsPattern: creditsPattern,
         forceChapterFallback: forceChapterFallback,
       );
+      // Movies carry `enableCreditsMarkerGeneration` on the row already in
+      // hand; episodes resolve the grandparent show through the same shared
+      // `/library/metadata/{id}` cache row the detail screen populates, so the
+      // lookup normally costs no network round trip.
+      return await plexApplyCreditsDetectionPreference(
+        extras,
+        metadataJson,
+        loadMetadataJson: (ratingKey) => _fetchSharedMetadataRow(ratingKey, requestContext: requestContext),
+      );
     } catch (e) {
       appLogger.w('Failed to get playback extras', error: e);
       return PlaybackExtras(chapters: [], markers: []);
     }
+  }
+
+  /// The first Metadata JSON of the shared `/library/metadata/{id}` cache row,
+  /// cache-first. A miss fetches with the same query shape as
+  /// [_getMetadataWithImages] so the written row matches what the detail
+  /// screen would cache.
+  Future<Map<String, dynamic>?> _fetchSharedMetadataRow(
+    String ratingKey, {
+    required ({ServerId cacheScope, Map<String, String> headers}) requestContext,
+  }) async {
+    final cacheKey = '/library/metadata/$ratingKey';
+    final data = await fetchWithCacheFirst<Map<String, dynamic>>(
+      cacheScope: requestContext.cacheScope,
+      cacheKey: cacheKey,
+      networkCall: () => _http.get(
+        cacheKey,
+        queryParameters: {'includeChapters': 1, 'includeMarkers': 1, 'checkFiles': 1, 'includeStreams': 1},
+        headers: requestContext.headers,
+      ),
+      parseCache: (cached) => cached as Map<String, dynamic>?,
+      parseResponse: (response) => response.data as Map<String, dynamic>?,
+    );
+    return _getFirstMetadataJsonFromData(data);
   }
 
   /// Parse PlaybackExtras from metadata JSON
@@ -2308,13 +2352,21 @@ class PlexClient
   /// advertise in `/library/sections/{id}/sorts`.
   ///
   /// Date Added (`addedAt`), plays (`viewCount`), and the signed-in user's
-  /// rating (`userRating`) sort correctly on movie/show libraries, so we
-  /// surface them client-side (mirroring how the Jellyfin sort list is built).
-  /// De-duped by key so we never double up if a future Plex version starts
-  /// advertising them.
+  /// rating (`userRating`) sort correctly on video libraries, so we surface
+  /// them client-side (mirroring how the Jellyfin sort list is built). De-duped
+  /// by key so we never double up if a future Plex version starts advertising
+  /// them.
+  ///
+  /// `clip` covers home-video / "Other Videos" sections. Those are
+  /// `type="movie"` on the wire — only [PlexMappers.mediaLibrary] folds their
+  /// `subtype="clip"` into [MediaKind.clip] so they render folder-first with
+  /// wide cards (#2036) — so they accept exactly the same unadvertised `sort=`
+  /// keys as a matched movie section. Unmatched files carry no critic/audience
+  /// rating, which makes the viewer's own rating the only score they can be
+  /// ordered by.
   List<MediaSort> _withExtraSorts(List<MediaSort> base, String? libraryType) {
-    final type = libraryType?.toLowerCase();
-    if (type != 'movie' && type != 'show') return base;
+    const typesWithExtraSorts = {'movie', 'show', 'clip'};
+    if (!typesWithExtraSorts.contains(libraryType?.toLowerCase())) return base;
 
     final keys = base.map((s) => s.key).toSet();
     final extras = [
@@ -3525,11 +3577,13 @@ class PlexClient
   /// station uri's trailing `?type=10` (track results) is part of the
   /// station path and rides inside the encoded uri value. Consumed as a
   /// plain track list — music playback is queue-managed client-side.
+  /// Failures propagate (matching the Jellyfin implementation) so callers
+  /// can tell a failed mix from a genuinely empty one.
   @override
   Future<List<MediaItem>> fetchInstantMix(String itemId, {int limit = 100}) async {
     final stationUri = '${await buildMetadataUri(itemId)}/station/${const Uuid().v4()}?type=${PlexMetadataType.track}';
     final queue = await createPlayQueue(uri: stationUri, type: 'audio');
-    final tracks = queue?.items ?? const <MediaItem>[];
+    final tracks = queue.items ?? const <MediaItem>[];
     return tracks.length > limit ? tracks.sublist(0, limit) : tracks;
   }
 
@@ -3626,7 +3680,7 @@ class PlexClient
       // (resolution/videoQuality) and is ignored for audio.
       final isTrack = options.metadata.kind == MediaKind.track;
       final audioPreset = options.audioQualityPreset ?? AudioQualityPreset.original;
-      final wantTranscode = isTrack ? !audioPreset.isOriginal : !options.qualityPreset.isOriginal;
+      final wantTranscode = isTrack ? !audioPreset.isOriginal : _presetNeedsTranscode(options.qualityPreset, data);
       if (wantTranscode && options.sessionIdentifier != null && options.transcodeSessionId != null) {
         if (isTrack) {
           final result = await buildMusicTranscodeStartPath(
@@ -3714,6 +3768,29 @@ class PlexClient
       if (error is PlaybackException) rethrow;
       Error.throwWithStackTrace(classifyPlaybackFailure(error), stackTrace);
     }
+  }
+
+  /// Whether [preset] asks for anything the selected version does not already
+  /// deliver. A preset is a ceiling, so a version that fits under it is served
+  /// by the file itself and playback direct plays instead of paying for an
+  /// encode that can only cost more (issue #2152).
+  ///
+  /// The comparison cannot be left to the server: PMS answers `directPlay=1`
+  /// with "Direct play OK" whatever bitrate cap the request carries (measured
+  /// on 1.43 with a 65 Mbps 4K source under a 10 Mbps cap), so asking its MDE
+  /// to arbitrate would cap nothing at all. Plex Web decides it client-side
+  /// too, folding the preset's bitrate into its own direct-play profile.
+  bool _presetNeedsTranscode(TranscodeQualityPreset preset, PlexVideoPlaybackData data) {
+    if (preset.isOriginal) return false;
+    final version = data.selectedMediaIndex < data.availableVersions.length
+        ? data.availableVersions[data.selectedMediaIndex]
+        : null;
+    if (!preset.coversSource(bitrateKbps: version?.bitrate, heightPx: version?.resolutionHeight)) return true;
+    appLogger.i(
+      'Preset ${preset.name} covers the source (${version?.bitrate} kbps, '
+      '${version?.resolutionHeight}p); playing the file directly',
+    );
+    return false;
   }
 
   /// Direct-play result for a transcode decision that fell back (failed or

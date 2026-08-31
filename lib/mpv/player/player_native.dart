@@ -28,7 +28,8 @@ class PlayerNative extends PlayerBase {
   ///
   /// [hardwareDecoding] mirrors the session's hardware-decoding setting so
   /// the Android core can pick its initial video output before mpv
-  /// initializes: gpu for hardware sessions, gpu-next for software ones (see
+  /// initializes: the fork's vo=mediacodec (with gpu behind it) for hardware
+  /// sessions, gpu-next for software ones (see
   /// MpvPlayerCore.initialVideoOutput; #2010). Other platforms ignore it.
   PlayerNative({this._hardwareDecoding = true})
     : methodChannel = const MethodChannel('com.plezy/mpv_player'),
@@ -77,6 +78,33 @@ class PlayerNative extends PlayerBase {
   /// tests agree on which path is live without reading a test-only field.
   static bool get usesLinuxVideoPlane => debugUseLinuxVideoPlane ?? Platform.isLinux;
 
+  /// First successful (positive) [getHeapSize] result; the device heap is
+  /// immutable per process, so one channel round trip serves every caller.
+  static int? _cachedHeapSizeMB;
+
+  /// Returns the device's large heap size in MB, or 0 if unavailable (Android only).
+  ///
+  /// Served by the always-registered mpv plugin, so it works whichever backend
+  /// is playing. Successful positive results are memoized — the playback-open
+  /// hot path asks again on every open. Failures keep returning 0 without
+  /// being cached, so a transient channel error can't pin the fallback for the
+  /// process lifetime.
+  static Future<int> getHeapSize() async {
+    final cached = _cachedHeapSizeMB;
+    if (cached != null) return cached;
+    try {
+      const channel = MethodChannel('com.plezy/mpv_player');
+      final result = await channel.invokeMethod<int>('getHeapSize');
+      if (result != null && result > 0) _cachedHeapSizeMB = result;
+      return result ?? 0;
+    } catch (e) {
+      return 0;
+    }
+  }
+
+  @visibleForTesting
+  static void debugResetHeapSizeCache() => _cachedHeapSizeMB = null;
+
   // Set by open() and consumed by that load's file-loaded event, so it is
   // not mistaken for a gapless advance (see _handleAudioFileLoaded).
   bool _expectOpenFileLoad = false;
@@ -98,6 +126,11 @@ class PlayerNative extends PlayerBase {
 
   @override
   bool get providesNativeStats => Platform.isAndroid;
+
+  // The Android plugin no-ops a dispose whose instanceId is not the core's
+  // creator; other platforms' handlers do not read the token yet.
+  @override
+  bool get nativeDisposeIsStaleGuarded => Platform.isAndroid;
 
   @override
   bool get attachesExternalSubtitlesAtOpen => true;
@@ -226,9 +259,13 @@ class PlayerNative extends PlayerBase {
   Future<void> _doInitialize() async {
     try {
       // The video core carries the session's decode intent so Android can
-      // choose its vo before mpv_initialize; every other platform's handler
-      // ignores initialize arguments.
-      final result = await invoke<Object>('initialize', audioOnly ? null : {'hardwareDecoding': _hardwareDecoding});
+      // choose its vo before mpv_initialize. `instanceId` names this Dart
+      // instance so a later `dispose` that lost the ownership race is
+      // provably stale; handlers that predate either argument ignore them.
+      final result = await invoke<Object>('initialize', {
+        if (!audioOnly) 'hardwareDecoding': _hardwareDecoding,
+        'instanceId': nativeInstanceId,
+      });
       if (result != true) {
         throw const PlayerInitializationException();
       }

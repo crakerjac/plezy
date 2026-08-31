@@ -72,6 +72,7 @@ class _FakeMusicService extends StubMusicPlaybackService {
   int toggleCalls = 0;
   int nextCalls = 0;
   int stopCalls = 0;
+  final List<Duration> seekCalls = [];
 
   _FakeMusicService({this.track});
 
@@ -125,6 +126,11 @@ class _FakeMusicService extends StubMusicPlaybackService {
   @override
   Future<void> stop() async {
     stopCalls++;
+  }
+
+  @override
+  Future<void> seek(Duration position) async {
+    seekCalls.add(position);
   }
 
   @override
