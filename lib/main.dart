@@ -34,6 +34,7 @@ import 'screens/profile/pin_entry_dialog.dart';
 import 'screens/profile/profile_switch_screen.dart';
 import 'services/storage_service.dart';
 import 'services/device_performance.dart';
+import 'services/video_decode_capabilities.dart';
 import 'services/macos_window_service.dart';
 import 'services/native_window_service.dart';
 import 'services/fullscreen_state_manager.dart';
@@ -47,6 +48,8 @@ import 'package:path_provider/path_provider.dart';
 import 'services/image_cache_service.dart';
 import 'services/gamepad_service.dart';
 import 'services/trackers/tracker_coordinator.dart';
+import 'providers/account_preferences_controller.dart';
+import 'services/account_preferences_repository.dart';
 import 'providers/user_profile_provider.dart';
 import 'providers/multi_server_provider.dart';
 import 'providers/theme_provider.dart';
@@ -909,12 +912,14 @@ Future<_StartupDependencies> _initializeStartup(SettingsService settings) async 
       });
     }
 
-    // MainApp reads both synchronous facades during its first build, and both
-    // have a working sync fallback, so a detection failure is not fatal.
+    // MainApp reads the first two synchronous facades during its first build
+    // and the Jellyfin device profile the third at playback negotiation. All
+    // three have a working sync fallback, so a detection failure is not fatal.
     await _optionalGatePhase(StartupPhase.deviceCapabilities, () async {
       await (
         TvDetectionService.getInstance(forceTv: settings.read(SettingsService.forceTvMode)),
         DevicePerformance.getInstance(override: settings.read(SettingsService.visualEffects)),
+        VideoDecodeCapabilities.getInstance(),
       ).wait;
     });
 
@@ -1031,6 +1036,7 @@ Future<void> _logEnvironmentDiagnostics() async {
     ' [effects: ${DevicePerformance.describeSync()}]',
   );
   appLogger.i('Display: ${DevicePerformance.describeDisplay()}');
+  appLogger.i('Video decoders: ${VideoDecodeCapabilities.describeSync()}');
   if (Platform.isAndroid) {
     appLogger.i('Startup RSS: ${ProcessInfo.currentRss >> 20}MB');
   }
@@ -1709,6 +1715,27 @@ class _MainAppState extends State<MainApp> with WidgetsBindingObserver {
           ),
           update: (_, syncService, downloadProvider, previous) => previous!,
         ),
+        // Account preferences (server-stored: Jellyfin UserConfiguration,
+        // plex.tv user profile) live above the profile session so a write
+        // survives navigation, and so a profile switch clears the cache in one
+        // place. The repository is exposed separately because UI reads it
+        // directly; the controller owns and disposes it.
+        ChangeNotifierProxyProvider2<ActiveProfileProvider, ConnectionRegistry, AccountPreferencesController>(
+          create: (_) => AccountPreferencesController(),
+          update: (context, activeProfile, connections, previous) {
+            final controller = previous!;
+            controller.attach(
+              connections: connections,
+              profileConnections: context.read<ProfileConnectionRegistry>(),
+              activeProfile: activeProfile,
+              serverManager: context.read<MultiServerProvider>().serverManager,
+            );
+            return controller;
+          },
+        ),
+        ProxyProvider<AccountPreferencesController, AccountPreferencesRepository>(
+          update: (_, controller, _) => controller.repository,
+        ),
         ChangeNotifierProxyProvider2<ActiveProfileProvider, ConnectionRegistry, UserProfileProvider>(
           create: (context) => UserProfileProvider(storageService: context.read<StorageService>()),
           update: (context, activeProfile, connections, previous) {
@@ -1718,6 +1745,7 @@ class _MainAppState extends State<MainApp> with WidgetsBindingObserver {
               activeProfile: activeProfile,
               profileConnections: context.read<ProfileConnectionRegistry>(),
               serverManager: context.read<MultiServerProvider>().serverManager,
+              accountPreferences: context.read<AccountPreferencesController>(),
             );
             return provider;
           },

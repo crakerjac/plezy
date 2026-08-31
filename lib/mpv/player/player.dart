@@ -379,27 +379,28 @@ abstract class Player {
   ///
   /// Returns a platform-specific implementation:
   /// - macOS/iOS: [PlayerNative] using MPVKit/libmpv with Metal rendering
-  /// - Android: [PlayerAndroid] using ExoPlayer (default) or [PlayerNative] using MPV (fallback)
+  /// - Android: [PlayerNative] using MPV (default) or [PlayerAndroid] using ExoPlayer (opt-in)
   /// - Windows: [PlayerWindows] using libmpv with native window embedding
   /// - Linux: [PlayerLinux] using libmpv on a native Wayland video plane
   ///
   /// On Android, pass [useExoPlayer] to override the default:
-  /// - true: Use ExoPlayer (default, better hardware support)
-  /// - false: Use MPV (more features, ASS subtitle rendering)
+  /// - false: Use MPV (default, more features, ASS subtitle rendering)
+  /// - true: Use ExoPlayer (the escape hatch for devices MPV mishandles)
   ///
   /// [hardwareDecoding] is the session's hardware-decoding setting. The
-  /// Android mpv backend uses it to pick its initial video output — gpu for
-  /// hardware sessions, gpu-next for software ones, where DV reshaping can
-  /// actually happen (see MpvPlayerCore.initialVideoOutput; #2010).
+  /// Android mpv backend uses it to pick its initial video output — the fork's
+  /// vo=mediacodec (with gpu behind it) for hardware sessions, gpu-next for
+  /// software ones, where DV reshaping can actually happen (see
+  /// MpvPlayerCore.initialVideoOutput; #2010).
   factory Player({bool? useExoPlayer, bool hardwareDecoding = true}) {
     if (Platform.isAndroid) {
-      // Default to ExoPlayer on Android, with MPV as fallback
-      // The caller should pass useExoPlayer based on SettingsService.getUseExoPlayer()
-      final useExo = useExoPlayer ?? true;
+      // Default to MPV on Android, with ExoPlayer as the opt-in alternative.
+      // The caller should pass useExoPlayer based on SettingsService.useExoPlayer.
+      final useExo = useExoPlayer ?? false;
       if (useExo) {
-        return PlayerAndroid(); // ExoPlayer (default)
+        return PlayerAndroid(); // ExoPlayer (opt-in)
       }
-      return PlayerNative(hardwareDecoding: hardwareDecoding); // MPV fallback
+      return PlayerNative(hardwareDecoding: hardwareDecoding); // MPV (default)
     }
     if (Platform.isMacOS || Platform.isIOS) {
       return PlayerNative();

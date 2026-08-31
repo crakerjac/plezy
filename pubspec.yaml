@@ -1,7 +1,7 @@
 name: plezy
 description: "A beautiful Plex and Jellyfin client for Flutter"
 publish_to: "none"
-version: 2.17.1-PlexSyncer+146
+version: 2.18.0-PlexSyncer+147
 
 environment:
   # Dart floor stays 3.12: freezed 3.x emits `final` constructor parameters,
@@ -69,8 +69,6 @@ dependencies:
       url: https://github.com/edde746/auto_updater
       path: packages/auto_updater
       ref: 9e150f7
-  cupertino_http: ^3.0.2
-  cronet_http: ^1.6.0
   win_http: ^0.2.2
   collection: ^1.18.0
   freezed_annotation: ^3.1.0

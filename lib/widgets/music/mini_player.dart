@@ -408,7 +408,9 @@ class _MiniPlayerCardState extends State<_MiniPlayerCard> with ContextMenuTapMix
 
 /// Isolated progress leaf — positionStream ticks rebuild only this
 /// background layer, never the card content above it. The played fraction
-/// renders as a subtle full-height tint that fills the card left-to-right.
+/// renders as a subtle full-height tint that fills the card left-to-right —
+/// deliberately the card's only progress display; precise seeking lives on
+/// the now-playing screen's seek bar.
 class _MiniPlayerProgress extends StatelessWidget {
   const _MiniPlayerProgress({super.key});
 
