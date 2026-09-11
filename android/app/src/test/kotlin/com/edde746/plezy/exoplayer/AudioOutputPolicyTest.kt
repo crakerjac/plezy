@@ -81,6 +81,20 @@ class AudioOutputPolicyTest {
   }
 
   @Test
+  fun dtsHdTakesTheCarrierOnlyWhenTheRouteAdvertisesDtsHd() {
+    assertTrue(dtsHdCarrierUsable({ it == C.ENCODING_DTS_HD }, { true }))
+    // Carries the tuple for TrueHD but decodes no DTS-HD: the burst would drain unheard.
+    assertFalse(dtsHdCarrierUsable({ false }, { true }))
+    assertFalse(dtsHdCarrierUsable({ true }, { false }))
+  }
+
+  @Test
+  fun theCarrierProbeIsSkippedWhenDtsHdIsNotAdvertised() {
+    // The carrier tiering costs several route calls; a route without DTS-HD must not pay them.
+    assertFalse(dtsHdCarrierUsable({ false }, { throw AssertionError("carrier probed without DTS-HD") }))
+  }
+
+  @Test
   fun nonDtsMimesNeverConsultTheDtsProbes() {
     // Decoder selection runs this predicate for every mime, video included; the probes make
     // binder calls and must stay behind the mime gate.
@@ -155,9 +169,50 @@ class AudioOutputPolicyTest {
 
   @Test
   fun spdifListIsEmptyWhenTheRouteTakesNoIecTrackAtAll() {
-    // Every encoding advertised, but no IEC 61937 track shape opens: mpv has no decode fallback
-    // for a named codec, so nothing may be named (#1991).
+    // Every encoding advertised, but no raw track and no IEC 61937 shape opens: mpv has no
+    // decode fallback for a named codec, so nothing may be named (#1991).
     assertEquals("", spdifCodecs(allEncodings, emptySet()))
+  }
+
+  @Test
+  fun rawCapableRouteBitstreamsTheCoreCodecsWithoutAnyIecShape() {
+    // #2177's Shield: every mpv IEC track opens and drains into silence, while raw
+    // ENCODING_AC3/E_AC3/DTS tracks (the ExoPlayer transport) play. The AO opens raw first,
+    // so raw support alone must qualify the core codecs.
+    assertEquals(
+      "ac3,eac3,dts",
+      spdifCodecs(allEncodings, emptySet(), raw = setOf(C.ENCODING_AC3, C.ENCODING_E_AC3, C.ENCODING_DTS))
+    )
+  }
+
+  @Test
+  fun rawSupportNeverQualifiesTheLosslessCodecs() {
+    // TrueHD and DTS-HD MA have no raw transport in the AO; they ride the 192kHz/7.1 IEC
+    // carrier or decode. A route that takes every raw track but no carrier must not name them.
+    assertEquals("ac3,eac3,dts", spdifCodecs(allEncodings, emptySet(), raw = allEncodings))
+  }
+
+  @Test
+  fun rawProbeIsOnlyConsultedForRawCandidates() {
+    // The raw probe costs real route calls; the carrier-only codecs must never trigger it.
+    val codecs = mpvSpdifCodecs(
+      { true },
+      { true },
+      { encoding ->
+        if (encoding == C.ENCODING_DOLBY_TRUEHD || encoding == C.ENCODING_DTS_HD) {
+          throw AssertionError("raw probe consulted for a carrier-only codec")
+        }
+        true
+      }
+    )
+    assertEquals("ac3,eac3,truehd,dts-hd", codecs)
+  }
+
+  @Test
+  fun dtsHdStillSupersedesPlainDtsWhenDtsBitstreamsRaw() {
+    // dts-hd selects the lossless spdif decoder for the whole dts codec; the raw core track
+    // must not resurrect the plain name beside it.
+    assertEquals("ac3,eac3,truehd,dts-hd", spdifCodecs(allEncodings, allShapes, raw = allEncodings))
   }
 
   @Test
@@ -262,5 +317,5 @@ class AudioOutputPolicyTest {
 
   private val allShapes = MpvIecShape.values().toSet()
 
-  private fun spdifCodecs(encodings: Set<Int>, shapes: Set<MpvIecShape>): String = mpvSpdifCodecs({ it in encodings }, { it in shapes })
+  private fun spdifCodecs(encodings: Set<Int>, shapes: Set<MpvIecShape>, raw: Set<Int> = emptySet()): String = mpvSpdifCodecs({ it in encodings }, { it in shapes }, { it in raw })
 }

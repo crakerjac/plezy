@@ -29,8 +29,8 @@ class SeerrQuickConnectInitiation {
 }
 
 /// Sign-in flows against a Seerr instance. Every flow ends with a captured
-/// `connect.sid` cookie and the Seerr-side [SeerrUser], packed into a
-/// [SeerrSession].
+/// `connect.sid` cookie and the Seerr-side [SeerrUser] read back through
+/// `GET /auth/me`, packed into a [SeerrSession].
 class SeerrAuthService {
   final http.Client Function()? httpClientFactory;
 
@@ -140,7 +140,7 @@ class SeerrAuthService {
 
   /// Validate that [baseUrl] points at a running, initialized Seerr and
   /// collect the metadata the connect flow needs. Throws [SeerrUrlException]
-  /// when unreachable or not set up.
+  /// when unreachable, not set up, or answered by an auth proxy instead.
   Future<SeerrPublicSettings> probe(String baseUrl) async {
     final client = _client(baseUrl);
     try {
@@ -151,6 +151,13 @@ class SeerrAuthService {
         throw SeerrUrlException(
           'Could not reach $baseUrl: $e',
           display: t.seerr.couldNotReach(url: baseUrl, error: e),
+        );
+      }
+      if (SeerrHttpClient.classify(res, path: '/settings/public') == SeerrRejection.intermediary) {
+        throw SeerrUrlException(
+          'Auth proxy in front of $baseUrl (HTTP ${res.statusCode})',
+          display: t.seerr.behindAuthProxy,
+          statusCode: res.statusCode,
         );
       }
       final data = res.data;
@@ -229,6 +236,7 @@ class SeerrAuthService {
         timeout: SeerrConstants.authTimeout,
         authenticated: false,
       );
+      SeerrHttpClient.throwIfIntermediary(res, path: '/auth/jellyfin/quickconnect/initiate');
       final data = res.data;
       final message = data is Map<String, dynamic> ? data['message'] as String? : null;
       if (res.statusCode == 404) {
@@ -300,7 +308,8 @@ class SeerrAuthService {
           }
           // 404 mid-poll = secret expired or revoked server-side. Terminal.
           if (res.statusCode == 404) throw const PollTerminatedSignal();
-          if (res.statusCode == 401 || res.statusCode == 403) {
+          const path = '/auth/jellyfin/quickconnect/check';
+          if (SeerrHttpClient.classify(res, path: path) == SeerrRejection.credentials) {
             final data = res.data;
             throw SeerrAuthException(
               (data is Map<String, dynamic> ? data['message'] as String? : null) ?? 'Quick Connect poll rejected',
@@ -308,7 +317,7 @@ class SeerrAuthService {
               display: t.addServer.quickConnectPollRejected,
             );
           }
-          SeerrHttpClient.throwForStatus(res);
+          SeerrHttpClient.throwForStatus(res, path: path);
           final data = res.data;
           return data is Map<String, dynamic> && data['authenticated'] == true ? true : null;
         },
@@ -358,6 +367,14 @@ class SeerrAuthService {
       ),
       _ => throw SeerrAuthException('No stored credentials for silent re-auth', display: t.seerr.noStoredCredentials),
     };
+    if (fresh.userId != session.userId) {
+      // A profile token or server-side account mapping changed. Never combine
+      // another user's cookie with this binding's identity and credentials.
+      throw SeerrReauthUnavailableException(
+        'Silent re-auth returned a different Seerr user',
+        display: t.seerr.noUserInformation,
+      );
+    }
     return session.copyWith(cookie: fresh.cookie, permissions: fresh.permissions, displayName: fresh.displayName);
   }
 
@@ -390,21 +407,18 @@ class SeerrAuthService {
         timeout: SeerrConstants.authTimeout,
         authenticated: false,
       );
-      if (res.statusCode == 401 || res.statusCode == 403) {
-        final message = res.data is Map<String, dynamic>
-            ? (res.data as Map<String, dynamic>)['message'] as String?
-            : null;
+      if (SeerrHttpClient.classify(res, path: path) == SeerrRejection.credentials) {
         throw SeerrAuthException(
-          message ?? 'Sign-in rejected',
+          (res.data as Map<String, dynamic>)['message'] as String,
           statusCode: res.statusCode,
           display: t.seerr.signInRejected,
         );
       }
-      SeerrHttpClient.throwForStatus(res);
+      SeerrHttpClient.throwForStatus(res, path: path);
       if (!client.captureSessionCookie(res.response)) {
         throw SeerrAuthException('Seerr did not issue a session cookie', display: t.seerr.noSessionCookie);
       }
-      final user = await _resolveUser(client, res.data);
+      final user = await _fetchUser(client);
       return SeerrSession(
         baseUrl: client.baseUrl,
         method: method,
@@ -412,7 +426,7 @@ class SeerrAuthService {
         secret: secret,
         cookie: client.cookie!,
         userId: user.id,
-        permissions: user.permissions ?? 0,
+        permissions: user.permissions,
         displayName: user.displayName ?? identifier,
         instanceLabel: '',
         createdAt: DateTime.now().millisecondsSinceEpoch ~/ 1000,
@@ -422,30 +436,36 @@ class SeerrAuthService {
     }
   }
 
-  /// The login endpoints return the [SeerrUser] directly; fall back to
-  /// `GET /auth/me` with the fresh cookie if that shape ever changes.
-  Future<SeerrUser> _resolveUser(SeerrHttpClient client, dynamic loginData) async {
-    if (loginData is Map<String, dynamic>) {
-      try {
-        return SeerrUser.fromJson(loginData);
-      } catch (_) {
-        // fall through to /auth/me
-      }
-    }
+  /// The user behind the fresh cookie, via `GET /auth/me`.
+  ///
+  /// The login response body is ignored on purpose. Each handler returns
+  /// whatever `User` instance it happened to build: `POST /auth/local` loads
+  /// only id, email, password, and plexId to check the password, so its body
+  /// carries the entity's `permissions` default of 0 rather than the stored
+  /// mask (#2213), and a first sign-in through Plex or Jellyfin returns the
+  /// just-saved entity before its display name is derived. `/auth/me` reloads
+  /// the full row, which is what the Seerr web UI itself reads after login.
+  Future<SeerrUser> _fetchUser(SeerrHttpClient client) async {
     final res = await client.send('GET', '/auth/me', timeout: SeerrConstants.authTimeout);
-    // throwForStatus passes 401 through (it's normally the re-auth signal);
-    // here it means the fresh cookie was rejected — an auth failure, not a
-    // malformed-user-payload crash further down.
-    if (res.statusCode == 401 || res.statusCode == 403) {
+    // Seerr's own middleware refusing the cookie it just issued is an auth
+    // failure, not a malformed-user-payload crash further down; a wall in
+    // front of it is neither.
+    if (SeerrHttpClient.classify(res, path: '/auth/me') == SeerrRejection.session) {
       throw SeerrAuthException(
         'Seerr rejected the fresh session cookie',
         statusCode: res.statusCode,
         display: t.seerr.freshCookieRejected,
       );
     }
-    SeerrHttpClient.throwForStatus(res);
+    SeerrHttpClient.throwForStatus(res, path: '/auth/me');
     final data = res.data;
-    if (data is Map<String, dynamic>) return SeerrUser.fromJson(data);
+    if (data is Map<String, dynamic>) {
+      try {
+        return SeerrUser.fromJson(data);
+      } on TypeError catch (e) {
+        appLogger.w('Seerr: /auth/me returned an unusable user', error: e);
+      }
+    }
     throw SeerrAuthException('Seerr did not return user information', display: t.seerr.noUserInformation);
   }
 }

@@ -21,7 +21,6 @@ import '../services/update_service.dart';
 import '../utils/app_logger.dart';
 import '../widgets/auth_error_banner.dart';
 import '../widgets/app_icon.dart';
-import '../utils/provider_extensions.dart';
 import '../utils/platform_detector.dart';
 import '../utils/snackbar_helper.dart';
 import '../utils/update_dialog.dart';
@@ -39,11 +38,13 @@ import '../profiles/active_profile_provider.dart';
 import '../profiles/plex_home_service.dart';
 import '../profiles/profile_selection_policy.dart';
 import '../providers/catalog_sources_provider.dart';
+import '../providers/account_preferences_controller.dart';
 import '../providers/download_provider.dart';
 import '../providers/multi_server_provider.dart';
 import '../providers/hidden_libraries_provider.dart';
 import '../providers/libraries_provider.dart';
 import '../providers/playback_state_provider.dart';
+import '../providers/seerr_account_provider.dart';
 import '../widgets/settings_builder.dart';
 import '../widgets/tv_virtual_keyboard.dart';
 import '../services/api_cache.dart';
@@ -57,6 +58,7 @@ import '../services/fullscreen_state_manager.dart';
 import '../providers/companion_remote_provider.dart';
 import '../utils/desktop_window_padding.dart';
 import '../widgets/music/mini_player.dart';
+import '../widgets/mobile_navigation_rail.dart';
 import '../widgets/side_navigation_rail.dart';
 import '../focus/dpad_navigator.dart';
 import '../focus/key_event_utils.dart';
@@ -369,6 +371,7 @@ class _MainScreenState extends State<MainScreen>
     with RouteAware, WindowListener, WidgetsBindingObserver, MountedSetStateMixin {
   NavigationTabId _currentTab = NavigationTabId.discover;
   String? _selectedLibraryGlobalKey;
+  Future<void>? _windowCloseFuture;
 
   /// Whether the app is in offline mode (no server connection)
   bool _isOffline = false;
@@ -434,8 +437,9 @@ class _MainScreenState extends State<MainScreen>
   final Map<NavigationTabId, GlobalKey> _screenKeys = {for (final id in NavigationTabId.values) id: GlobalKey()};
   final GlobalKey<SideNavigationRailState> _sideNavKey = GlobalKey();
 
-  /// Measures the mobile bottom navigation area for the music mini-player.
-  final GlobalKey _bottomBarKey = GlobalKey();
+  /// Measures the mobile navigation area (bottom bar or landscape rail) for
+  /// the music mini-player.
+  final GlobalKey _navBarKey = GlobalKey();
   MiniPlayerInsetController? _miniPlayerInsets;
 
   // Focus management for sidebar/content switching
@@ -584,10 +588,9 @@ class _MainScreenState extends State<MainScreen>
       _runStartupOnFirstOnlineServer(manager);
 
       if (!_isOffline) {
-        // Settings-only initialization — profile identity is managed by
-        // ActiveProfileProvider + ActiveProfileBinder.
-        final userProfileProvider = context.userProfile;
-        await userProfileProvider.initialize();
+        // The active user's playback preferences; profile identity is managed
+        // by ActiveProfileProvider + ActiveProfileBinder.
+        await context.read<AccountPreferencesController>().ensureActiveLoaded();
         if (!mounted) return;
 
         // Ensure first login (or any unset profile state) requires explicit selection.
@@ -1109,20 +1112,27 @@ class _MainScreenState extends State<MainScreen>
 
   @override
   void onWindowClose() {
-    unawaited(_exitOnWindowClose());
+    unawaited(
+      _windowCloseFuture ??= _exitOnWindowClose().whenComplete(() {
+        _windowCloseFuture = null;
+      }),
+    );
   }
 
-  /// `setPreventClose(true)` hands the window's close button to us, so the app
-  /// has to shut itself down. A bare `exit(0)` killed the process before the
-  /// app-level teardown could run — including the terminal playback report that
-  /// trackers owning their own watched semantics depend on.
+  /// The root exit observer owns the shutdown deadline. Do not time out its
+  /// dispatch here or interpret a canceled close as permission to force exit.
   Future<void> _exitOnWindowClose() async {
     try {
-      await AppExitService.requestGracefulExit().timeout(const Duration(seconds: 5));
+      await AppExitService.requestGracefulExit();
     } catch (e, st) {
-      appLogger.w('Graceful window close failed; exiting immediately', error: e, stackTrace: st);
+      appLogger.w('Graceful window close failed; destroying window', error: e, stackTrace: st);
+      try {
+        await windowManager.destroy().timeout(const Duration(seconds: 3));
+      } catch (fallbackError, fallbackStack) {
+        appLogger.e('Window destruction failed; forcing exit', error: fallbackError, stackTrace: fallbackStack);
+        exit(1);
+      }
     }
-    exit(0);
   }
 
   @override
@@ -1130,6 +1140,11 @@ class _MainScreenState extends State<MainScreen>
     // Always consume: the gates latch backgrounding on every lifecycle event.
     final resumedFromBackground = _profileSelectionResumeGate.consumePromptOn(state);
     final refreshStaleContent = _contentRefreshResumeGate.consumeRefreshOn(state);
+    // Seerr authority is independent of media-server reachability and stale
+    // content. A grant must recover hidden Request actions on any real resume.
+    if (resumedFromBackground && mounted) {
+      unawaited(context.read<SeerrAccountProvider?>()?.refreshUser());
+    }
     if (shouldShowProfileSelectionOnResume(
       resumedFromBackground: resumedFromBackground,
       isOffline: _isOffline,
@@ -1154,10 +1169,11 @@ class _MainScreenState extends State<MainScreen>
   /// without this the tabs keep showing the in-memory content from the previous
   /// session — the Libraries grid could sit hours stale until the user switched
   /// libraries (#2043). Goes through [Refreshable.refresh], each screen's
-  /// non-destructive refetch: Discover refreshes Continue Watching in place,
-  /// Libraries refetches the selected library's loaded tabs, Search re-runs a
-  /// non-empty query. Skipped while playback is up — nothing content-stale is
-  /// on screen and the playback path must stay quiet.
+  /// non-destructive refetch: Discover refreshes Continue Watching in place
+  /// (plus a full hub pass when the hub list has gone stale, #1646), Libraries
+  /// refetches the selected library's loaded tabs, Search re-runs a non-empty
+  /// query. Skipped while playback is up — nothing content-stale is on screen
+  /// and the playback path must stay quiet.
   void _refreshContentAfterStaleResume() {
     if (_isOffline || !_startupServicesPrimed || !mounted) return;
     if (VideoPlayerScreenState.activeGlobalKey != null) return;
@@ -1390,7 +1406,7 @@ class _MainScreenState extends State<MainScreen>
           await binder.rebindActive();
           if (!mounted) return;
         }
-        await context.userProfile.initialize();
+        await context.read<AccountPreferencesController>().ensureActiveLoaded();
         if (!mounted) return;
         await _primeOnlineServices(mp.serverManager);
       }());
@@ -1491,9 +1507,15 @@ class _MainScreenState extends State<MainScreen>
 
     // The tvOS engine normally passes root Menu presses through to UIKit. If a
     // stale event still reaches Flutter, avoid showing an exit prompt that
-    // cannot be honored app-side.
+    // cannot be honored app-side. Log it: a Menu swallowed here with the
+    // picker up or focus off this route is how #2239 read as a dead remote.
     if (PlatformDetector.isAppleTV()) {
       _lastBackPressAt = null;
+      appLogger.d(
+        'tvOS Menu reached MainScreen at the home root: '
+        'passthrough=$_shouldPassTvosMenuToSystem picker=$_isShowingProfileSelection '
+        'focus=${FocusManager.instance.primaryFocus?.debugLabel}',
+      );
       return KeyEventResult.handled;
     }
 
@@ -1721,11 +1743,6 @@ class _MainScreenState extends State<MainScreen>
     playbackStateProvider.clearShuffle();
 
     _fullRefreshContentTabs();
-
-    // Refresh user-level settings (audio/sub defaults) for the new identity.
-    if (mounted) {
-      unawaited(context.userProfile.refreshProfileSettings());
-    }
   }
 
   void _selectTab(NavigationTabId tab, {bool focusSearchInput = true}) {
@@ -1972,16 +1989,18 @@ class _MainScreenState extends State<MainScreen>
     );
   }
 
-  /// Report the mobile bottom bar's rendered height to the mini-player inset
-  /// controller after this frame (the bar mixes NavigationBar, optional
-  /// offline banner, and label modes — measuring beats re-deriving).
-  void _scheduleBottomBarMeasure() {
+  /// Report the mobile navigation area's rendered extent to the mini-player
+  /// inset controller after this frame: the bottom bar's height in portrait,
+  /// the leading rail's width in landscape (the bar mixes NavigationBar,
+  /// optional offline banner, and label modes — measuring beats re-deriving).
+  void _scheduleNavBarMeasure({required bool rail}) {
     final controller = _miniPlayerInsets;
     if (controller == null) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      final box = _bottomBarKey.currentContext?.findRenderObject() as RenderBox?;
-      if (box != null && box.hasSize) controller.setNavBarInset(box.size.height);
+      final box = _navBarKey.currentContext?.findRenderObject() as RenderBox?;
+      if (box == null || !box.hasSize) return;
+      controller.setNavInsets(bottom: rail ? 0 : box.size.height, start: rail ? box.size.width : 0);
     });
   }
 
@@ -2143,65 +2162,109 @@ class _MainScreenState extends State<MainScreen>
       },
       child: ScaffoldMessenger(
         key: ProfileNavigationScope.of(context).mainScaffoldMessengerKey,
-        child: Scaffold(
-          body: _buildTickerAwareStack(),
-          bottomNavigationBar: Column(
-            key: _bottomBarKey,
-            mainAxisSize: .min,
+        child: PlatformDetector.shouldUseLandscapeNavigationRail(context)
+            ? _buildLandscapeShell(context)
+            : _buildPortraitShell(context),
+      ),
+    );
+  }
+
+  /// Mobile landscape: the bottom bar's destinations on a leading rail, the
+  /// content beside it. The rail absorbs the leading system inset itself, so
+  /// the content must not indent for it a second time.
+  Widget _buildLandscapeShell(BuildContext context) {
+    return Scaffold(
+      body: Builder(
+        builder: (context) {
+          final isRtl = Directionality.of(context) == TextDirection.rtl;
+          return Row(
             children: [
-              // Reconnect bar when offline
-              if (_isOffline)
-                Material(
-                  color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                  child: InkWell(
-                    onTap: _isReconnecting ? null : _triggerReconnect,
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                      child: Row(
-                        mainAxisAlignment: .center,
-                        children: [
-                          if (_isReconnecting)
-                            SizedBox(
-                              width: 16,
-                              height: 16,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                color: Theme.of(context).colorScheme.primary,
-                              ),
-                            )
-                          else
-                            AppIcon(Symbols.wifi_rounded, size: 18, color: Theme.of(context).colorScheme.primary),
-                          const SizedBox(width: 8),
-                          Text(
-                            t.common.reconnect,
-                            style: TextStyle(
-                              fontSize: 14,
-                              fontWeight: .w500,
-                              color: Theme.of(context).colorScheme.primary,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
               SettingValueBuilder<bool>(
                 pref: SettingsService.showNavBarLabels,
                 builder: (context, showNavBarLabels, _) {
-                  final hideLabels = !showNavBarLabels;
-                  // Re-measure whenever the bar's composition can change:
-                  // this builder reruns on label toggles AND on every
-                  // MainScreen rebuild (offline bar appearing/disappearing).
-                  _scheduleBottomBarMeasure();
-                  return NavigationBarTheme(
-                    data: NavigationBarTheme.of(context).copyWith(height: hideLabels ? 56 : null),
-                    child: _buildBottomNavigationBar(context, hideLabels: hideLabels),
+                  _scheduleNavBarMeasure(rail: true);
+                  return MobileNavigationRail(
+                    key: _navBarKey,
+                    tabs: _getBottomNavigationTabs(context),
+                    selectedTab: _currentTab,
+                    showLabels: showNavBarLabels,
+                    onDestinationSelected: _selectTab,
+                    onLibrariesLongPress: () => _showLibraryQuickPicker(context),
+                    isOffline: _isOffline,
+                    isReconnecting: _isReconnecting,
+                    onReconnect: _triggerReconnect,
                   );
                 },
               ),
+              Expanded(
+                child: MediaQuery.removePadding(
+                  context: context,
+                  removeLeft: !isRtl,
+                  removeRight: isRtl,
+                  child: _buildTickerAwareStack(),
+                ),
+              ),
             ],
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildPortraitShell(BuildContext context) {
+    return Scaffold(
+      body: _buildTickerAwareStack(),
+      bottomNavigationBar: Column(
+        key: _navBarKey,
+        mainAxisSize: .min,
+        children: [
+          // Reconnect bar when offline
+          if (_isOffline)
+            Material(
+              color: Theme.of(context).colorScheme.surfaceContainerHighest,
+              child: InkWell(
+                onTap: _isReconnecting ? null : _triggerReconnect,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                  child: Row(
+                    mainAxisAlignment: .center,
+                    children: [
+                      if (_isReconnecting)
+                        SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Theme.of(context).colorScheme.primary,
+                          ),
+                        )
+                      else
+                        AppIcon(Symbols.wifi_rounded, size: 18, color: Theme.of(context).colorScheme.primary),
+                      const SizedBox(width: 8),
+                      Text(
+                        t.common.reconnect,
+                        style: TextStyle(fontSize: 14, fontWeight: .w500, color: Theme.of(context).colorScheme.primary),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          SettingValueBuilder<bool>(
+            pref: SettingsService.showNavBarLabels,
+            builder: (context, showNavBarLabels, _) {
+              final hideLabels = !showNavBarLabels;
+              // Re-measure whenever the bar's composition can change:
+              // this builder reruns on label toggles AND on every
+              // MainScreen rebuild (offline bar appearing/disappearing).
+              _scheduleNavBarMeasure(rail: false);
+              return NavigationBarTheme(
+                data: NavigationBarTheme.of(context).copyWith(height: hideLabels ? 56 : null),
+                child: _buildBottomNavigationBar(context, hideLabels: hideLabels),
+              );
+            },
           ),
-        ),
+        ],
       ),
     );
   }

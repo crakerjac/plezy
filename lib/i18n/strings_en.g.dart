@@ -546,6 +546,12 @@ class Translations$settings$en {
 	/// en: 'Display unwatched episode count on shows and seasons'
 	String get showUnwatchedCountDescription => 'Display unwatched episode count on shows and seasons';
 
+	/// en: 'Show Watched Indicators'
+	String get showWatchedIndicators => 'Show Watched Indicators';
+
+	/// en: 'Display a checkmark on watched movies, shows, and episodes'
+	String get showWatchedIndicatorsDescription => 'Display a checkmark on watched movies, shows, and episodes';
+
 	/// en: 'Show Episode Number on Cards'
 	String get showEpisodeNumberOnCards => 'Show Episode Number on Cards';
 
@@ -632,6 +638,12 @@ class Translations$settings$en {
 
 	/// en: 'Same as Default Quality'
 	String get cellularQualitySameAsDefault => 'Same as Default Quality';
+
+	/// en: 'Play Smaller Videos at Original Quality'
+	String get directPlayCoveredQuality => 'Play Smaller Videos at Original Quality';
+
+	/// en: 'Direct play videos already within the quality limit instead of transcoding them'
+	String get directPlayCoveredQualityDescription => 'Direct play videos already within the quality limit instead of transcoding them';
 
 	/// en: 'Music Quality'
 	String get musicQualityTitle => 'Music Quality';
@@ -852,17 +864,38 @@ class Translations$settings$en {
 	/// en: 'Play immediately'
 	String get playNextCountdownImmediate => 'Play immediately';
 
-	/// en: 'Auto Skip Intro'
-	String get autoSkipIntro => 'Auto Skip Intro';
+	/// en: 'Skip Intro'
+	String get skipIntroMode => 'Skip Intro';
 
-	/// en: 'Automatically skip intro markers after a few seconds'
-	String get autoSkipIntroDescription => 'Automatically skip intro markers after a few seconds';
+	/// en: 'Play intros normally without a skip button'
+	String get skipIntroModeOffDescription => 'Play intros normally without a skip button';
 
-	/// en: 'Auto Skip Credits'
-	String get autoSkipCredits => 'Auto Skip Credits';
+	/// en: 'Show a skip button when an intro starts'
+	String get skipIntroModeButtonDescription => 'Show a skip button when an intro starts';
 
-	/// en: 'Automatically skip credits and play next episode'
-	String get autoSkipCreditsDescription => 'Automatically skip credits and play next episode';
+	/// en: 'Skip intros automatically after the delay below'
+	String get skipIntroModeAutoDescription => 'Skip intros automatically after the delay below';
+
+	/// en: 'Skip Credits'
+	String get skipCreditsMode => 'Skip Credits';
+
+	/// en: 'Play credits normally without a skip button'
+	String get skipCreditsModeOffDescription => 'Play credits normally without a skip button';
+
+	/// en: 'Show a skip button when credits start'
+	String get skipCreditsModeButtonDescription => 'Show a skip button when credits start';
+
+	/// en: 'Skip credits automatically and play the next episode'
+	String get skipCreditsModeAutoDescription => 'Skip credits automatically and play the next episode';
+
+	/// en: 'Off'
+	String get skipMarkerModeOff => 'Off';
+
+	/// en: 'Show button'
+	String get skipMarkerModeButton => 'Show button';
+
+	/// en: 'Automatic'
+	String get skipMarkerModeAuto => 'Automatic';
 
 	/// en: 'Force Fallback Markers'
 	String get forceSkipMarkerFallback => 'Force Fallback Markers';
@@ -1202,6 +1235,12 @@ class Translations$settings$en {
 
 	/// en: 'Pinch on the video to zoom in or out'
 	String get gesturePinchToZoomDescription => 'Pinch on the video to zoom in or out';
+
+	/// en: 'Remember Brightness Level'
+	String get rememberBrightnessLevel => 'Remember Brightness Level';
+
+	/// en: 'Start playback at the brightness set by the last swipe'
+	String get rememberBrightnessLevelDescription => 'Start playback at the brightness set by the last swipe';
 
 	/// en: 'Controls'
 	String get controls => 'Controls';
@@ -2233,6 +2272,9 @@ class Translations$messages$en {
 	/// en: 'Playback could not be started.'
 	String get playbackFailed => 'Playback could not be started.';
 
+	/// en: 'This content is no longer available.'
+	String get mediaUnavailable => 'This content is no longer available.';
+
 	/// en: 'Error loading file info: ${error}'
 	String errorLoadingFileInfo({required Object error}) => 'Error loading file info: ${error}';
 
@@ -2493,6 +2535,15 @@ class Translations$mpvConfig$en {
 
 	/// en: 'gpu-api=vulkan hwdec=auto # comment'
 	String get configPlaceholder => 'gpu-api=vulkan\nhwdec=auto\n# comment';
+
+	/// en: 'option=value'
+	String get lineHint => 'option=value';
+
+	/// en: 'Add line'
+	String get addLine => 'Add line';
+
+	/// en: 'Remove line'
+	String get removeLine => 'Remove line';
 
 	/// en: 'vo, gpu-context and gpu-api are ignored on Linux: embedded video always renders through vo=libmpv on the video plane, and gpu-next (which compute shaders like ArtCNN need) cannot run embedded.'
 	String get embeddedVoHint => 'vo, gpu-context and gpu-api are ignored on Linux: embedded video always renders through vo=libmpv on the video plane, and gpu-next (which compute shaders like ArtCNN need) cannot run embedded.';
@@ -3399,6 +3450,12 @@ class Translations$explore$en {
 	/// en: 'Checking your library...'
 	String get checkingLibrary => 'Checking your library...';
 
+	/// en: '(one) {Couldn't check ${n} server} (other) {Couldn't check ${n} servers}'
+	String libraryCheckFailed({required num n}) => (_root.$meta.cardinalResolver ?? PluralResolvers.cardinal('en'))(n,
+		one: 'Couldn\'t check ${n} server',
+		other: 'Couldn\'t check ${n} servers',
+	);
+
 	/// en: 'Nothing here yet'
 	String get emptyTitle => 'Nothing here yet';
 
@@ -4016,6 +4073,27 @@ class Translations$watchTogether$en {
 	/// en: 'You are the host'
 	String get youAreHost => 'You are the host';
 
+	/// en: 'Make host'
+	String get makeHost => 'Make host';
+
+	/// en: 'Transfer host?'
+	String get makeHostQuestion => 'Transfer host?';
+
+	/// en: '${name} will control playback and drive the session for everyone.'
+	String makeHostConfirm({required Object name}) => '${name} will control playback and drive the session for everyone.';
+
+	/// en: 'Transfer'
+	String get transfer => 'Transfer';
+
+	/// en: '${name} is now the host'
+	String hostChangedTo({required Object name}) => '${name} is now the host';
+
+	/// en: 'You are now the host'
+	String get youAreNowHost => 'You are now the host';
+
+	/// en: 'Couldn't make ${name} the host'
+	String hostTransferFailed({required Object name}) => 'Couldn\'t make ${name} the host';
+
 	/// en: 'Watching with others'
 	String get watchingWithOthers => 'Watching with others';
 
@@ -4111,6 +4189,9 @@ class Translations$watchTogether$en {
 
 	/// en: '${name} changed the playback position'
 	String participantSeeked({required Object name}) => '${name} changed the playback position';
+
+	/// en: '${name} set the speed to ${speed}'
+	String participantChangedSpeed({required Object name, required Object speed}) => '${name} set the speed to ${speed}';
 
 	/// en: '${name} is buffering'
 	String participantBuffering({required Object name}) => '${name} is buffering';
@@ -5180,6 +5261,18 @@ class Translations$seerr$en {
 	/// en: 'Language profile'
 	String get languageProfile => 'Language profile';
 
+	/// en: 'Tags'
+	String get tags => 'Tags';
+
+	/// en: 'No tags'
+	String get noTags => 'No tags';
+
+	/// en: '${name} (Default)'
+	String defaultOption({required Object name}) => '${name} (Default)';
+
+	/// en: 'This series is an anime.'
+	String get animeNote => 'This series is an anime.';
+
 	/// en: 'Request submitted'
 	String get requestSubmitted => 'Request submitted';
 
@@ -5213,6 +5306,9 @@ class Translations$seerr$en {
 	/// en: 'No Seerr instance at ${url} (HTTP ${status})'
 	String noInstanceAtUrl({required Object url, required Object status}) => 'No Seerr instance at ${url} (HTTP ${status})';
 
+	/// en: 'An authenticating reverse proxy (SSO or HTTP auth) answered instead of Seerr. Plezy cannot sign in through it: let Seerr's /api/v1 path bypass the proxy for this app, or use an address that reaches Seerr directly.'
+	String get behindAuthProxy => 'An authenticating reverse proxy (SSO or HTTP auth) answered instead of Seerr. Plezy cannot sign in through it: let Seerr\'s /api/v1 path bypass the proxy for this app, or use an address that reaches Seerr directly.';
+
 	/// en: 'Enter a server address like https://seerr.example.com'
 	String get invalidUrl => 'Enter a server address like https://seerr.example.com';
 
@@ -5242,6 +5338,12 @@ class Translations$seerr$en {
 
 	/// en: 'The session was rejected after signing in again'
 	String get sessionRejectedAfterReauth => 'The session was rejected after signing in again';
+
+	/// en: 'Seerr denied this action: your account no longer has the required permission'
+	String get permissionDenied => 'Seerr denied this action: your account no longer has the required permission';
+
+	/// en: 'You no longer have permission to request this'
+	String get permissionRevoked => 'You no longer have permission to request this';
 }
 
 // Path: services
@@ -6466,6 +6568,9 @@ class Translations$watchTogether$errors$en {
 
 	/// en: 'The host ended the session'
 	String get sessionEnded => 'The host ended the session';
+
+	/// en: 'Unable to resume this session. Join or create a room to continue.'
+	String get sessionUnavailable => 'Unable to resume this session. Join or create a room to continue.';
 }
 
 // Path: downloads.backgroundWarning
@@ -7069,6 +7174,8 @@ extension on Translations {
 			'settings.alwaysKeepSidebarOpenDescription' => 'Sidebar stays expanded and content area adjusts to fit',
 			'settings.showUnwatchedCount' => 'Show Unwatched Count',
 			'settings.showUnwatchedCountDescription' => 'Display unwatched episode count on shows and seasons',
+			'settings.showWatchedIndicators' => 'Show Watched Indicators',
+			'settings.showWatchedIndicatorsDescription' => 'Display a checkmark on watched movies, shows, and episodes',
 			'settings.showEpisodeNumberOnCards' => 'Show Episode Number on Cards',
 			'settings.showEpisodeNumberOnCardsDescription' => 'Show season and episode number on episode cards',
 			'settings.showSeasonPostersOnTabs' => 'Show Season Posters on Tabs',
@@ -7098,6 +7205,8 @@ extension on Translations {
 			'settings.defaultQualityTitle' => 'Default Quality',
 			'settings.cellularQualityTitle' => 'Default Quality on Cellular',
 			'settings.cellularQualitySameAsDefault' => 'Same as Default Quality',
+			'settings.directPlayCoveredQuality' => 'Play Smaller Videos at Original Quality',
+			'settings.directPlayCoveredQualityDescription' => 'Direct play videos already within the quality limit instead of transcoding them',
 			'settings.musicQualityTitle' => 'Music Quality',
 			'settings.subtitleStyling' => 'Subtitle Styling',
 			'settings.subtitleStylingDescription' => 'Customize subtitle appearance',
@@ -7171,10 +7280,17 @@ extension on Translations {
 			'settings.autoPlayNextEpisodeDescription' => 'Start the next episode automatically when one ends',
 			'settings.playNextCountdown' => 'Play Next Countdown',
 			'settings.playNextCountdownImmediate' => 'Play immediately',
-			'settings.autoSkipIntro' => 'Auto Skip Intro',
-			'settings.autoSkipIntroDescription' => 'Automatically skip intro markers after a few seconds',
-			'settings.autoSkipCredits' => 'Auto Skip Credits',
-			'settings.autoSkipCreditsDescription' => 'Automatically skip credits and play next episode',
+			'settings.skipIntroMode' => 'Skip Intro',
+			'settings.skipIntroModeOffDescription' => 'Play intros normally without a skip button',
+			'settings.skipIntroModeButtonDescription' => 'Show a skip button when an intro starts',
+			'settings.skipIntroModeAutoDescription' => 'Skip intros automatically after the delay below',
+			'settings.skipCreditsMode' => 'Skip Credits',
+			'settings.skipCreditsModeOffDescription' => 'Play credits normally without a skip button',
+			'settings.skipCreditsModeButtonDescription' => 'Show a skip button when credits start',
+			'settings.skipCreditsModeAutoDescription' => 'Skip credits automatically and play the next episode',
+			'settings.skipMarkerModeOff' => 'Off',
+			'settings.skipMarkerModeButton' => 'Show button',
+			'settings.skipMarkerModeAuto' => 'Automatic',
 			'settings.forceSkipMarkerFallback' => 'Force Fallback Markers',
 			'settings.forceSkipMarkerFallbackDescription' => 'Use chapter title patterns even when Plex has markers',
 			'settings.autoSkipDelay' => 'Auto Skip Delay',
@@ -7288,6 +7404,8 @@ extension on Translations {
 			'settings.gestureVolumeSwipeDescription' => 'Swipe up or down on the right edge to adjust volume',
 			'settings.gesturePinchToZoom' => 'Pinch to Zoom',
 			'settings.gesturePinchToZoomDescription' => 'Pinch on the video to zoom in or out',
+			'settings.rememberBrightnessLevel' => 'Remember Brightness Level',
+			'settings.rememberBrightnessLevelDescription' => 'Start playback at the brightness set by the last swipe',
 			'settings.controls' => 'Controls',
 			'settings.rememberPlayerChanges' => 'Remember Player Changes',
 			'settings.rememberPlayerChangesDescription' => 'Where a change made during playback is saved and reapplied from',
@@ -7413,6 +7531,8 @@ extension on Translations {
 			'fileInfo.path' => 'Path',
 			'fileInfo.fileName' => 'File Name',
 			'fileInfo.size' => 'Size',
+			_ => null,
+		} ?? switch (path) {
 			'fileInfo.totalSize' => 'Total Size',
 			'fileInfo.container' => 'Container',
 			'fileInfo.duration' => 'Duration',
@@ -7426,8 +7546,6 @@ extension on Translations {
 			'fileInfo.has64bitOffsets' => '64-bit Offsets',
 			'fileInfo.protocol' => 'Protocol',
 			'fileInfo.mediaType' => 'Media Type',
-			_ => null,
-		} ?? switch (path) {
 			'fileInfo.sourceKind' => 'Source Kind',
 			'fileInfo.optimizedVersion' => 'Optimized Version',
 			'fileInfo.optimizationTarget' => 'Optimization Target',
@@ -7631,6 +7749,7 @@ extension on Translations {
 			'messages.playbackDataInvalid' => 'The server returned invalid playback information.',
 			'messages.playbackCancelled' => 'Playback was canceled.',
 			'messages.playbackFailed' => 'Playback could not be started.',
+			'messages.mediaUnavailable' => 'This content is no longer available.',
 			'messages.errorLoadingFileInfo' => ({required Object error}) => 'Error loading file info: ${error}',
 			'messages.errorLoadingSeries' => 'Error loading series',
 			'messages.musicNotSupported' => 'Music playback is not yet supported',
@@ -7712,6 +7831,9 @@ extension on Translations {
 			'mpvConfig.presetDeleted' => 'Preset deleted',
 			'mpvConfig.confirmDeletePreset' => 'Are you sure you want to delete this preset?',
 			'mpvConfig.configPlaceholder' => 'gpu-api=vulkan\nhwdec=auto\n# comment',
+			'mpvConfig.lineHint' => 'option=value',
+			'mpvConfig.addLine' => 'Add line',
+			'mpvConfig.removeLine' => 'Remove line',
 			'mpvConfig.embeddedVoHint' => 'vo, gpu-context and gpu-api are ignored on Linux: embedded video always renders through vo=libmpv on the video plane, and gpu-next (which compute shaders like ArtCNN need) cannot run embedded.',
 			'dialog.confirmAction' => 'Confirm Action',
 			'profiles.addPlezyProfile' => 'Add Plezy profile',
@@ -7923,6 +8045,8 @@ extension on Translations {
 			'libraries.folders' => 'folders',
 			'libraries.tabs.recommended' => 'Recommended',
 			'libraries.tabs.browse' => 'Browse',
+			_ => null,
+		} ?? switch (path) {
 			'libraries.tabs.collections' => 'Collections',
 			'libraries.tabs.playlists' => 'Playlists',
 			'libraries.groupings.title' => 'Grouping',
@@ -7940,8 +8064,6 @@ extension on Translations {
 			'libraries.filterCategories.contentRating' => 'Content Rating',
 			'libraries.filterCategories.tag' => 'Tag',
 			'libraries.filterCategories.unwatched' => 'Unwatched',
-			_ => null,
-		} ?? switch (path) {
 			'libraries.filterCategories.unplayed' => 'Unplayed',
 			'libraries.filterCategories.favorites' => 'Favorites',
 			'libraries.sortLabels.title' => 'Title',
@@ -8050,6 +8172,7 @@ extension on Translations {
 			'explore.notInLibrary' => 'Not in your library',
 			'explore.inTheseLibraries' => 'In these libraries',
 			'explore.checkingLibrary' => 'Checking your library...',
+			'explore.libraryCheckFailed' => ({required num n}) => (_root.$meta.cardinalResolver ?? PluralResolvers.cardinal('en'))(n, one: 'Couldn\'t check ${n} server', other: 'Couldn\'t check ${n} servers', ), 
 			'explore.emptyTitle' => 'Nothing here yet',
 			'explore.emptyMessage' => ({required Object source}) => 'Rows from ${source} will appear here once they have content.',
 			'explore.searchHint' => ({required Object source}) => 'Search ${source}',
@@ -8346,6 +8469,13 @@ extension on Translations {
 			'watchTogether.host' => 'Host',
 			'watchTogether.hostBadge' => 'HOST',
 			'watchTogether.youAreHost' => 'You are the host',
+			'watchTogether.makeHost' => 'Make host',
+			'watchTogether.makeHostQuestion' => 'Transfer host?',
+			'watchTogether.makeHostConfirm' => ({required Object name}) => '${name} will control playback and drive the session for everyone.',
+			'watchTogether.transfer' => 'Transfer',
+			'watchTogether.hostChangedTo' => ({required Object name}) => '${name} is now the host',
+			'watchTogether.youAreNowHost' => 'You are now the host',
+			'watchTogether.hostTransferFailed' => ({required Object name}) => 'Couldn\'t make ${name} the host',
 			'watchTogether.watchingWithOthers' => 'Watching with others',
 			'watchTogether.endSession' => 'End Session',
 			'watchTogether.leaveSession' => 'Leave Session',
@@ -8378,6 +8508,7 @@ extension on Translations {
 			'watchTogether.participantPaused' => ({required Object name}) => '${name} paused',
 			'watchTogether.participantResumed' => ({required Object name}) => '${name} resumed',
 			'watchTogether.participantSeeked' => ({required Object name}) => '${name} changed the playback position',
+			'watchTogether.participantChangedSpeed' => ({required Object name, required Object speed}) => '${name} set the speed to ${speed}',
 			'watchTogether.participantBuffering' => ({required Object name}) => '${name} is buffering',
 			'watchTogether.participantNeedsUpdate' => ({required Object name}) => '${name} is on an older app version — sync unavailable',
 			'watchTogether.resumingWithout' => ({required Object name}) => 'Resuming without ${name}',
@@ -8393,6 +8524,7 @@ extension on Translations {
 			'watchTogether.errors.connectionLost' => 'The connection closed before the session was ready',
 			'watchTogether.errors.invalidRelayResponse' => 'The relay sent an unexpected response',
 			'watchTogether.errors.sessionEnded' => 'The host ended the session',
+			'watchTogether.errors.sessionUnavailable' => 'Unable to resume this session. Join or create a room to continue.',
 			'downloads.title' => 'Downloads',
 			'downloads.manage' => 'Manage',
 			'downloads.tvShows' => 'TV Shows',
@@ -8427,6 +8559,8 @@ extension on Translations {
 			'downloads.downloadingFilesTooltip' => ({required Object files}) => 'Downloading ${files}',
 			'downloads.noDownloadsTree' => 'No downloads',
 			'downloads.pauseAll' => 'Pause all',
+			_ => null,
+		} ?? switch (path) {
 			'downloads.resumeAll' => 'Resume all',
 			'downloads.deleteAll' => 'Delete all',
 			'downloads.selectVersion' => 'Select Version',
@@ -8454,8 +8588,6 @@ extension on Translations {
 			'downloads.syncRuleCleanupUnavailable' => 'Associated downloads could not be identified safely. Reconnect the server and try again, or remove the rule without deleting downloads.',
 			'downloads.syncedNewEpisodes' => ({required Object count, required Object title}) => 'Synced ${count} new episodes for ${title}',
 			'downloads.activeSyncRules' => 'Sync rules',
-			_ => null,
-		} ?? switch (path) {
 			'downloads.noSyncRules' => 'No sync rules',
 			'downloads.manageSyncRule' => 'Manage sync',
 			'downloads.editEpisodeCount' => 'Episode count',
@@ -8792,6 +8924,10 @@ extension on Translations {
 			'seerr.qualityProfile' => 'Quality profile',
 			'seerr.rootFolder' => 'Root folder',
 			'seerr.languageProfile' => 'Language profile',
+			'seerr.tags' => 'Tags',
+			'seerr.noTags' => 'No tags',
+			'seerr.defaultOption' => ({required Object name}) => '${name} (Default)',
+			'seerr.animeNote' => 'This series is an anime.',
 			'seerr.requestSubmitted' => 'Request submitted',
 			'seerr.requestFailed' => ({required Object error}) => 'Request failed: ${error}',
 			'seerr.requestsLoadFailed' => 'Couldn\'t load request options',
@@ -8803,6 +8939,7 @@ extension on Translations {
 			'seerr.statusBlocklisted' => 'Blocklisted',
 			'seerr.couldNotReach' => ({required Object url, required Object error}) => 'Could not reach ${url}: ${error}',
 			'seerr.noInstanceAtUrl' => ({required Object url, required Object status}) => 'No Seerr instance at ${url} (HTTP ${status})',
+			'seerr.behindAuthProxy' => 'An authenticating reverse proxy (SSO or HTTP auth) answered instead of Seerr. Plezy cannot sign in through it: let Seerr\'s /api/v1 path bypass the proxy for this app, or use an address that reaches Seerr directly.',
 			'seerr.invalidUrl' => 'Enter a server address like https://seerr.example.com',
 			'seerr.quickConnectUnsupported' => 'This Seerr instance does not support Quick Connect. It needs Seerr 3.4 or newer.',
 			'seerr.notInitialized' => 'This Seerr instance has not completed first-run setup',
@@ -8813,6 +8950,8 @@ extension on Translations {
 			'seerr.freshCookieRejected' => 'Seerr rejected the new session cookie',
 			'seerr.noUserInformation' => 'Seerr did not return user information',
 			'seerr.sessionRejectedAfterReauth' => 'The session was rejected after signing in again',
+			'seerr.permissionDenied' => 'Seerr denied this action: your account no longer has the required permission',
+			'seerr.permissionRevoked' => 'You no longer have permission to request this',
 			'services.title' => 'Services',
 			'services.hubSubtitle' => 'Sync watch progress and request new titles.',
 			'services.integrations' => 'Integrations',
