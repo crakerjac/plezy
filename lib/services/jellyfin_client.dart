@@ -22,6 +22,8 @@ import '../media/live_tv_support.dart';
 import '../media/lyrics.dart';
 import '../media/media_backend.dart';
 import '../media/media_browser_dialect.dart';
+import '../media/library_change_event.dart';
+import 'library_events/media_browser_library_event_socket.dart';
 import '../media/media_file_info.dart';
 import '../media/media_hub.dart';
 import '../media/media_item.dart';
@@ -35,13 +37,13 @@ import '../media/server_capabilities.dart';
 import '../models/audio_quality_preset.dart';
 import '../models/jellyfin/jellyfin_account_preferences.dart';
 import '../models/jellyfin/jellyfin_display_preferences.dart';
-import '../models/jellyfin/jellyfin_user_profile.dart';
 import '../models/livetv_capture_buffer.dart';
 import '../models/livetv_channel.dart';
 import '../models/livetv_program.dart';
 import '../models/livetv_dvr.dart';
 import '../models/media_grab_operation.dart';
 import '../models/media_subscription.dart';
+import '../models/transcode_quality_preset.dart';
 import '../media/media_source_info.dart';
 import '../media/media_sort.dart';
 import '../media/media_version.dart';
@@ -148,6 +150,7 @@ mixin _JellyfinClientInternals on MediaServerCacheMixin {
     bool? enableTranscoding,
     bool? allowVideoStreamCopy,
     bool? allowAudioStreamCopy,
+    bool isLiveTv,
     bool audioProfile,
     bool burnSubtitles,
   });
@@ -280,18 +283,13 @@ class JellyfinClient
     } catch (_) {
       // Tests / non-platform contexts — keep the fallback version.
     }
-    // Raw, not header-sanitized: [buildJellyfinAuthHeader] percent-encodes it.
-    String? deviceName;
-    try {
-      final resolved = (await DeviceIdentityService.resolve()).deviceName?.trim();
-      if (resolved != null && resolved.isNotEmpty) deviceName = resolved;
-    } catch (_) {
-      // Tests / non-platform contexts — keep the fallback name.
-    }
+    // Never throws: tests and non-platform contexts degrade to the bare OS
+    // name, which the helpers below turn into a usable client and device.
+    final identity = await DeviceIdentityService.resolve();
     final authHeader = buildJellyfinAuthHeader(
-      clientName: 'Plezy',
+      clientName: jellyfinClientName(identity),
       clientVersion: version,
-      deviceName: deviceName ?? 'Plezy',
+      deviceName: jellyfinDeviceName(identity),
       deviceId: connection.deviceId,
       accessToken: connection.accessToken,
     );
@@ -436,6 +434,9 @@ class JellyfinClient
   String get scopedServerId => connection.id;
 
   @override
+  final Object authenticationSessionId = Object();
+
+  @override
   String? get serverName => connection.serverName;
 
   @override
@@ -446,6 +447,40 @@ class JellyfinClient
     MediaBrowserDialect.jellyfin => ServerCapabilities.jellyfin,
     MediaBrowserDialect.emby => ServerCapabilities.emby,
   };
+
+  /// Realtime library-change push on the dialect's session socket. Reads the
+  /// base URL live so endpoint failover lands on the channel's next
+  /// reconnect; Emby only routes `LibraryChanged` to sessions that registered
+  /// capabilities, so that dialect registers before each connect.
+  /// [LibraryEventService] owns the returned channel's lifecycle.
+  @override
+  LibraryEventChannel? createLibraryEventChannel() {
+    return MediaBrowserLibraryEventSocket(
+      serverId: serverId,
+      dialect: dialect,
+      baseUrl: () => _http.baseUrl,
+      accessToken: connection.accessToken,
+      deviceId: connection.deviceId,
+      registerCapabilities: dialect.requiresSessionCapabilitiesForLibraryEvents
+          ? _registerSessionCapabilitiesForEvents
+          : null,
+    );
+  }
+
+  /// `POST /Sessions/Capabilities/Full` with a minimal payload (verified 204
+  /// on Emby 4.9.5, after which the socket receives `LibraryChanged`).
+  Future<void> _registerSessionCapabilitiesForEvents() async {
+    final response = await _http.post(
+      '/Sessions/Capabilities/Full',
+      body: {
+        'PlayableMediaTypes': ['Video', 'Audio'],
+        'SupportedCommands': <String>[],
+        'SupportsMediaControl': false,
+        'SupportsSync': false,
+      },
+    );
+    throwIfHttpError(response);
+  }
 
   /// Neither dialect exposes a per-server played-threshold pref, so we mirror
   /// Plex's default of 90%.
@@ -527,22 +562,6 @@ class JellyfinClient
 
   @override
   Future<bool> isHealthy() async => (await checkHealth()) == HealthStatus.online;
-
-  /// Fetch the authenticated user's `Configuration` (audio/subtitle language
-  /// prefs, auto-select flag) so the player can apply per-user defaults.
-  /// Returns null on transport failures — caller treats as "no preference".
-  Future<JellyfinUserProfile?> fetchUserProfile() async {
-    try {
-      final response = await _http.get(paths.currentUser);
-      throwIfHttpError(response);
-      final data = response.data;
-      if (data is! Map<String, dynamic>) return null;
-      return JellyfinUserProfile.fromUserDto(data);
-    } catch (e, st) {
-      appLogger.w('JellyfinClient.fetchUserProfile failed', error: e, stackTrace: st);
-      return null;
-    }
-  }
 
   @override
   Future<String?> getMachineIdentifier() async {

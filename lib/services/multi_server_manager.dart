@@ -273,6 +273,11 @@ class MultiServerManager {
     _emitStatus();
   }
 
+  /// Re-publish the current status snapshot so tests can drive
+  /// [statusStream]-reactive services after `debugRegister*ForTesting`.
+  @visibleForTesting
+  void debugEmitStatusForTesting() => _emitStatus();
+
   /// Mark every cached Plex server on [connection] as auth-rejected without
   /// requiring a live client. Startup auth failures happen before a client can
   /// exist, but the UI still needs a server id/name for the re-auth banner.
@@ -1127,6 +1132,38 @@ class MultiServerManager {
     return client is PlexClient &&
         server != null &&
         server.networkClassForUrl(client.config.baseUrl) == PlexNetworkClass.relay;
+  }
+
+  /// Re-race endpoints for every online Plex server whose active endpoint is
+  /// remote or relay while the server also publishes a local connection.
+  ///
+  /// The failover cascade can walk a LAN session onto the remote endpoint
+  /// (a dead pooled socket after a device sleep looks like a dead endpoint),
+  /// and the only automatic way back is a connectivity event — which a
+  /// same-interface sleep/wake never produces. Called from the app's resume
+  /// probe (#2056). Servers already where the selector would put them are
+  /// skipped, so a genuinely off-LAN session costs nothing here.
+  Future<void> reoptimizeDemotedServers({required String reason}) {
+    final futures = <Future<void>>[];
+    for (final entry in _plexServers.entries) {
+      final serverId = ServerId(entry.key);
+      final server = entry.value;
+      final client = _clients[serverId];
+      if (client is! PlexClient || !isServerOnline(serverId)) continue;
+      if (_activeOptimizations.containsKey(serverId)) continue;
+      final activeClass = server.networkClassForUrl(client.config.baseUrl);
+      if (activeClass != PlexNetworkClass.remote && activeClass != PlexNetworkClass.relay) continue;
+      if (!server.connections.any((c) => c.local && !c.relay)) continue;
+
+      appLogger.i(
+        'Re-optimizing ${server.name}: on ${activeClass.name} endpoint while a local one is published',
+        error: {'reason': reason},
+      );
+      futures.add(
+        _runServerTask(serverId, () => _reoptimizeServer(serverId: serverId, server: server, reason: reason)),
+      );
+    }
+    return Future.wait(futures);
   }
 
   /// Reconcile the relay-escape prober with [serverId]'s current endpoint.
