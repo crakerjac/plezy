@@ -19,6 +19,7 @@ import 'package:plezy/services/plex_client.dart';
 import 'package:plezy/services/playback_initialization_types.dart';
 import 'package:plezy/models/transcode_quality_preset.dart';
 import '../test_helpers/backend_client_fixtures.dart';
+import '../test_helpers/http_fixtures.dart';
 
 /// Pins the [LiveTvPlaybackSession] lifecycle on both backends — the
 /// per-backend protocol that used to be hand-rolled (3×) inside the player's
@@ -36,9 +37,6 @@ void main() {
   tearDown(() async {
     await db.close();
   });
-
-  http.Response jsonResponse(Map<String, dynamic> body) =>
-      http.Response(jsonEncode(body), 200, headers: {'content-type': 'application/json'});
 
   group('Plex live playback session', () {
     Map<String, dynamic> tuneResponse() => {
@@ -431,7 +429,7 @@ void main() {
       expect(uri.queryParameters['X-Plex-Client-Profile-Extra'], isNot(contains('add-limitation')));
     });
 
-    test('a capped preset forces an h264 encode at that ceiling and survives recovery', () async {
+    test('a capped preset asks for a remux under a bitrate ceiling and survives recovery', () async {
       final decisions = <Uri>[];
       final client = makeClient((request) async {
         if (request.url.path.endsWith('/tune')) {
@@ -452,16 +450,21 @@ void main() {
       ))!;
       final uri = Uri.parse((await session.streamUrlAt())!);
 
-      // Without a client ceiling a remote session lands on the server's own
-      // top transcode tier (#2072): the cap must reach both the decision and
-      // the start request, as bitrate limitation plus resolution/quality caps.
-      expect(uri.queryParameters['directStream'], '0');
+      // A preset is a ceiling, not a re-encode request: the remux is still
+      // asked for so the server copies a channel that already fits (pinning
+      // directStream=0 re-encoded an in-cap 1080p channel at 0.40x). Without
+      // a client ceiling a remote session lands on the server's own top
+      // transcode tier (#2072): the cap must reach both the decision and the
+      // start request, as bitrate limitation plus resolution/quality caps.
+      expect(uri.queryParameters['directPlay'], '0');
+      expect(uri.queryParameters['directStream'], '1');
       expect(uri.queryParameters['videoResolution'], '1280x720');
       expect(uri.queryParameters['videoQuality'], '60');
       final profile = uri.queryParameters['X-Plex-Client-Profile-Extra']!;
       expect(profile, contains('name=video.bitrate&value=2000'));
-      // Every target codec is now an encode output; HEVC into TS is the #1859
-      // corruption, so the h264-only TS target replaces the broadcast one.
+      // The ceiling can force an encode, so the codec list doubles as the
+      // encode menu; HEVC into TS is the #1859 corruption, so the h264-only
+      // TS target replaces the broadcast one.
       expect(profile, contains('container=mpegts&videoCodec=h264&'));
       expect(profile, isNot(contains('hevc')));
       expect(decisions.single.queryParameters['videoResolution'], '1280x720');
@@ -470,7 +473,7 @@ void main() {
       // A re-tune keeps the cap; dropping it would reopen the uncapped shape.
       final recovered = await session.recover(directStream: true, directStreamAudio: true);
       final recoveredUri = Uri.parse((await recovered!.streamUrlAt())!);
-      expect(recoveredUri.queryParameters['directStream'], '0');
+      expect(recoveredUri.queryParameters['directStream'], '1');
       expect(recoveredUri.queryParameters['X-Plex-Client-Profile-Extra'], contains('value=2000'));
     });
   });
@@ -635,12 +638,14 @@ void main() {
       final direct = (await client.liveTv.startPlayback('channel-1'))!;
       expect(Uri.parse((await direct.streamUrlAt())!).path, '/Videos/channel-1/stream.ts');
       expect(negotiations.single['EnableDirectPlay'], isTrue);
+      expect(negotiations.single['MaxStreamingBitrate'], 100_000_000);
       expect(containers(negotiations.single), liveContainers);
 
       final recovered = (await direct.recover(directStream: false, directStreamAudio: true))!;
       expect(Uri.parse((await recovered.streamUrlAt())!).path, '/Videos/channel-1/live.m3u8');
       expect(containers(negotiations[1]), liveContainers);
       expect(negotiations[1]['EnableDirectPlay'], isFalse);
+      expect(negotiations[1]['MaxStreamingBitrate'], 100_000_000);
       expect(negotiations[1]['AllowVideoStreamCopy'], isTrue);
       expect(negotiations[1]['AllowAudioStreamCopy'], isTrue);
       await recovered.reportTimeline(state: 'stopped', positionMs: 0, durationMs: 0);
@@ -805,12 +810,17 @@ void main() {
 
       final session = await client.liveTv.startPlayback('channel-1');
 
-      final body = jsonDecode(negotiations.single.body) as Map<String, dynamic>;
+      final request = negotiations.single;
+      final body = jsonDecode(request.body) as Map<String, dynamic>;
+      final deviceProfile = body['DeviceProfile'] as Map<String, dynamic>;
       expect(body['EnableDirectPlay'], isTrue);
       expect(body['EnableDirectStream'], isTrue);
-      // Original sends no ceiling: the server assumes 40 Mbps for an unknown
-      // live bitrate, so any real cap would silently deny direct play.
-      expect(body.containsKey('MaxStreamingBitrate'), isFalse);
+      // Original uses Plezy's normal high negotiation ceiling. 100 Mbps is
+      // above MediaBrowser's 40 Mbps unknown-live estimate and prevents an
+      // omitted DeviceProfile value from falling back to 8 Mbps server-side.
+      expect(request.url.queryParameters['MaxStreamingBitrate'], '100000000');
+      expect(body['MaxStreamingBitrate'], 100_000_000);
+      expect(deviceProfile['MaxStreamingBitrate'], 100_000_000);
 
       // The server-proxied direct URL jellyfin-web uses (not the raw tuner
       // Path, which needs reachability probing).
@@ -829,7 +839,7 @@ void main() {
       expect(report['LiveStreamId'], 'live-1');
     });
 
-    test('a capped preset forces a transcode at that ceiling', () async {
+    test('a capped preset transcodes a source the server keeps above the ceiling', () async {
       final negotiations = <http.Request>[];
       final client = JellyfinClient.forTesting(
         connection: conn(),
@@ -855,11 +865,47 @@ void main() {
 
       final session = await client.liveTv.startPlayback('channel-1', quality: TranscodeQualityPreset.p720_2mbps);
 
+      // Direct play is asked for on every preset: the ceiling is what the
+      // server compares the source against, and this source did not clear it,
+      // so the negotiation still comes back as a transcode (#2306).
       final body = jsonDecode(negotiations.single.body) as Map<String, dynamic>;
-      expect(body['EnableDirectPlay'], isFalse);
-      expect(body['EnableDirectStream'], isFalse);
+      expect(body['EnableDirectPlay'], isTrue);
+      expect(body['EnableDirectStream'], isTrue);
       expect(body['MaxStreamingBitrate'], 2_000_000);
       expect(Uri.parse((await session!.streamUrlAt())!).path, endsWith('.m3u8'));
+    });
+
+    test('a capped preset direct-plays a source the server clears', () async {
+      final negotiations = <http.Request>[];
+      final reports = <http.Request>[];
+      final client = JellyfinClient.forTesting(
+        connection: conn(),
+        httpClient: MockClient((request) async {
+          if (request.url.path.contains('PlaybackInfo')) {
+            negotiations.add(request);
+            return jsonResponse({
+              'PlaySessionId': 'play-1',
+              'MediaSources': [
+                {'Id': 'source-1', 'Container': 'ts', 'LiveStreamId': 'live-1', 'SupportsDirectPlay': true},
+              ],
+            });
+          }
+          if (request.url.path.contains('Sessions/Playing')) reports.add(request);
+          return jsonResponse(const {});
+        }),
+      );
+      addTearDown(client.close);
+
+      final session = await client.liveTv.startPlayback('channel-1', quality: TranscodeQualityPreset.p720_2mbps);
+
+      final body = jsonDecode(negotiations.single.body) as Map<String, dynamic>;
+      expect(body['MaxStreamingBitrate'], 2_000_000);
+      expect(body['EnableDirectPlay'], isTrue);
+      expect(Uri.parse((await session!.streamUrlAt())!).path, '/Videos/channel-1/stream.ts');
+
+      await session.reportTimeline(state: 'playing', positionMs: 1000, durationMs: 0);
+      final report = jsonDecode(reports.single.body) as Map<String, dynamic>;
+      expect(report['PlayMethod'], 'DirectPlay');
     });
 
     test('a negotiation that yields no HLS URL closes the live stream it opened', () async {
@@ -943,6 +989,7 @@ void main() {
       final retryBody = jsonDecode(negotiations[1].body) as Map<String, dynamic>;
       expect(retryBody['EnableDirectPlay'], isFalse);
       expect(retryBody['EnableDirectStream'], isFalse);
+      expect(retryBody['MaxStreamingBitrate'], 100_000_000);
 
       // …and the replaced direct session's live stream is released: the
       // player adopts the replacement without ever stop-reporting the old one.
