@@ -41,6 +41,15 @@ enum PlaybackFailureAction {
 /// arrives only as the open-phase watchdog's cause tag (it never latches into
 /// [fatalHttpStatuses]); by then the reconnect loop has had its chances, so
 /// on-demand playback surfaces it while live TV keeps its ladder.
+///
+/// An audio-output failure is checked first: the device stopped taking audio,
+/// so a latched status or the live ladder would only re-open a stream into the
+/// same dead output.
+///
+/// [PlayerError.openTimedOut] and [PlayerError.streamInitFailed] name no
+/// status and no device fault, so they take the default path like any other
+/// failed open: live TV climbs its ladder (a different stream may well decode),
+/// on-demand playback is fatal.
 PlaybackFailureAction resolvePlaybackFailureAction({
   required String? cause,
   required Set<int> fatalHttpStatuses,
@@ -49,6 +58,8 @@ PlaybackFailureAction resolvePlaybackFailureAction({
   required int liveFallbackLevel,
   required bool liveRetryFailed,
 }) {
+  if (cause == PlayerError.audioOutputFailed) return PlaybackFailureAction.fatal;
+
   if (cause == PlayerError.serverHttp500 || fatalHttpStatuses.contains(500)) {
     return PlaybackFailureAction.serverLimitDialog;
   }

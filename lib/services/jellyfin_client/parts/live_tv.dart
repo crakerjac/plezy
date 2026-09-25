@@ -191,24 +191,28 @@ class _JellyfinLiveTvSupport implements LiveTvSupport {
   /// without `SupportsDirectPlay`:
   ///
   /// - **DirectPlay**: no `TranscodingUrl`; the client streams the source
-  ///   through `/Videos/{id}/stream.{container}?Static=true`. Granted only
-  ///   when [quality] is `original` (the server treats an unknown live
-  ///   bitrate as 40 Mbps, so any real `MaxStreamingBitrate` cap would deny
-  ///   it anyway) and the source matches a `DirectPlayProfiles` entry.
+  ///   through `/Videos/{id}/stream.{container}?Static=true`. Granted when the
+  ///   source matches a `DirectPlayProfiles` entry and fits under the ceiling
+  ///   this negotiation sends, which the server checks itself — a capped preset
+  ///   is a ceiling, not a request to re-encode, so direct play is asked for on
+  ///   every preset and the server makes the call (#2306).
   /// - **Transcode**: an HLS `TranscodingUrl`, capped by the preset's
-  ///   bitrate when one is set.
+  ///   bitrate when one is set. That is what a source above the ceiling comes
+  ///   back with, and what [forceTranscode] recovery asks for outright.
   Future<LiveTvStreamResolution?> _resolveStreamUrl(
     String channelKey, {
     required TranscodeQualityPreset quality,
     bool forceTranscode = false,
   }) async {
-    final wantsDirect = quality.isOriginal && !forceTranscode;
+    final wantsDirect = !forceTranscode;
     final info = await _client.getPlaybackInfo(
       channelKey,
       isLiveTv: true,
-      // Original sends no ceiling, mirroring the VOD path: a cap below the
-      // assumed 40 Mbps live bitrate silently forbids direct play.
-      maxStreamingBitrate: quality.isOriginal ? null : (quality.videoBitrateKbps ?? 100_000) * 1000,
+      // A posted MediaBrowser DeviceProfile defaults an omitted
+      // MaxStreamingBitrate to 8 Mbps. Keep Original on Plezy's normal
+      // 100 Mbps negotiation ceiling: it stays above the server's 40 Mbps
+      // unknown-live estimate without inheriting that implicit 8 Mbps cap.
+      maxStreamingBitrate: quality.isOriginal ? 100_000_000 : (quality.videoBitrateKbps ?? 100_000) * 1000,
       autoOpenLiveStream: true,
       enableDirectPlay: wantsDirect,
       enableDirectStream: wantsDirect,
@@ -311,17 +315,24 @@ class _JellyfinLiveTvSupport implements LiveTvSupport {
   @override
   FavoriteChannelPersistenceMode get favoritePersistenceMode => FavoriteChannelPersistenceMode.serverSlice;
 
-  Future<List<FavoriteChannel>> _readPersistedFavoriteChannels() =>
-      _client._favoritesRepository.read(key: _favoritesPrefsKey, legacyKey: _legacyFavoritesPrefsKey);
+  Future<List<FavoriteChannel>> _readPersistedFavoriteChannels({bool migrate = true, void Function()? checkCurrent}) =>
+      _client._favoritesRepository.read(
+        key: _favoritesPrefsKey,
+        legacyKey: _legacyFavoritesPrefsKey,
+        migrate: migrate,
+        checkCurrent: checkCurrent,
+      );
 
   /// Local list is the source of truth (preserves order + display fields).
   /// Server-side `IsFavorite` is mirrored on writes via [setFavoriteChannels].
   @override
-  Future<List<FavoriteChannel>> fetchFavoriteChannels() => _readPersistedFavoriteChannels();
+  Future<List<FavoriteChannel>> fetchFavoriteChannels({bool migrate = true, void Function()? checkCurrent}) =>
+      _readPersistedFavoriteChannels(migrate: migrate, checkCurrent: checkCurrent);
 
   @override
-  Future<void> setFavoriteChannels(List<FavoriteChannel> channels) async {
-    final previous = await _readPersistedFavoriteChannels();
+  Future<void> setFavoriteChannels(List<FavoriteChannel> channels, {void Function()? checkCurrent}) async {
+    checkCurrent?.call();
+    final previous = await _readPersistedFavoriteChannels(checkCurrent: checkCurrent);
     final previousIds = previous.map((channel) => channel.id).toSet();
     final requestedIds = channels.map((channel) => channel.id).toSet();
     final confirmedIds = {...previousIds};
@@ -329,6 +340,7 @@ class _JellyfinLiveTvSupport implements LiveTvSupport {
     StackTrace? firstStackTrace;
 
     Future<void> applyMutation(String id, bool isFavorite) async {
+      checkCurrent?.call();
       try {
         await _client._setItemFavorite(id, isFavorite);
         if (isFavorite) {
@@ -360,7 +372,8 @@ class _JellyfinLiveTvSupport implements LiveTvSupport {
       for (final channel in previous)
         if (!requestedIds.contains(channel.id) && confirmedIds.contains(channel.id)) channel,
     ];
-    await _client._favoritesRepository.write(_favoritesPrefsKey, confirmed);
+    checkCurrent?.call();
+    await _client._favoritesRepository.write(_favoritesPrefsKey, confirmed, checkCurrent: checkCurrent);
 
     if (firstError != null) {
       Error.throwWithStackTrace(firstError!, firstStackTrace!);

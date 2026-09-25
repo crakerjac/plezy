@@ -79,6 +79,21 @@ void main() {
     });
   });
 
+  group('audio output failure', () {
+    test('is terminal even where a live retry or latched status would apply', () {
+      // The device stopped taking audio (#2255 Fire TV): re-opening the stream
+      // on the live ladder or diagnosing a latched status would only run the
+      // same dead output again.
+      expect(resolve(cause: PlayerError.audioOutputFailed), PlaybackFailureAction.fatal);
+      expect(resolve(cause: PlayerError.audioOutputFailed, isLive: true), PlaybackFailureAction.fatal);
+      expect(
+        resolve(cause: PlayerError.audioOutputFailed, isLive: true, liveRetrying: true),
+        PlaybackFailureAction.fatal,
+      );
+      expect(resolve(cause: PlayerError.audioOutputFailed, statuses: {404}), PlaybackFailureAction.fatal);
+    });
+  });
+
   group('live fallback ladder', () {
     test('climbs every rung below the bound', () {
       for (var level = 0; level < maxLiveFallbackLevel; level++) {
@@ -102,6 +117,13 @@ void main() {
     test('an exhausted ladder that never failed falls through to the raw error', () {
       expect(resolve(isLive: true, liveFallbackLevel: maxLiveFallbackLevel), PlaybackFailureAction.fatal);
     });
+  });
+
+  test('a stream mpv gave up on at open is a failed open, not a device fault', () {
+    // No status and no dead output: on-demand playback fails; live TV rides
+    // its ladder, since a different stream may decode where this one did not.
+    expect(resolve(cause: PlayerError.streamInitFailed), PlaybackFailureAction.fatal);
+    expect(resolve(cause: PlayerError.streamInitFailed, isLive: true), PlaybackFailureAction.liveRetry);
   });
 
   test('an error with no server status is fatal for on-demand playback', () {
