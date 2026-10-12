@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import '../i18n/strings.g.dart';
 import '../media/media_backend.dart';
 import '../media/media_item.dart';
+import '../media/downloads_collection_grouping.dart';
 import '../media/media_item_merge.dart';
 import '../media/media_item_sort.dart';
 import '../media/media_item_types.dart';
@@ -13,6 +14,7 @@ import '../media/media_version.dart';
 import '../models/download_models.dart';
 import '../utils/download_version_utils.dart';
 import '../database/app_database.dart';
+import '../database/download_collection_operations.dart';
 import '../database/download_operations.dart';
 import '../services/background_work_diagnostics_service.dart';
 import '../services/download_manager_service.dart';
@@ -100,11 +102,24 @@ class DownloadProvider extends ChangeNotifier with DisposableChangeNotifierMixin
   // Track items currently being deleted with progress
   final Map<String, DeletionProgress> _deletionProgress = {};
 
+  /// Global keys whose [retryDownload] is still in flight.
+  final Set<String> _retryingKeys = {};
+
   // Persistent sync rules keyed by profile-scoped globalKey
   // (profileId|serverId:ratingKey). Downloads remain public/shared.
   final Map<String, SyncRuleItem> _syncRules = {};
   final Set<String> _removingSyncRuleKeys = {};
   bool _syncRuleCleanupInProgress = false;
+
+  /// Collections holding the active profile's downloaded movies and shows,
+  /// keyed by the collection's public globalKey. Loaded from
+  /// [DownloadCollections] plus the collections' pinned metadata.
+  final Map<String, DownloadedCollection> _collections = {};
+
+  /// `generation:serverId` of the collection-membership refreshes running,
+  /// and of those asked for again while they ran.
+  final Set<String> _collectionRefreshesRunning = {};
+  final Set<String> _collectionRefreshesRequested = {};
 
   String? _activeProfileId;
   int _profileGeneration = 0;
@@ -182,6 +197,7 @@ class DownloadProvider extends ChangeNotifier with DisposableChangeNotifierMixin
     _queueing.clear();
     _ownedDownloadKeys.clear();
     _syncRules.clear();
+    _collections.clear();
     _metadata.clear();
     _activeProfileId = profileId;
     _metadataStore.setActiveProfileId(profileId);
@@ -293,6 +309,7 @@ class DownloadProvider extends ChangeNotifier with DisposableChangeNotifierMixin
     await _database.clearAllDownloadOwners();
     _ownedDownloadKeys.clear();
     _syncRules.clear();
+    _collections.clear();
     safeNotifyListeners();
   }
 
@@ -361,11 +378,15 @@ class DownloadProvider extends ChangeNotifier with DisposableChangeNotifierMixin
     Map<String, DeletionProgress>? deletionProgress,
     Set<String>? ownedDownloadKeys,
     Map<String, ({String? libraryId, String? libraryTitle})>? downloadLibraries,
+    List<DownloadedCollection>? collections,
   }) {
     if (downloads != null) _downloads.addAll(downloads);
     if (metadata != null) _metadata.addAll(metadata);
     if (artwork != null) _artworkPaths.addAll(artwork);
     if (downloadLibraries != null) _downloadLibraries.addAll(downloadLibraries);
+    for (final entry in collections ?? const <DownloadedCollection>[]) {
+      _collections[buildGlobalKey(ServerId(entry.collection.serverId!), entry.collection.id)] = entry;
+    }
     if (queueing != null) {
       final ownership = _captureQueueOwnership();
       for (final globalKey in queueing) {
@@ -439,6 +460,7 @@ class DownloadProvider extends ChangeNotifier with DisposableChangeNotifierMixin
       }
 
       await _loadSyncRules();
+      await _loadDownloadCollections(pinned);
 
       // Apply queued offline watch actions on top of the server-time metadata
       // we just loaded, so re-entries reflect locally-marked watched/unwatched
@@ -470,6 +492,40 @@ class DownloadProvider extends ChangeNotifier with DisposableChangeNotifierMixin
   /// initialization to avoid per-item DB queries.
   void _loadParentMetadataFromMap(MediaItem leaf, Map<String, MediaItem> allMetadata, {String? clientScopeId}) {
     _metadataStore.loadParentMetadataFromMap(leaf, allMetadata, clientScopeId: clientScopeId);
+  }
+
+  /// Rebuild [_collections] from the active profile's stored membership and
+  /// the collections' metadata in [pinned]. [pinned] can predate a refresh
+  /// that just pinned a collection, so the loaded entry's metadata stands in
+  /// for a snapshot miss. A collection with neither stays out until the next
+  /// refresh pins it.
+  Future<void> _loadDownloadCollections(
+    ({Map<String, MediaItem> items, Map<String, String?> scopesByServer}) pinned,
+  ) async {
+    final profileId = _activeProfileId;
+    final generation = _profileGeneration;
+    final stored = profileId == null
+        ? const <StoredDownloadCollection>[]
+        : await _database.getDownloadCollections(profileId);
+    if (generation != _profileGeneration) return;
+    final loaded = Map.of(_collections);
+    _collections.clear();
+    for (final (:serverId, :collectionId, :memberIds) in stored) {
+      final scopeId = pinned.scopesByServer[serverId];
+      final globalKey = buildGlobalKey(ServerId(serverId), collectionId);
+      final cached =
+          (scopeId == null ? null : pinned.items[buildGlobalKey(ServerId(scopeId), collectionId)]) ??
+          pinned.items[globalKey] ??
+          loaded[globalKey]?.collection;
+      if (cached != null) _putDownloadedCollection(serverId, cached, memberIds);
+    }
+  }
+
+  void _putDownloadedCollection(String serverId, MediaItem collection, List<String> memberIds) {
+    final withServer = collection.serverId == null ? collection.copyWith(serverId: serverId) : collection;
+    final globalKey = buildGlobalKey(ServerId(serverId), withServer.id);
+    _collections[globalKey] = (collection: withServer, memberIds: memberIds);
+    _artworkPaths[globalKey] = DownloadedArtwork(thumbPath: withServer.thumbPath);
   }
 
   Future<_MetadataHydrationResult> _hydrateDownloadMetadata(
@@ -598,6 +654,18 @@ class DownloadProvider extends ChangeNotifier with DisposableChangeNotifierMixin
 
   Map<String, DownloadProgress> get downloads =>
       Map.unmodifiable(Map.fromEntries(_downloads.entries.where(_ownsProgressEntry)));
+
+  /// Whether the active profile owns a failed download.
+  bool get hasFailedDownloads => _downloads.entries.any(_isOwnedFailure);
+
+  /// Global keys of the active profile's failed downloads.
+  List<String> get failedDownloadKeys => [
+    for (final entry in _downloads.entries)
+      if (_isOwnedFailure(entry)) entry.key,
+  ];
+
+  bool _isOwnedFailure(MapEntry<String, DownloadProgress> entry) =>
+      entry.value.status == DownloadStatus.failed && _ownsProgressEntry(entry);
 
   /// Per-item [MediaItemSortExtras] for sorting [items] by download
   /// bookkeeping. Leaves resolve their own row; containers (shows, seasons,
@@ -967,6 +1035,120 @@ class DownloadProvider extends ChangeNotifier with DisposableChangeNotifierMixin
         })
         .map((entry) => _metadataStore.applyWatchState(entry.value))
         .toList();
+  }
+
+  /// [items] — a downloads tab's movies or shows, filtered and sorted — with
+  /// the titles of each collection holding two or more of them folded into
+  /// one collection item. See [groupByDownloadedCollection].
+  List<MediaItem> groupDownloadsByCollection(List<MediaItem> items) =>
+      groupByDownloadedCollection(items, _collections.values);
+
+  /// The downloaded movies and shows of the collection at
+  /// [collectionGlobalKey], in the collection's order.
+  List<MediaItem> downloadedCollectionItems(String collectionGlobalKey) {
+    final entry = _collections[collectionGlobalKey];
+    final serverId = serverIdOrNull(entry?.collection.serverId);
+    if (entry == null || serverId == null) return const [];
+    final titles = {
+      for (final title in [...downloadedMovies, ...downloadedShows]) title.globalKey: title,
+    };
+    return [for (final id in entry.memberIds) ?titles[buildGlobalKey(serverId, id)]];
+  }
+
+  /// How long a server's collection membership stays current before the
+  /// next connect refreshes it. Downloading a title the last refresh did not
+  /// cover refreshes it straight away.
+  static const _collectionRefreshInterval = Duration(hours: 24);
+
+  /// Refresh which collections hold the active profile's downloaded movies
+  /// and shows on each online server in [serverIds]. Run when servers
+  /// connect; servers refreshed within [_collectionRefreshInterval] that
+  /// gained no title since are skipped.
+  Future<void> syncDownloadCollections(MultiServerManager serverManager, Iterable<String> serverIds) async {
+    if (!_downloadManager.downloadsSupported) return;
+    await ensureInitialized();
+    await _profileScopedReloadFuture;
+    for (final rawServerId in serverIds) {
+      final serverId = ServerId(rawServerId);
+      final client = serverManager.getClient(serverId);
+      if (client == null || !serverManager.isServerOnline(serverId)) continue;
+      await _refreshCollections(client);
+    }
+  }
+
+  /// Refresh the active profile's collection membership on [client]'s server
+  /// when it is stale or misses a downloaded title. A call arriving while one
+  /// runs for the same server folds into a single rerun. A failed refresh
+  /// keeps the stored membership.
+  Future<void> _refreshCollections(MediaServerClient client) async {
+    final profileId = _activeProfileId;
+    if (profileId == null || profileId.isEmpty || (_offlineSource?.isOffline ?? false)) return;
+    final generation = _profileGeneration;
+    final serverId = client.serverId;
+    final runKey = '$generation:$serverId';
+    if (!_collectionRefreshesRunning.add(runKey)) {
+      _collectionRefreshesRequested.add(runKey);
+      return;
+    }
+    bool isStale() => isDisposed || generation != _profileGeneration;
+    try {
+      do {
+        _collectionRefreshesRequested.remove(runKey);
+        await _refreshCollectionsOnce(client, profileId, serverId, isStale);
+      } while (_collectionRefreshesRequested.contains(runKey) && !isStale());
+    } catch (e, st) {
+      appLogger.w('Collection membership refresh failed for $serverId', error: e, stackTrace: st);
+    } finally {
+      _collectionRefreshesRunning.remove(runKey);
+      _collectionRefreshesRequested.remove(runKey);
+    }
+  }
+
+  Future<void> _refreshCollectionsOnce(
+    MediaServerClient client,
+    String profileId,
+    ServerId serverId,
+    bool Function() isStale,
+  ) async {
+    // Every owned movie, and the show of every owned episode, whatever its
+    // download state: a queued title is grouped the moment it completes.
+    final titleIds = <String>{
+      for (final entry in _metadata.entries)
+        if (_ownsDownloadKey(entry.key) && entry.value.serverId == serverId)
+          if (entry.value.isMovie) entry.value.id else if (entry.value.isEpisode) ?entry.value.grandparentId,
+    };
+    // A profile mid-hydration has no titles yet; refreshing then would erase
+    // membership that is still valid.
+    if (titleIds.isEmpty) return;
+    final previous = await _database.getDownloadCollectionSync(profileId: profileId, serverId: serverId);
+    final now = DateTime.now();
+    if (previous != null &&
+        previous.checkedIds.containsAll(titleIds) &&
+        now.difference(DateTime.fromMillisecondsSinceEpoch(previous.syncedAt)) < _collectionRefreshInterval) {
+      return;
+    }
+
+    final memberships = await client.fetchCollectionMemberships(titleIds);
+    if (isStale()) return;
+    final refreshed = <String, DownloadedCollection>{};
+    for (final (:collection, :memberIds) in memberships) {
+      final pinned = await _downloadManager.pinCollectionForOffline(collection.id, client);
+      if (isStale()) return;
+      if (pinned != null) refreshed[collection.id] = (collection: pinned, memberIds: memberIds);
+    }
+    await _database.replaceDownloadCollections(
+      profileId: profileId,
+      serverId: serverId,
+      membersByCollection: {for (final entry in refreshed.entries) entry.key: entry.value.memberIds},
+      checkedIds: titleIds,
+      syncedAt: now.millisecondsSinceEpoch,
+    );
+    if (isStale()) return;
+    _collections.removeWhere((_, entry) => entry.collection.serverId == serverId);
+    for (final (:collection, :memberIds) in refreshed.values) {
+      _putDownloadedCollection(serverId, collection, memberIds);
+    }
+    safeNotifyListeners();
   }
 
   /// Unique albums that have completed downloaded tracks, sorted by artist
@@ -1608,6 +1790,7 @@ class DownloadProvider extends ChangeNotifier with DisposableChangeNotifierMixin
     if (storedMetadata.libraryId != null || storedMetadata.libraryTitle != null) {
       _downloadLibraries[globalKey] = (libraryId: storedMetadata.libraryId, libraryTitle: storedMetadata.libraryTitle);
     }
+    if (storedMetadata.isMovie || storedMetadata.isEpisode) unawaited(_refreshCollections(client));
     return true;
   }
 
@@ -1645,6 +1828,7 @@ class DownloadProvider extends ChangeNotifier with DisposableChangeNotifierMixin
         appLogger.w('Failed to load parent metadata while claiming $globalKey', error: e);
       }
     }
+    if (hydrated.isMovie || hydrated.isEpisode) unawaited(_refreshCollections(client));
   }
 
   /// Fetch and store parent metadata for a leaf item — show + season for an
@@ -1848,9 +2032,39 @@ class DownloadProvider extends ChangeNotifier with DisposableChangeNotifierMixin
   Future<void> resumeDownload(String globalKey, MediaServerClient client) =>
       _whenOwnedIn(globalKey, const {DownloadStatus.paused}, () => _downloadManager.resumeDownload(globalKey, client));
 
-  /// Retry a failed download
-  Future<void> retryDownload(String globalKey, MediaServerClient client) =>
-      _whenOwnedIn(globalKey, const {DownloadStatus.failed}, () => _downloadManager.retryDownload(globalKey, client));
+  /// Retry a failed download. A retry still requeueing [globalKey] makes a
+  /// repeat call a no-op, so a second press cannot restart the same item.
+  Future<void> retryDownload(String globalKey, MediaServerClient client) async {
+    if (!_retryingKeys.add(globalKey)) return;
+    try {
+      await _whenOwnedIn(globalKey, const {
+        DownloadStatus.failed,
+      }, () => _downloadManager.retryDownload(globalKey, client));
+    } finally {
+      _retryingKeys.remove(globalKey);
+    }
+  }
+
+  /// Retry the failed downloads among [globalKeys] one at a time, so the
+  /// queue downloads them in the given order. [clientFor] resolves each key's
+  /// server; a key whose server is unavailable stays failed. One key's error
+  /// does not stop the rest; a profile switch does.
+  Future<void> retryDownloads(
+    Iterable<String> globalKeys,
+    MediaServerClient? Function(String globalKey) clientFor,
+  ) async {
+    final profileGeneration = _profileGeneration;
+    for (final globalKey in globalKeys.toList(growable: false)) {
+      if (isDisposed || profileGeneration != _profileGeneration) return;
+      final client = clientFor(globalKey);
+      if (client == null) continue;
+      try {
+        await retryDownload(globalKey, client);
+      } catch (e, st) {
+        appLogger.e('Failed to retry download $globalKey', error: e, stackTrace: st);
+      }
+    }
+  }
 
   /// Cancel a download
   Future<void> cancelDownload(String globalKey) async {
@@ -1878,6 +2092,23 @@ class DownloadProvider extends ChangeNotifier with DisposableChangeNotifierMixin
 
   Future<void> deleteDownload(String globalKey) =>
       _deleteDownload(globalKey, notify: true, profileGeneration: _profileGeneration);
+
+  /// Delete every downloaded title of the collection at
+  /// [collectionGlobalKey]: a movie's download, a show's episodes.
+  Future<void> deleteCollectionDownloads(String collectionGlobalKey) async {
+    final profileGeneration = _profileGeneration;
+    final titles = downloadedCollectionItems(collectionGlobalKey);
+    _batchDeletionDepth++;
+    try {
+      for (final title in titles) {
+        if (profileGeneration != _profileGeneration) return;
+        await _deleteDownload(title.globalKey, notify: true, profileGeneration: profileGeneration);
+      }
+    } finally {
+      _batchDeletionDepth--;
+    }
+    safeNotifyListeners();
+  }
 
   /// [profileGeneration] is the profile generation that initiated the
   /// deletion. Ownership checks read the mutable active-profile view, so a
@@ -2027,13 +2258,63 @@ class DownloadProvider extends ChangeNotifier with DisposableChangeNotifierMixin
       activeProfileId: _requireActiveProfileId(),
       clientResolver: clientResolver,
     );
-    await refresh();
+    await refresh(clientResolver: clientResolver);
     return summary;
   }
 
-  /// Refresh the downloads list from database
-  Future<void> refresh() async {
+  /// Refresh the downloads list from database and hydrate missing artwork
+  Future<void> refresh({MediaServerClient? Function(String serverId)? clientResolver}) async {
+    // 1. Load the physical downloads into memory FIRST so we know what was imported
     await _loadPersistedDownloads();
+
+    if (clientResolver == null) return;
+
+    final ownership = _captureQueueOwnership();
+    final context = _RelatedMetadataDownloadContext();
+
+    // 2. Loop over the metadata to fetch artwork and parent data for the imported items
+    for (final entry in _metadata.entries) {
+      if (!_ownsDownloadKey(entry.key)) continue;
+
+      final meta = entry.value;
+      final serverIdStr = meta.serverId;
+      if (serverIdStr == null) continue;
+
+      final client = clientResolver(serverIdStr);
+      if (client == null) continue;
+
+      // Download the item's own artwork (e.g., Movie heroart, Episode thumb)
+      if (context.ensuredArtworkKeys.add(entry.key)) {
+        await _downloadManager.downloadArtworkForMetadata(meta, client);
+      }
+
+      // For episodes/tracks, fetch the Show/Season or Artist/Album heroart
+      if (meta.isEpisode || meta.kind == MediaKind.track) {
+        if (meta.grandparentId != null) {
+          await _fetchAndStoreRelatedMetadata(
+            serverId: ServerId(serverIdStr),
+            ratingKey: meta.grandparentId,
+            client: client,
+            ownership: ownership,
+            context: context,
+          );
+        }
+        if (meta.parentId != null) {
+          await _fetchAndStoreRelatedMetadata(
+            serverId: ServerId(serverIdStr),
+            ratingKey: meta.parentId,
+            client: client,
+            ownership: ownership,
+            context: context,
+          );
+        }
+      }
+
+      // Abort processing if the user switches profiles mid-refresh
+      if (!_isQueueOwnershipCurrent(ownership)) break;
+    }
+    
+    safeNotifyListeners();
   }
 
   /// Resume queued downloads that were interrupted by app kill.
@@ -2104,6 +2385,8 @@ class DownloadProvider extends ChangeNotifier with DisposableChangeNotifierMixin
         appLogger.d('Failed to refresh metadata for $globalKey: $e');
       }
     }
+    await _loadDownloadCollections(pinned);
+    if (isStale()) return;
 
     // Re-apply offline overlay so locally-queued watch actions aren't clobbered
     // by stale per-backend caches that haven't yet seen the server roundtrip.
@@ -2139,7 +2422,14 @@ class DownloadProvider extends ChangeNotifier with DisposableChangeNotifierMixin
     return meta.title ?? t.common.unknown;
   }
 
-  /// Auto-delete downloaded episodes/movies that are now marked as watched.
+  /// Auto-delete downloaded episodes/movies that are now watched and have no
+  /// resume point.
+  ///
+  /// Watched-but-resumable items (a rewatch in progress, or a server that
+  /// marked the item played but kept its resume point) are kept: sync rules
+  /// and "unwatched only" downloads still select them via
+  /// [MediaItem.isUnwatchedOrInProgress], so deleting them here would just
+  /// re-queue them on the next rule pass.
   ///
   /// Only deletes individual episodes and movies, never show/season containers.
   /// [activeGlobalKey] is excluded from deletion to protect the currently playing item.
@@ -2158,7 +2448,7 @@ class DownloadProvider extends ChangeNotifier with DisposableChangeNotifierMixin
       if (profileGeneration != _profileGeneration) break;
       final meta = _resolvedMetadata(globalKey);
       if (meta == null) continue;
-      if (!meta.isWatched) continue;
+      if (meta.isUnwatchedOrInProgress) continue;
 
       // Don't delete the episode that's currently playing
       if (activeGlobalKey != null && meta.globalKey == activeGlobalKey) continue;

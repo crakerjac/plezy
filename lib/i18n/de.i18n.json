@@ -372,6 +372,8 @@
     "dvConversionNativeDescription": "Natives DV7 erzwingen und einen erneuten DV-Konvertierungsversuch unterdrücken",
     "dvConversionDv81Description": "Inline-RPU-Konvertierung in Dolby-Vision-Profil 8.1 erzwingen",
     "dvConversionHevcStripDescription": "Dolby-Vision-RPU/EL-Schichten entfernen und reines HEVC ausgeben",
+    "disableDolbyVision": "Dolby Vision deaktivieren",
+    "disableDolbyVisionDescription": "Statt Dolby Vision die HDR10- oder HLG-Ebene der Datei abspielen, sofern vorhanden",
     "hdrSdrConversion": "HDR-zu-SDR-Konvertierung",
     "hdrSdrConversionDescription": "Wähle, was HDR-Videos umwandelt, wenn das Display kein HDR darstellen kann.",
     "hdrSdrConversionAuto": "Automatisch",
@@ -1766,6 +1768,9 @@
     "episodesQueued": "${count} Episoden zum Download hinzugefügt",
     "downloadDeleted": "Download gelöscht",
     "deleteConfirm": "\"${title}\" von diesem Gerät löschen?",
+    "deleteCollectionDownloads": "",
+    "deleteCollectionDownloadsConfirm": "",
+    "collectionDownloadsDeleted": "",
     "cancelledDownloadTitle": "Abgebrochener Download",
     "cancelledDownloadMessage": "Dieser Download wurde abgebrochen. Was möchtest du tun?",
     "allEpisodesAlreadyDownloaded": "Alle Episoden sind bereits heruntergeladen",
@@ -1783,6 +1788,8 @@
     "noDownloadsTree": "Keine Downloads",
     "pauseAll": "Alle pausieren",
     "resumeAll": "Alle fortsetzen",
+    "retryAll": "",
+    "retryFailed": "",
     "deleteAll": "Alle löschen",
     "selectVersion": "Version auswählen",
     "allEpisodes": "Alle Episoden",
@@ -1853,7 +1860,8 @@
     },
     "options": "Download-Optionen",
     "groupings": {
-      "library": "Mediathek"
+      "library": "Mediathek",
+      "collections": ""
     },
     "unknownLibrary": "Unbekannte Mediathek",
     "unknownShow": "Unbekannte Serie",
@@ -2006,6 +2014,13 @@
     "rotation": "Drehung",
     "dvSource": "DV-Quelle",
     "dvPath": "DV-Pfad",
+    "dvRouteDecoder": "",
+    "dvRouteDecoderP81": "",
+    "dvRouteBaseLayer": "",
+    "dvRouteBaseLayerHdr10": "",
+    "dvRouteBaseLayerHlg": "",
+    "dvRouteBaseLayerSdr": "",
+    "dvRouteReshaped": "",
     "p7Conversion": "P7-Konv.",
     "sampleRate": "Abtastrate",
     "pixelFormat": "Pixelformat",
@@ -2235,6 +2250,10 @@
       "simkl": "Simkl",
       "seerr": "Seerr",
       "mdblist": "MDBList"
+    },
+    "simklReconnect": {
+      "title": "",
+      "subtitle": ""
     },
     "deviceCode": {
       "title": "Plezy auf ${service} aktivieren",

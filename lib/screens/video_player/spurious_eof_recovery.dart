@@ -2,6 +2,7 @@ import 'dart:async';
 
 import '../../i18n/strings.g.dart';
 import '../../media/media_item.dart';
+import '../../media/media_part_timeline.dart';
 import '../../mpv/mpv.dart';
 import '../../utils/app_logger.dart';
 import '../../utils/snackbar_helper.dart';
@@ -17,7 +18,9 @@ import 'wakelock_controller.dart';
 /// refills it, and the parked latch playback sits on once the budget is
 /// spent. Exits from a park: user play/seek (always allowed, never consume
 /// the budget) or the server-status monitor seeing the server come back
-/// online. Plain State-owned helper in the established player pattern.
+/// online. A stream the server ended itself ([_serverStoppedSession]) parks
+/// at once: rebuilding it would open a new session behind the admin's stop.
+/// Plain State-owned helper in the established player pattern.
 class SpuriousEofRecovery {
   SpuriousEofRecovery({
     required this.isLive,
@@ -27,8 +30,10 @@ class SpuriousEofRecovery {
     required this._player,
     required this._metadata,
     required this._transportFaultSeen,
+    required this._serverStoppedSession,
     required this._reload,
     required this._wakelock,
+    this._partTimeline,
   });
 
   static const int maxAttempts = 2;
@@ -48,6 +53,10 @@ class SpuriousEofRecovery {
   final Player? Function() _player;
   final MediaItem Function() _metadata;
 
+  /// The open source's place in a stacked item, when it is one file of
+  /// several: that file ends at its own span, not at the item's end.
+  final MediaPartTimeline? Function()? _partTimeline;
+
   /// Whether the transport layer has logged a warning or error (see
   /// [isTransportFaultLog]) since the current file opened. A latch, not a
   /// window: ffmpeg's reconnect loop logs each attempt *before* its backoff
@@ -55,6 +64,10 @@ class SpuriousEofRecovery {
   /// going for minutes after the demuxer hit the dead socket, so the fault
   /// that explains an EOF may be many minutes older than the EOF.
   final bool Function() _transportFaultSeen;
+
+  /// The server ended the current item's session and no viewer action has
+  /// resumed it since (the progress tracker's `stoppedByServer`).
+  final bool Function() _serverStoppedSession;
   final Future<MediaReloadOutcome> Function({required Duration resumePosition, required String reason}) _reload;
   final WakelockController _wakelock;
 
@@ -123,8 +136,11 @@ class SpuriousEofRecovery {
     if (_parked) return true;
 
     final positionMs = currentPlayer.state.position.inMilliseconds;
-    final playerDurationMs = currentPlayer.state.duration.inMilliseconds;
-    final metadataDurationMs = _metadata().durationMs;
+    // One file of a stacked item ends where its span does; the player's
+    // duration is the whole item's.
+    final part = _partTimeline?.call()?.current;
+    final playerDurationMs = part == null ? currentPlayer.state.duration.inMilliseconds : 0;
+    final metadataDurationMs = part == null ? _metadata().durationMs : part.end.inMilliseconds;
     final signal = classifyEofSignal(
       positionMs: positionMs,
       playerDurationMs: playerDurationMs,
@@ -153,6 +169,16 @@ class SpuriousEofRecovery {
         '${source.format} source: the container ends here; treating as complete',
       );
       return false;
+    }
+
+    // A server stop (a Plex admin stop) ends the transfer too, so the buffer
+    // running dry is that stop taking effect, not a network fault to heal:
+    // an automatic rebuild would open a new session nobody asked for. Park;
+    // a viewer play/seek still retries.
+    if (_serverStoppedSession()) {
+      appLogger.i('EOF at ${positionMs}ms after the server ended the session: parked without automatic recovery');
+      _park();
+      return true;
     }
 
     appLogger.w(

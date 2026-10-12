@@ -372,6 +372,8 @@
     "dvConversionNativeDescription": "強制使用原生 DV7 並停用 DV 轉換重試",
     "dvConversionDv81Description": "強制將內嵌的 RPU 轉換為 Dolby Vision Profile 8.1",
     "dvConversionHevcStripDescription": "移除 Dolby Vision RPU/EL 層，並以一般 HEVC 呈現",
+    "disableDolbyVision": "停用 Dolby Vision",
+    "disableDolbyVisionDescription": "檔案包含 HDR10 或 HLG 層時，改為播放該層而非 Dolby Vision",
     "hdrSdrConversion": "HDR 轉 SDR",
     "hdrSdrConversionDescription": "選擇在顯示器無法顯示 HDR 時由誰轉換 HDR 影片。",
     "hdrSdrConversionAuto": "自動",
@@ -1755,6 +1757,9 @@
     "episodesQueued": "已將 ${count} 集影片加入下載佇列",
     "downloadDeleted": "下載內容已刪除",
     "deleteConfirm": "確定要從此裝置刪除「${title}」嗎？",
+    "deleteCollectionDownloads": "",
+    "deleteCollectionDownloadsConfirm": "",
+    "collectionDownloadsDeleted": "",
     "cancelledDownloadTitle": "已取消的下載",
     "cancelledDownloadMessage": "此下載已取消。您想要如何處理？",
     "allEpisodesAlreadyDownloaded": "所有單集都已下載完成",
@@ -1772,6 +1777,8 @@
     "noDownloadsTree": "目前沒有下載內容",
     "pauseAll": "全部暫停",
     "resumeAll": "全部繼續",
+    "retryAll": "",
+    "retryFailed": "",
     "deleteAll": "全部刪除",
     "selectVersion": "選擇版本",
     "allEpisodes": "所有單集",
@@ -1842,7 +1849,8 @@
     },
     "options": "下載選項",
     "groupings": {
-      "library": "媒體庫"
+      "library": "媒體庫",
+      "collections": ""
     },
     "unknownLibrary": "未知媒體庫",
     "unknownShow": "未知節目",
@@ -1995,6 +2003,13 @@
     "rotation": "旋轉角度",
     "dvSource": "DV 來源",
     "dvPath": "DV 路徑",
+    "dvRouteDecoder": "",
+    "dvRouteDecoderP81": "",
+    "dvRouteBaseLayer": "",
+    "dvRouteBaseLayerHdr10": "",
+    "dvRouteBaseLayerHlg": "",
+    "dvRouteBaseLayerSdr": "",
+    "dvRouteReshaped": "",
     "p7Conversion": "P7 轉換",
     "sampleRate": "取樣率",
     "pixelFormat": "像素格式",
@@ -2224,6 +2239,10 @@
       "simkl": "Simkl",
       "seerr": "Seerr",
       "mdblist": "MDBList"
+    },
+    "simklReconnect": {
+      "title": "",
+      "subtitle": ""
     },
     "deviceCode": {
       "title": "在 ${service} 啟用 Plezy",

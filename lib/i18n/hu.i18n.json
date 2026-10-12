@@ -372,6 +372,8 @@
     "dvConversionNativeDescription": "A natív DV7 kényszerítése és a DV-átalakítási újrapróbálkozás letiltása",
     "dvConversionDv81Description": "A közvetlen RPU-átalakítás kényszerítése Dolby Vision Profile 8.1-re",
     "dvConversionHevcStripDescription": "A Dolby Vision RPU/EL-rétegek eltávolítása és egyszerű HEVC-ként való megjelenítés",
+    "disableDolbyVision": "Dolby Vision letiltása",
+    "disableDolbyVisionDescription": "A Dolby Vision helyett a fájl HDR10 vagy HLG rétegének lejátszása, ha van ilyen",
     "hdrSdrConversion": "HDR–SDR átalakítás",
     "hdrSdrConversionDescription": "Válaszd ki, mi alakítsa át a HDR-videót, ha a kijelző nem tud HDR-t megjeleníteni.",
     "hdrSdrConversionAuto": "Automatikus",
@@ -1766,6 +1768,9 @@
     "episodesQueued": "${count} epizód letöltésre sorba állítva",
     "downloadDeleted": "Letöltés törölve",
     "deleteConfirm": "Törlöd a következőt: \"${title}\" erről az eszközről?",
+    "deleteCollectionDownloads": "",
+    "deleteCollectionDownloadsConfirm": "",
+    "collectionDownloadsDeleted": "",
     "cancelledDownloadTitle": "Megszakított letöltés",
     "cancelledDownloadMessage": "Ez a letöltés meg lett szakítva. Mit szeretnél tenni?",
     "allEpisodesAlreadyDownloaded": "Minden epizód le van töltve",
@@ -1783,6 +1788,8 @@
     "noDownloadsTree": "Nincsenek letöltések",
     "pauseAll": "Összes szüneteltetése",
     "resumeAll": "Összes folytatása",
+    "retryAll": "",
+    "retryFailed": "",
     "deleteAll": "Összes törlése",
     "selectVersion": "Verzió kiválasztása",
     "allEpisodes": "Minden epizód",
@@ -1853,7 +1860,8 @@
     },
     "options": "Letöltések lehetőségei",
     "groupings": {
-      "library": "Könyvtár"
+      "library": "Könyvtár",
+      "collections": ""
     },
     "unknownLibrary": "Ismeretlen könyvtár",
     "unknownShow": "Ismeretlen sorozat",
@@ -2006,6 +2014,13 @@
     "rotation": "Forgatás",
     "dvSource": "DV-forrás",
     "dvPath": "DV-útvonal",
+    "dvRouteDecoder": "",
+    "dvRouteDecoderP81": "",
+    "dvRouteBaseLayer": "",
+    "dvRouteBaseLayerHdr10": "",
+    "dvRouteBaseLayerHlg": "",
+    "dvRouteBaseLayerSdr": "",
+    "dvRouteReshaped": "",
     "p7Conversion": "P7-átalakítás",
     "sampleRate": "Mintavételezési frekvencia",
     "pixelFormat": "Képpontformátum",
@@ -2235,6 +2250,10 @@
       "simkl": "Simkl",
       "seerr": "Seerr",
       "mdblist": "MDBList"
+    },
+    "simklReconnect": {
+      "title": "",
+      "subtitle": ""
     },
     "deviceCode": {
       "title": "Plezy aktiválása a következőn: ${service}",

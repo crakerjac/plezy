@@ -372,6 +372,8 @@
     "dvConversionNativeDescription": "Forçar DV7 nativo e impedir uma nova tentativa de conversão de DV",
     "dvConversionDv81Description": "Forçar a conversão RPU integrada para Dolby Vision perfil 8.1",
     "dvConversionHevcStripDescription": "Remover as camadas RPU/EL do Dolby Vision e apresentar HEVC sem Dolby Vision",
+    "disableDolbyVision": "Desativar Dolby Vision",
+    "disableDolbyVisionDescription": "Reproduzir a camada HDR10 ou HLG do arquivo em vez de Dolby Vision, quando houver",
     "hdrSdrConversion": "Conversão de HDR para SDR",
     "hdrSdrConversionDescription": "Escolha o que converte vídeos HDR quando a tela não consegue exibir HDR.",
     "hdrSdrConversionAuto": "Automático",
@@ -1766,6 +1768,9 @@
     "episodesQueued": "${count} episódios na fila de download",
     "downloadDeleted": "Download excluído",
     "deleteConfirm": "Excluir \"${title}\" deste dispositivo?",
+    "deleteCollectionDownloads": "",
+    "deleteCollectionDownloadsConfirm": "",
+    "collectionDownloadsDeleted": "",
     "cancelledDownloadTitle": "Download cancelado",
     "cancelledDownloadMessage": "Este download foi cancelado. O que você deseja fazer?",
     "allEpisodesAlreadyDownloaded": "Todos os episódios já foram baixados",
@@ -1783,6 +1788,8 @@
     "noDownloadsTree": "Nenhum download",
     "pauseAll": "Pausar todos",
     "resumeAll": "Retomar todos",
+    "retryAll": "",
+    "retryFailed": "",
     "deleteAll": "Excluir todos",
     "selectVersion": "Selecionar versão",
     "allEpisodes": "Todos os episódios",
@@ -1853,7 +1860,8 @@
     },
     "options": "Opções de downloads",
     "groupings": {
-      "library": "Biblioteca"
+      "library": "Biblioteca",
+      "collections": ""
     },
     "unknownLibrary": "Biblioteca desconhecida",
     "unknownShow": "Série desconhecida",
@@ -2006,6 +2014,13 @@
     "rotation": "Rotação",
     "dvSource": "Fonte DV",
     "dvPath": "Caminho DV",
+    "dvRouteDecoder": "",
+    "dvRouteDecoderP81": "",
+    "dvRouteBaseLayer": "",
+    "dvRouteBaseLayerHdr10": "",
+    "dvRouteBaseLayerHlg": "",
+    "dvRouteBaseLayerSdr": "",
+    "dvRouteReshaped": "",
     "p7Conversion": "Conv. P7",
     "sampleRate": "Taxa de amostragem",
     "pixelFormat": "Formato de pixel",
@@ -2235,6 +2250,10 @@
       "simkl": "Simkl",
       "seerr": "Seerr",
       "mdblist": "MDBList"
+    },
+    "simklReconnect": {
+      "title": "",
+      "subtitle": ""
     },
     "deviceCode": {
       "title": "Ativar o Plezy no ${service}",

@@ -1826,6 +1826,40 @@ void main() {
       });
     });
 
+    test('a paused keepalive the server has not answered is not stacked by later ticks', () {
+      fakeAsync((async) {
+        final client = _FakePlexClient();
+        final player = _FakePlayer(position: const Duration(seconds: 5), duration: const Duration(seconds: 100))
+          ..playing = false;
+        final pings = <Completer<void>>[];
+        final tracker = PlaybackProgressTracker(
+          client: client,
+          metadata: _meta(),
+          player: player,
+          isOffline: false,
+          updateInterval: const Duration(seconds: 1),
+          onPausedKeepalive: () {
+            final ping = Completer<void>();
+            pings.add(ping);
+            return ping.future;
+          },
+        );
+
+        tracker.startTracking();
+        async.elapse(const Duration(seconds: 3));
+        async.flushMicrotasks();
+        expect(pings, hasLength(1), reason: 'the first ping is still waiting on the server');
+
+        pings.single.complete();
+        async.elapse(const Duration(seconds: 1));
+        async.flushMicrotasks();
+        expect(pings, hasLength(2), reason: 'the next tick pings again once the server answered');
+
+        pings.last.complete();
+        tracker.dispose();
+      });
+    });
+
     test('startTracking overrides only the initial report with the caller-supplied start state (#1849)', () {
       fakeAsync((async) {
         final client = _FakePlexClient();
@@ -2033,6 +2067,82 @@ void main() {
 
         tracker.dispose();
       });
+    });
+
+    test('terminated while playing: buffered playback keeps the session closed until the viewer resumes', () {
+      fakeAsync((async) {
+        final client = _TerminatingProgressClient();
+        final player = _FakePlayer(position: const Duration(seconds: 5), duration: const Duration(seconds: 100));
+        final tracker = PlaybackProgressTracker(
+          client: client,
+          metadata: _meta(),
+          player: player,
+          isOffline: false,
+          updateInterval: const Duration(seconds: 1),
+        );
+
+        tracker.startTracking();
+        async.flushMicrotasks();
+
+        // An admin stop lands on a playing heartbeat.
+        client.terminateNextProgress = true;
+        async.elapse(const Duration(seconds: 1));
+        async.flushMicrotasks();
+        expect(tracker.stoppedByServer, isTrue);
+
+        // Buffered playback carries on; its heartbeats must not re-open the
+        // session the admin just ended.
+        player.position = const Duration(seconds: 30);
+        async.elapse(const Duration(seconds: 5));
+        async.flushMicrotasks();
+        expect(client.reportKinds, [
+          PlaybackReportKind.started,
+          PlaybackReportKind.progress, // the terminated attempt
+          PlaybackReportKind.stopped,
+        ]);
+        expect(tracker.stoppedByServer, isTrue);
+
+        // A pause and resume is a person at the screen: a fresh session opens.
+        player.playing = false;
+        async.elapse(const Duration(seconds: 1));
+        async.flushMicrotasks();
+        player.playing = true;
+        async.elapse(const Duration(seconds: 1));
+        async.flushMicrotasks();
+        expect(client.reportKinds.last, PlaybackReportKind.started);
+        expect(tracker.stoppedByServer, isFalse);
+
+        tracker.dispose();
+      });
+    });
+
+    test('the terminal report after a termination records where playback ended and marks the item watched', () async {
+      final client = _TerminatingProgressClient();
+      final player = _FakePlayer(position: const Duration(seconds: 50), duration: const Duration(seconds: 100));
+      final tracker = PlaybackProgressTracker(client: client, metadata: _meta(), player: player, isOffline: false);
+      addTearDown(tracker.dispose);
+
+      await tracker.sendProgress('playing');
+      await pumpEventQueue();
+      client.terminateNextProgress = true;
+      await tracker.sendProgress('playing');
+      await pumpEventQueue();
+
+      // Buffered playback runs to the end with nobody touching it.
+      player.position = const Duration(seconds: 100);
+      await tracker.sendProgress('playing');
+      await tracker.sendStoppedProgressOnce(positionOverride: const Duration(seconds: 100));
+      await pumpEventQueue();
+
+      expect(client.updateProgressCalls.map((call) => (call.state, call.time)), [
+        ('playing', 50000),
+        ('stopped', 50000),
+        ('stopped', 100000),
+      ]);
+      expect(client.markWatchedCalls, ['42']);
+      // Finishing the item is not a viewer action: the next item still waits
+      // for a person.
+      expect(tracker.stoppedByServer, isTrue);
     });
 
     test('termination is not a report failure: nothing is queued for offline replay', () async {
