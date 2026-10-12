@@ -372,6 +372,8 @@
     "dvConversionNativeDescription": "Ішкі DV7 режимін мәжбүрлеу",
     "dvConversionDv81Description": "Dolby Vision profile 8.1 форматына түрлендіру",
     "dvConversionHevcStripDescription": "Dolby Vision қабаттарын алып тастап, HEVC ретінде көрсету",
+    "disableDolbyVision": "Dolby Vision-ды өшіру",
+    "disableDolbyVisionDescription": "Файлда бар болса, Dolby Vision орнына HDR10 немесе HLG қабатын ойнату",
     "hdrSdrConversion": "HDR-ды SDR-ға түрлендіру",
     "hdrSdrConversionDescription": "Дисплей HDR көрсете алмаған кезде HDR бейнесін не түрлендіретінін таңдаңыз.",
     "hdrSdrConversionAuto": "Автоматты",
@@ -1766,6 +1768,9 @@
     "episodesQueued": "${count} бөлім жүктеу кезегіне қосылды",
     "downloadDeleted": "Жүктеу өшірілді",
     "deleteConfirm": "\"${title}\" осы құрылғыдан өшірілсін бе?",
+    "deleteCollectionDownloads": "",
+    "deleteCollectionDownloadsConfirm": "",
+    "collectionDownloadsDeleted": "",
     "cancelledDownloadTitle": "Тоқтатылған жүктеу",
     "cancelledDownloadMessage": "Бұл жүктеу тоқтатылды. Не істегіңіз келеді?",
     "allEpisodesAlreadyDownloaded": "Барлық бөлімдер бұрыннан жүктелген",
@@ -1783,6 +1788,8 @@
     "noDownloadsTree": "Жүктеулер жоқ",
     "pauseAll": "Барлығын кідірту",
     "resumeAll": "Барлығын жалғастыру",
+    "retryAll": "",
+    "retryFailed": "",
     "deleteAll": "Барлығын өшіру",
     "selectVersion": "Нұсқаны таңдау",
     "allEpisodes": "Барлық бөлімдер",
@@ -1853,7 +1860,8 @@
     },
     "options": "Жүктеулер параметрлері",
     "groupings": {
-      "library": "Кітапхана"
+      "library": "Кітапхана",
+      "collections": ""
     },
     "unknownLibrary": "Белгісіз кітапхана",
     "unknownShow": "Белгісіз телешоу",
@@ -2006,6 +2014,13 @@
     "rotation": "Бұрылыс",
     "dvSource": "DV дереккөзі",
     "dvPath": "DV жолы",
+    "dvRouteDecoder": "",
+    "dvRouteDecoderP81": "",
+    "dvRouteBaseLayer": "",
+    "dvRouteBaseLayerHdr10": "",
+    "dvRouteBaseLayerHlg": "",
+    "dvRouteBaseLayerSdr": "",
+    "dvRouteReshaped": "",
     "p7Conversion": "P7 түрлендіруі",
     "sampleRate": "Дискретизация жиілігі",
     "pixelFormat": "Пиксель форматы",
@@ -2235,6 +2250,10 @@
       "simkl": "Simkl",
       "seerr": "Seerr",
       "mdblist": "MDBList"
+    },
+    "simklReconnect": {
+      "title": "",
+      "subtitle": ""
     },
     "deviceCode": {
       "title": "Plezy-ді ${service} қызметінде белсендіру",

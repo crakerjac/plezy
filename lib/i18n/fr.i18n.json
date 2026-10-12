@@ -372,6 +372,8 @@
     "dvConversionNativeDescription": "Forcer le DV7 natif et bloquer la nouvelle tentative de conversion DV",
     "dvConversionDv81Description": "Forcer la conversion RPU intégrée vers le profil 8.1 de Dolby Vision",
     "dvConversionHevcStripDescription": "Supprimer les couches RPU/EL Dolby Vision et présenter du HEVC simple",
+    "disableDolbyVision": "Désactiver Dolby Vision",
+    "disableDolbyVisionDescription": "Lire la couche HDR10 ou HLG du fichier au lieu de Dolby Vision, si elle existe",
     "hdrSdrConversion": "Conversion HDR vers SDR",
     "hdrSdrConversionDescription": "Choisir ce qui convertit les vidéos HDR lorsque l’écran ne peut pas afficher le HDR.",
     "hdrSdrConversionAuto": "Auto",
@@ -1766,6 +1768,9 @@
     "episodesQueued": "${count} épisodes en attente de téléchargement",
     "downloadDeleted": "Téléchargement supprimé",
     "deleteConfirm": "Supprimer « ${title} » de cet appareil ?",
+    "deleteCollectionDownloads": "",
+    "deleteCollectionDownloadsConfirm": "",
+    "collectionDownloadsDeleted": "",
     "cancelledDownloadTitle": "Téléchargement annulé",
     "cancelledDownloadMessage": "Ce téléchargement a été annulé. Que voulez-vous faire ?",
     "allEpisodesAlreadyDownloaded": "Tous les épisodes sont déjà téléchargés",
@@ -1783,6 +1788,8 @@
     "noDownloadsTree": "Aucun téléchargement",
     "pauseAll": "Tout mettre en pause",
     "resumeAll": "Tout reprendre",
+    "retryAll": "",
+    "retryFailed": "",
     "deleteAll": "Tout supprimer",
     "selectVersion": "Sélectionner la version",
     "allEpisodes": "Tous les épisodes",
@@ -1853,7 +1860,8 @@
     },
     "options": "Options de téléchargement",
     "groupings": {
-      "library": "Bibliothèque"
+      "library": "Bibliothèque",
+      "collections": ""
     },
     "unknownLibrary": "Bibliothèque inconnue",
     "unknownShow": "Série inconnue",
@@ -2006,6 +2014,13 @@
     "rotation": "Rotation",
     "dvSource": "Source DV",
     "dvPath": "Chemin DV",
+    "dvRouteDecoder": "",
+    "dvRouteDecoderP81": "",
+    "dvRouteBaseLayer": "",
+    "dvRouteBaseLayerHdr10": "",
+    "dvRouteBaseLayerHlg": "",
+    "dvRouteBaseLayerSdr": "",
+    "dvRouteReshaped": "",
     "p7Conversion": "Conv. P7",
     "sampleRate": "Fréquence d’échantillonnage",
     "pixelFormat": "Fmt pixel",
@@ -2235,6 +2250,10 @@
       "simkl": "Simkl",
       "seerr": "Seerr",
       "mdblist": "MDBList"
+    },
+    "simklReconnect": {
+      "title": "",
+      "subtitle": ""
     },
     "deviceCode": {
       "title": "Activer Plezy sur ${service}",

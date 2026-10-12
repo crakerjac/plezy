@@ -372,6 +372,8 @@
     "dvConversionNativeDescription": "Принуждава директно възпроизвеждане на DV7 и изключва повторния опит за преобразуване",
     "dvConversionDv81Description": "Принуждава директно преобразуване на RPU към Dolby Vision Profile 8.1",
     "dvConversionHevcStripDescription": "Премахва слоевете Dolby Vision RPU/EL и подава обикновен HEVC поток",
+    "disableDolbyVision": "Изключване на Dolby Vision",
+    "disableDolbyVisionDescription": "Възпроизвежда слоя HDR10 или HLG на файла вместо Dolby Vision, когато има такъв",
     "hdrSdrConversion": "Преобразуване от HDR към SDR",
     "hdrSdrConversionDescription": "Изберете какво да преобразува HDR видеото, когато дисплеят не поддържа HDR.",
     "hdrSdrConversionAuto": "Автоматично",
@@ -1766,6 +1768,9 @@
     "episodesQueued": "${count} епизода са добавени в опашката за изтегляне",
     "downloadDeleted": "Изтеглянето е изтрито",
     "deleteConfirm": "Да се изтрие ли \"${title}\" от това устройство?",
+    "deleteCollectionDownloads": "",
+    "deleteCollectionDownloadsConfirm": "",
+    "collectionDownloadsDeleted": "",
     "cancelledDownloadTitle": "Отменено изтегляне",
     "cancelledDownloadMessage": "Това изтегляне беше отменено. Какво искате да направите?",
     "allEpisodesAlreadyDownloaded": "Всички епизоди вече са изтеглени",
@@ -1783,6 +1788,8 @@
     "noDownloadsTree": "Няма изтегляния",
     "pauseAll": "Пауза на всички",
     "resumeAll": "Продължи всички",
+    "retryAll": "",
+    "retryFailed": "",
     "deleteAll": "Изтрий всички",
     "selectVersion": "Избери версия",
     "allEpisodes": "Всички епизоди",
@@ -1853,7 +1860,8 @@
     },
     "options": "Опции за изтеглянията",
     "groupings": {
-      "library": "Библиотека"
+      "library": "Библиотека",
+      "collections": ""
     },
     "unknownLibrary": "Неизвестна библиотека",
     "unknownShow": "Неизвестен сериал",
@@ -2006,6 +2014,13 @@
     "rotation": "Завъртане",
     "dvSource": "DV източник",
     "dvPath": "DV път",
+    "dvRouteDecoder": "",
+    "dvRouteDecoderP81": "",
+    "dvRouteBaseLayer": "",
+    "dvRouteBaseLayerHdr10": "",
+    "dvRouteBaseLayerHlg": "",
+    "dvRouteBaseLayerSdr": "",
+    "dvRouteReshaped": "",
     "p7Conversion": "P7 конв.",
     "sampleRate": "Честота",
     "pixelFormat": "Пикселен формат",
@@ -2235,6 +2250,10 @@
       "simkl": "Simkl",
       "seerr": "Seerr",
       "mdblist": "MDBList"
+    },
+    "simklReconnect": {
+      "title": "",
+      "subtitle": ""
     },
     "deviceCode": {
       "title": "Активиране на Plezy в ${service}",

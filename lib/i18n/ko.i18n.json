@@ -372,6 +372,8 @@
     "dvConversionNativeDescription": "네이티브 DV7을 강제하고 DV 변환 재시도를 억제합니다",
     "dvConversionDv81Description": "Dolby Vision 프로필 8.1로 인라인 RPU 변환을 강제합니다",
     "dvConversionHevcStripDescription": "Dolby Vision RPU/EL 레이어를 제거하고 일반 HEVC로 제공합니다",
+    "disableDolbyVision": "Dolby Vision 끄기",
+    "disableDolbyVisionDescription": "파일에 HDR10 또는 HLG 레이어가 있으면 Dolby Vision 대신 해당 레이어를 재생합니다",
     "hdrSdrConversion": "HDR을 SDR로 변환",
     "hdrSdrConversionDescription": "디스플레이가 HDR을 표시할 수 없을 때 HDR 동영상을 무엇으로 변환할지 선택합니다.",
     "hdrSdrConversionAuto": "자동",
@@ -1755,6 +1757,9 @@
     "episodesQueued": "에피소드 ${count}개가 다운로드 대기열에 추가되었습니다",
     "downloadDeleted": "다운로드 삭제됨",
     "deleteConfirm": "이 기기에서 \"${title}\"을(를) 삭제할까요?",
+    "deleteCollectionDownloads": "",
+    "deleteCollectionDownloadsConfirm": "",
+    "collectionDownloadsDeleted": "",
     "cancelledDownloadTitle": "취소된 다운로드",
     "cancelledDownloadMessage": "이 다운로드가 취소되었습니다. 어떻게 하시겠습니까?",
     "allEpisodesAlreadyDownloaded": "모든 에피소드가 이미 다운로드되었습니다",
@@ -1772,6 +1777,8 @@
     "noDownloadsTree": "다운로드 없음",
     "pauseAll": "모두 일시정지",
     "resumeAll": "모두 재개",
+    "retryAll": "",
+    "retryFailed": "",
     "deleteAll": "모두 삭제",
     "selectVersion": "버전 선택",
     "allEpisodes": "모든 에피소드",
@@ -1842,7 +1849,8 @@
     },
     "options": "다운로드 옵션",
     "groupings": {
-      "library": "라이브러리"
+      "library": "라이브러리",
+      "collections": ""
     },
     "unknownLibrary": "알 수 없는 라이브러리",
     "unknownShow": "알 수 없는 프로그램",
@@ -1995,6 +2003,13 @@
     "rotation": "회전",
     "dvSource": "DV 소스",
     "dvPath": "DV 경로",
+    "dvRouteDecoder": "",
+    "dvRouteDecoderP81": "",
+    "dvRouteBaseLayer": "",
+    "dvRouteBaseLayerHdr10": "",
+    "dvRouteBaseLayerHlg": "",
+    "dvRouteBaseLayerSdr": "",
+    "dvRouteReshaped": "",
     "p7Conversion": "P7 변환",
     "sampleRate": "샘플 레이트",
     "pixelFormat": "픽셀 형식",
@@ -2224,6 +2239,10 @@
       "simkl": "Simkl",
       "seerr": "Seerr",
       "mdblist": "MDBList"
+    },
+    "simklReconnect": {
+      "title": "",
+      "subtitle": ""
     },
     "deviceCode": {
       "title": "${service}에서 Plezy 활성화",

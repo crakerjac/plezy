@@ -113,9 +113,19 @@ String _nextUpDateCutoff() =>
 /// queries because it is the heaviest item field Jellyfin returns.
 const _baseEpisodeRowFields = '$_baseBrowseFields,MediaSources';
 
-/// Media types global search surfaces. Episodes are included so a user can
-/// find a single episode by name.
-const _searchItemTypes = 'Movie,Series,Episode,MusicAlbum,Audio';
+/// `IncludeItemTypes` for a scoped search of one non-music library, narrowed to
+/// what its kind can hold. Emby 4.11 answers a library-scoped search of a large
+/// TV library in ~70 ms for `Series,Episode` but takes 11–12 s once
+/// `MusicAlbum,Audio` join the list (#2581). Episodes are included so a user
+/// can find a single episode by name. A library of unknown kind (mixed
+/// content, books) keeps the broad list.
+String _searchItemTypesFor(MediaKind libraryKind) => switch (libraryKind) {
+  MediaKind.movie => 'Movie',
+  MediaKind.show => 'Series,Episode',
+  // Home video and music video libraries.
+  MediaKind.clip => 'Video,MusicVideo',
+  _ => 'Movie,Series,Episode,MusicAlbum,Audio',
+};
 
 /// Title types a person's filmography lists. People search checks each
 /// candidate against the same set, so a person it returns never opens an empty
@@ -233,6 +243,14 @@ const _episodeOrderQueryParameters = {
   'SortBy': 'ParentIndexNumber,IndexNumber,SortName',
   'SortOrder': 'Ascending,Ascending,Ascending',
 };
+
+/// Hides the placeholder (virtual) episodes a server synthesises for episodes
+/// that have no file — missing and not-yet-aired alike (#2551). Recursive
+/// `/Items` queries return them unless asked not to, and they carry a fresh
+/// `DateCreated`, so they float to the top of date-sorted lists. `/Items` does
+/// not accept the `IsVirtualUnaired` key the `/Shows/{id}/Episodes` calls use;
+/// this is the filter Jellyfin Web's playback queries send.
+const _excludeVirtualItemsQuery = {'ExcludeLocationTypes': 'Virtual'};
 
 bool _isJellyfinFolderDto(Map<String, dynamic> item) {
   final type = (item['Type'] as String?)?.toLowerCase();
@@ -1248,6 +1266,7 @@ mixin _JellyfinBrowseMethods on _JellyfinClientInternals {
         'StartIndex': offset.toString(),
         'Limit': pageSize.toString(),
         'Fields': _episodeRowFields,
+        ..._excludeVirtualItemsQuery,
         ...jellyfinImageQueryParameters,
       },
       abort: abort,
@@ -1329,7 +1348,8 @@ mixin _JellyfinBrowseMethods on _JellyfinClientInternals {
     final libraries = await _searchLibraryViews(abort: abort);
     final visible = [
       for (final library in libraries)
-        if (!excludedLibraryIds.contains(library.id)) library,
+        // A photo library holds nothing search surfaces.
+        if (!excludedLibraryIds.contains(library.id) && library.kind != MediaKind.photo) library,
     ];
     if (visible.isEmpty) return const [];
 
@@ -1402,7 +1422,7 @@ mixin _JellyfinBrowseMethods on _JellyfinClientInternals {
               'SearchTerm': query,
               'Recursive': 'true',
               'Limit': limit.toString(),
-              'IncludeItemTypes': _searchItemTypes,
+              'IncludeItemTypes': _searchItemTypesFor(library.kind),
               'ParentId': library.id,
               'Fields': _browseFields,
               'EnableTotalRecordCount': 'false',
@@ -2088,6 +2108,7 @@ mixin _JellyfinBrowseMethods on _JellyfinClientInternals {
             'SortBy': 'DateCreated,SortName,ProductionYear',
             'SortOrder': 'Descending,Descending,Descending',
             'Fields': _hubRowFields,
+            ..._excludeVirtualItemsQuery,
             ...jellyfinImageQueryParameters,
           },
           offset: offset,

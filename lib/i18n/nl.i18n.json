@@ -372,6 +372,8 @@
     "dvConversionNativeDescription": "Dwing native DV7 af en voorkom een nieuwe poging met DV-conversie",
     "dvConversionDv81Description": "Dwing directe RPU-conversie naar Dolby Vision-profiel 8.1 af",
     "dvConversionHevcStripDescription": "Verwijder Dolby Vision RPU/EL-lagen en bied gewone HEVC aan",
+    "disableDolbyVision": "Dolby Vision uitschakelen",
+    "disableDolbyVisionDescription": "Speel de HDR10- of HLG-laag van het bestand af in plaats van Dolby Vision, indien aanwezig",
     "hdrSdrConversion": "HDR-naar-SDR-conversie",
     "hdrSdrConversionDescription": "Kies wat HDR-video omzet als het scherm geen HDR kan weergeven.",
     "hdrSdrConversionAuto": "Automatisch",
@@ -1766,6 +1768,9 @@
     "episodesQueued": "${count} afleveringen in wachtrij voor download",
     "downloadDeleted": "Download verwijderd",
     "deleteConfirm": "\"${title}\" van dit apparaat verwijderen?",
+    "deleteCollectionDownloads": "",
+    "deleteCollectionDownloadsConfirm": "",
+    "collectionDownloadsDeleted": "",
     "cancelledDownloadTitle": "Geannuleerde download",
     "cancelledDownloadMessage": "Deze download is geannuleerd. Wat wil je doen?",
     "allEpisodesAlreadyDownloaded": "Alle afleveringen zijn al gedownload",
@@ -1783,6 +1788,8 @@
     "noDownloadsTree": "Geen downloads",
     "pauseAll": "Alles pauzeren",
     "resumeAll": "Alles hervatten",
+    "retryAll": "",
+    "retryFailed": "",
     "deleteAll": "Alles verwijderen",
     "selectVersion": "Versie selecteren",
     "allEpisodes": "Alle afleveringen",
@@ -1853,7 +1860,8 @@
     },
     "options": "Downloadopties",
     "groupings": {
-      "library": "Bibliotheek"
+      "library": "Bibliotheek",
+      "collections": ""
     },
     "unknownLibrary": "Onbekende bibliotheek",
     "unknownShow": "Onbekende serie",
@@ -2006,6 +2014,13 @@
     "rotation": "Rotatie",
     "dvSource": "DV-bron",
     "dvPath": "DV-pad",
+    "dvRouteDecoder": "",
+    "dvRouteDecoderP81": "",
+    "dvRouteBaseLayer": "",
+    "dvRouteBaseLayerHdr10": "",
+    "dvRouteBaseLayerHlg": "",
+    "dvRouteBaseLayerSdr": "",
+    "dvRouteReshaped": "",
     "p7Conversion": "P7-conv.",
     "sampleRate": "Samplefrequentie",
     "pixelFormat": "Pixelformaat",
@@ -2235,6 +2250,10 @@
       "simkl": "Simkl",
       "seerr": "Seerr",
       "mdblist": "MDBList"
+    },
+    "simklReconnect": {
+      "title": "",
+      "subtitle": ""
     },
     "deviceCode": {
       "title": "Plezy activeren op ${service}",

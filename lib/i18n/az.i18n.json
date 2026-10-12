@@ -372,6 +372,8 @@
     "dvConversionNativeDescription": "Daxili DV7-ni məcburi et",
     "dvConversionDv81Description": "Dolby Vision profile 8.1-ə çevrilməni məcburi et",
     "dvConversionHevcStripDescription": "Dolby Vision təbəqələrini sil və sadə HEVC kimi təqdim et",
+    "disableDolbyVision": "Dolby Vision-u söndür",
+    "disableDolbyVisionDescription": "Faylda varsa, Dolby Vision əvəzinə HDR10 və ya HLG təbəqəsini oynat",
     "hdrSdrConversion": "HDR-dən SDR-ə çevirmə",
     "hdrSdrConversionDescription": "Ekran HDR göstərə bilmədikdə HDR videonu nəyin çevirəcəyini seçin.",
     "hdrSdrConversionAuto": "Avtomatik",
@@ -1766,6 +1768,9 @@
     "episodesQueued": "Yükləmə üçün ${count} seriya növbəyə alındı",
     "downloadDeleted": "Yükləmə silindi",
     "deleteConfirm": "\"${title}\" bu cihazdan silinsin?",
+    "deleteCollectionDownloads": "",
+    "deleteCollectionDownloadsConfirm": "",
+    "collectionDownloadsDeleted": "",
     "cancelledDownloadTitle": "Ləğv edilmiş yükləmə",
     "cancelledDownloadMessage": "Bu yükləmə ləğv edildi. Nə etmək istərdiniz?",
     "allEpisodesAlreadyDownloaded": "Bütün seriyalar artıq yüklənib",
@@ -1783,6 +1788,8 @@
     "noDownloadsTree": "Yükləmə yoxdur",
     "pauseAll": "Hamısını fasilə et",
     "resumeAll": "Hamısını davam etdir",
+    "retryAll": "",
+    "retryFailed": "",
     "deleteAll": "Hamısını sil",
     "selectVersion": "Versiya seç",
     "allEpisodes": "Bütün seriyalar",
@@ -1853,7 +1860,8 @@
     },
     "options": "Yükləmə seçimləri",
     "groupings": {
-      "library": "Kitabxana"
+      "library": "Kitabxana",
+      "collections": ""
     },
     "unknownLibrary": "Məlum olmayan kitabxana",
     "unknownShow": "Məlum olmayan serial",
@@ -2006,6 +2014,13 @@
     "rotation": "Dönmə",
     "dvSource": "DV mənbəyi",
     "dvPath": "DV yolu",
+    "dvRouteDecoder": "",
+    "dvRouteDecoderP81": "",
+    "dvRouteBaseLayer": "",
+    "dvRouteBaseLayerHdr10": "",
+    "dvRouteBaseLayerHlg": "",
+    "dvRouteBaseLayerSdr": "",
+    "dvRouteReshaped": "",
     "p7Conversion": "P7 çevrilməsi",
     "sampleRate": "Diskretləşdirmə tezliyi",
     "pixelFormat": "Piksel formatı",
@@ -2235,6 +2250,10 @@
       "simkl": "Simkl",
       "seerr": "Seerr",
       "mdblist": "MDBList"
+    },
+    "simklReconnect": {
+      "title": "",
+      "subtitle": ""
     },
     "deviceCode": {
       "title": "Plezy-ni ${service} üzərində aktivləşdirin",

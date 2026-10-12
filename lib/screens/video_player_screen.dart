@@ -37,6 +37,7 @@ import '../database/app_database.dart';
 import '../media/media_version.dart';
 import '../models/transcode_quality_preset.dart';
 import '../media/media_source_info.dart';
+import '../media/media_part_timeline.dart';
 import '../media/stepped_seek.dart';
 import '../mixins/mounted_set_state_mixin.dart';
 import '../mixins/listenable_bindings_mixin.dart';
@@ -397,15 +398,35 @@ class _PlaybackOpenRequest {
 class _PlaybackOpenTiming {
   final Duration? mediaStart;
   final Duration? timelineDuration;
+  final Duration timelineOffset;
 
-  const _PlaybackOpenTiming({this.mediaStart, this.timelineDuration});
+  const _PlaybackOpenTiming({this.mediaStart, this.timelineDuration, this.timelineOffset = Duration.zero});
 }
 
 _PlaybackOpenTiming _playbackOpenTiming({
   required bool isTranscoding,
   required Duration? resumePosition,
   required int? durationMs,
+  MediaPartTimeline? partTimeline,
 }) {
+  if (partTimeline != null) {
+    // One file of a stacked item: the player lays it onto the item timeline.
+    // A resume it does not hold — the file holding it is gone, or a download
+    // won with progress of its own — starts this file from its beginning.
+    final part = partTimeline.current;
+    final resumeHeld = resumePosition != null && partTimeline.covers(resumePosition);
+    if (resumePosition != null && !resumeHeld) {
+      appLogger.d(
+        'Stacked part ${partTimeline.currentIndex + 1}/${partTimeline.parts.length} does not hold '
+        'resume ${resumePosition.inMilliseconds}ms; starting at ${part.start.inMilliseconds}ms',
+      );
+    }
+    return _PlaybackOpenTiming(
+      mediaStart: resumeHeld ? resumePosition : part.start,
+      timelineDuration: partTimeline.duration,
+      timelineOffset: part.start,
+    );
+  }
   return _PlaybackOpenTiming(
     mediaStart: resumePosition,
     timelineDuration: isTranscoding && durationMs != null ? Duration(milliseconds: durationMs) : null,
@@ -842,7 +863,9 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen>
     transitionGate: _transitionGate,
     player: () => player,
     metadata: () => _currentMetadata,
+    partTimeline: () => _currentMediaInfo?.partTimeline,
     transportFaultSeen: () => _transportFaultSeen,
+    serverStoppedSession: () => _progressTracker?.stoppedByServer ?? false,
     reload: ({required Duration resumePosition, required String reason}) => _reloadMediaInPlace(
       metadata: _currentMetadata,
       resumePosition: resumePosition,
@@ -1078,8 +1101,9 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen>
   /// collapses its waiters. Superseded by every [_beginPlaybackAttempt].
   _PlaybackAttempt? _playbackAttempt;
 
-  /// How long the backend may sit on a started load without loading,
-  /// failing, or dying before the attempt gives up on it.
+  /// How long a started load may go without progress — no `file-loaded`, no
+  /// demuxer progress, no failure, no death — before the attempt gives up on
+  /// it. A slow load that keeps moving is not bounded by this (#2635).
   static const Duration _openDeadline = Duration(seconds: 30);
 
   /// Start a new playback attempt: aborts the previous attempt's open,
@@ -1108,12 +1132,13 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen>
       this,
       generation,
       currentPlayer,
-      // Bounds a backend that started the load and then went silent: longer
-      // than the sidecar guard's discovery + file-loaded budget, so it cannot
-      // pre-empt a sidecar-stall verdict. It arms from the backend's load
-      // start, so an open that never starts one is bounded by
-      // [OpenHttp503Watchdog] instead, not by this. A passed deadline is a
-      // failure the user sees, not just aborted waiters.
+      // Bounds a backend that started the load and then stopped moving:
+      // re-armed by every sign of progress, so it fires no earlier than the
+      // sidecar guard's discovery + file-loaded budget and cannot pre-empt a
+      // sidecar-stall verdict. It arms from the backend's load start, so an
+      // open that never starts one is bounded by [OpenHttp503Watchdog]
+      // instead, not by this. A passed deadline is a failure the user sees,
+      // not just aborted waiters.
       PlaybackOpenOutcome.arm(
         currentPlayer,
         deadline: _openDeadline,
@@ -1288,6 +1313,11 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen>
   /// initialization, which no widget test finishes without a live native core.
   @visibleForTesting
   Future<void> debugStartPlaybackForTesting() => _startPlayback();
+
+  /// A channel zap, awaited to its end: the transports fire it and forget,
+  /// and its display negotiation outlives the zap's own transition.
+  @visibleForTesting
+  Future<void> debugSwitchLiveChannelForTesting(int delta) => _switchLiveChannel(delta);
 
   /// Adjacency otherwise arrives from the backend's queue containers, which
   /// no widget test stands up; this seeds what [_loadAdjacentEpisodes] would
@@ -1735,6 +1765,14 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen>
             preferredSubtitleTrack: _preferredSubtitleTrack,
             sessionIdentifier: _playbackSessionIdentifier,
             transcodeSessionId: _playbackTranscodeSessionId,
+            // The same resume the open will land on (see
+            // _resolveOpenResumePosition): a stacked item opens the file
+            // holding it.
+            startPosition: resolveOpenResumePosition(
+              requested: widget.initialPosition,
+              shuffleFromBeginning: widget.initialPosition == null && _opensShuffledFromBeginning(settingsService),
+              viewOffsetMs: _currentMetadata.viewOffsetMs,
+            ),
           ),
           offlineLibraryMode: false,
           downloadOutranksQuality: _downloadOutranksQuality,
@@ -1806,6 +1844,12 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen>
       if (Platform.isAndroid && !useExoPlayer) {
         final hdrSdrConversion = settingsService.read(SettingsService.hdrSdrConversion);
         await currentPlayer.setProperty('hdr-sdr-conversion', hdrSdrConversion.nativeValue);
+      }
+      // Also before the first file: Android mpv picks the decoder per file
+      // before it opens, and tvOS asks the TV for a mode at the first frame.
+      if ((Platform.isAndroid && !useExoPlayer) || PlatformDetector.isAppleTV()) {
+        final disableDolbyVision = settingsService.read(SettingsService.disableDolbyVision);
+        await currentPlayer.setProperty('dolby-vision-output', disableDolbyVision ? 'no' : 'yes');
       }
       if (Platform.isIOS || Platform.isMacOS) {
         await currentPlayer.setProperty('dv-conversion-log', debugLoggingEnabled ? 'yes' : 'no');

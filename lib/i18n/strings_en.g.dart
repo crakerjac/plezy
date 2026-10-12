@@ -1155,6 +1155,12 @@ class Translations$settings$en {
 	/// en: 'Strip Dolby Vision RPU/EL layers and present plain HEVC'
 	String get dvConversionHevcStripDescription => 'Strip Dolby Vision RPU/EL layers and present plain HEVC';
 
+	/// en: 'Disable Dolby Vision'
+	String get disableDolbyVision => 'Disable Dolby Vision';
+
+	/// en: 'Play the file's HDR10 or HLG layer instead of Dolby Vision, when it has one'
+	String get disableDolbyVisionDescription => 'Play the file\'s HDR10 or HLG layer instead of Dolby Vision, when it has one';
+
 	/// en: 'HDR to SDR Conversion'
 	String get hdrSdrConversion => 'HDR to SDR Conversion';
 
@@ -4439,6 +4445,15 @@ class Translations$downloads$en {
 	/// en: 'Delete "${title}" from this device?'
 	String deleteConfirm({required Object title}) => 'Delete "${title}" from this device?';
 
+	/// en: 'Delete downloads'
+	String get deleteCollectionDownloads => 'Delete downloads';
+
+	/// en: 'Delete every download in "${title}" from this device?'
+	String deleteCollectionDownloadsConfirm({required Object title}) => 'Delete every download in "${title}" from this device?';
+
+	/// en: 'Downloads deleted'
+	String get collectionDownloadsDeleted => 'Downloads deleted';
+
 	/// en: 'Canceled Download'
 	String get cancelledDownloadTitle => 'Canceled Download';
 
@@ -4489,6 +4504,12 @@ class Translations$downloads$en {
 
 	/// en: 'Resume all'
 	String get resumeAll => 'Resume all';
+
+	/// en: 'Retry all'
+	String get retryAll => 'Retry all';
+
+	/// en: 'Retry failed downloads'
+	String get retryFailed => 'Retry failed downloads';
 
 	/// en: 'Delete all'
 	String get deleteAll => 'Delete all';
@@ -4876,6 +4897,27 @@ class Translations$performanceOverlay$en {
 
 	/// en: 'DV Path'
 	String get dvPath => 'DV Path';
+
+	/// en: 'Dolby Vision decoder'
+	String get dvRouteDecoder => 'Dolby Vision decoder';
+
+	/// en: 'Dolby Vision decoder (P7→8.1)'
+	String get dvRouteDecoderP81 => 'Dolby Vision decoder (P7→8.1)';
+
+	/// en: 'Base layer'
+	String get dvRouteBaseLayer => 'Base layer';
+
+	/// en: 'HDR10 base layer'
+	String get dvRouteBaseLayerHdr10 => 'HDR10 base layer';
+
+	/// en: 'HLG base layer'
+	String get dvRouteBaseLayerHlg => 'HLG base layer';
+
+	/// en: 'SDR base layer'
+	String get dvRouteBaseLayerSdr => 'SDR base layer';
+
+	/// en: 'RPU reshaped (gpu-next)'
+	String get dvRouteReshaped => 'RPU reshaped (gpu-next)';
 
 	/// en: 'P7 Conv'
 	String get p7Conversion => 'P7 Conv';
@@ -5568,6 +5610,7 @@ class Translations$services$en {
 	String connectFailed({required Object service}) => 'Couldn\'t connect to ${service}. Try again.';
 
 	late final Translations$services$names$en names = Translations$services$names$en.internal(_root);
+	late final Translations$services$simklReconnect$en simklReconnect = Translations$services$simklReconnect$en.internal(_root);
 	late final Translations$services$deviceCode$en deviceCode = Translations$services$deviceCode$en.internal(_root);
 	late final Translations$services$oauthProxy$en oauthProxy = Translations$services$oauthProxy$en.internal(_root);
 	late final Translations$services$pendingAuth$en pendingAuth = Translations$services$pendingAuth$en.internal(_root);
@@ -6955,6 +6998,9 @@ class Translations$downloads$groupings$en {
 
 	/// en: 'Library'
 	String get library => 'Library';
+
+	/// en: 'Collections'
+	String get collections => 'Collections';
 }
 
 // Path: companionRemote.session
@@ -7201,6 +7247,21 @@ class Translations$services$names$en {
 
 	/// en: 'MDBList'
 	String get mdblist => 'MDBList';
+}
+
+// Path: services.simklReconnect
+class Translations$services$simklReconnect$en {
+	Translations$services$simklReconnect$en.internal(this._root);
+
+	final Translations _root; // ignore: unused_field
+
+	// Translations
+
+	/// en: 'Reconnect Simkl'
+	String get title => 'Reconnect Simkl';
+
+	/// en: 'Simkl is retiring the sign-in method this connection uses. Reconnecting opens simkl.com to approve Plezy — Plezy never sees your password. Your watch history stays on Simkl.'
+	String get subtitle => 'Simkl is retiring the sign-in method this connection uses. Reconnecting opens simkl.com to approve Plezy — Plezy never sees your password. Your watch history stays on Simkl.';
 }
 
 // Path: services.deviceCode
@@ -7674,6 +7735,8 @@ extension on Translations {
 			'settings.dvConversionNativeDescription' => 'Force native DV7 and suppress DV conversion retry',
 			'settings.dvConversionDv81Description' => 'Force inline RPU conversion to Dolby Vision profile 8.1',
 			'settings.dvConversionHevcStripDescription' => 'Strip Dolby Vision RPU/EL layers and present plain HEVC',
+			'settings.disableDolbyVision' => 'Disable Dolby Vision',
+			'settings.disableDolbyVisionDescription' => 'Play the file\'s HDR10 or HLG layer instead of Dolby Vision, when it has one',
 			'settings.hdrSdrConversion' => 'HDR to SDR Conversion',
 			'settings.hdrSdrConversionDescription' => 'Choose what converts HDR video when the display can\'t show HDR.',
 			'settings.hdrSdrConversionAuto' => 'Auto',
@@ -7826,10 +7889,10 @@ extension on Translations {
 			'fileInfo.dolbyVision' => 'Dolby Vision',
 			'fileInfo.dolbyVisionLevel' => 'Dolby Vision Level',
 			'fileInfo.dolbyVisionVersion' => 'Dolby Vision Version',
-			'fileInfo.dolbyVisionLayers' => 'Dolby Vision Layers',
-			'fileInfo.baseLayerCompatibility' => 'Base Layer Compatibility',
 			_ => null,
 		} ?? switch (path) {
+			'fileInfo.dolbyVisionLayers' => 'Dolby Vision Layers',
+			'fileInfo.baseLayerCompatibility' => 'Base Layer Compatibility',
 			'fileInfo.avcBitstream' => 'AVC Bitstream',
 			'fileInfo.nalLengthSize' => 'NAL Length Size',
 			'fileInfo.scalingMatrix' => 'Custom Scaling Matrix',
@@ -8340,10 +8403,10 @@ extension on Translations {
 			'errors.reasonUnreachable' => 'the server could not be reached',
 			'errors.reasonRefused' => 'the server refused the request',
 			'errors.reasonNotFound' => 'the item is no longer on the server',
-			'errors.reasonServerError' => 'the server reported an error',
-			'errors.reasonCancelled' => 'the request was cancelled',
 			_ => null,
 		} ?? switch (path) {
+			'errors.reasonServerError' => 'the server reported an error',
+			'errors.reasonCancelled' => 'the request was cancelled',
 			'errors.reasonUnexpected' => 'an unexpected error occurred',
 			'libraries.title' => 'Libraries',
 			'libraries.fallbackTitle' => 'Library',
@@ -8854,10 +8917,10 @@ extension on Translations {
 			'watchTogether.hostTransferFailed' => ({required Object name}) => 'Couldn\'t make ${name} the host',
 			'watchTogether.watchingWithOthers' => 'Watching with others',
 			'watchTogether.endSession' => 'End Session',
-			'watchTogether.leaveSession' => 'Leave Session',
-			'watchTogether.endSessionQuestion' => 'End Session?',
 			_ => null,
 		} ?? switch (path) {
+			'watchTogether.leaveSession' => 'Leave Session',
+			'watchTogether.endSessionQuestion' => 'End Session?',
 			'watchTogether.leaveSessionQuestion' => 'Leave Session?',
 			'watchTogether.endSessionConfirm' => 'This will end the session for all participants.',
 			'watchTogether.leaveSessionConfirm' => 'You will be removed from the session.',
@@ -8922,6 +8985,9 @@ extension on Translations {
 			'downloads.episodesQueued' => ({required Object count}) => '${count} episodes queued for download',
 			'downloads.downloadDeleted' => 'Download deleted',
 			'downloads.deleteConfirm' => ({required Object title}) => 'Delete "${title}" from this device?',
+			'downloads.deleteCollectionDownloads' => 'Delete downloads',
+			'downloads.deleteCollectionDownloadsConfirm' => ({required Object title}) => 'Delete every download in "${title}" from this device?',
+			'downloads.collectionDownloadsDeleted' => 'Downloads deleted',
 			'downloads.cancelledDownloadTitle' => 'Canceled Download',
 			'downloads.cancelledDownloadMessage' => 'This download was canceled. What would you like to do?',
 			'downloads.allEpisodesAlreadyDownloaded' => 'All episodes already downloaded',
@@ -8939,6 +9005,8 @@ extension on Translations {
 			'downloads.noDownloadsTree' => 'No downloads',
 			'downloads.pauseAll' => 'Pause all',
 			'downloads.resumeAll' => 'Resume all',
+			'downloads.retryAll' => 'Retry all',
+			'downloads.retryFailed' => 'Retry failed downloads',
 			'downloads.deleteAll' => 'Delete all',
 			'downloads.selectVersion' => 'Select Version',
 			'downloads.allEpisodes' => 'All episodes',
@@ -9007,6 +9075,7 @@ extension on Translations {
 			'downloads.backgroundWarning.linkUnavailable' => 'Couldn\'t open dontkillmyapp.com on this device',
 			'downloads.options' => 'Downloads options',
 			'downloads.groupings.library' => 'Library',
+			'downloads.groupings.collections' => 'Collections',
 			'downloads.unknownLibrary' => 'Unknown library',
 			'downloads.unknownShow' => 'Unknown Show',
 			'downloads.unknownSeason' => 'Unknown Season',
@@ -9142,6 +9211,13 @@ extension on Translations {
 			'performanceOverlay.rotation' => 'Rotation',
 			'performanceOverlay.dvSource' => 'DV Source',
 			'performanceOverlay.dvPath' => 'DV Path',
+			'performanceOverlay.dvRouteDecoder' => 'Dolby Vision decoder',
+			'performanceOverlay.dvRouteDecoderP81' => 'Dolby Vision decoder (P7→8.1)',
+			'performanceOverlay.dvRouteBaseLayer' => 'Base layer',
+			'performanceOverlay.dvRouteBaseLayerHdr10' => 'HDR10 base layer',
+			'performanceOverlay.dvRouteBaseLayerHlg' => 'HLG base layer',
+			'performanceOverlay.dvRouteBaseLayerSdr' => 'SDR base layer',
+			'performanceOverlay.dvRouteReshaped' => 'RPU reshaped (gpu-next)',
 			'performanceOverlay.p7Conversion' => 'P7 Conv',
 			'performanceOverlay.sampleRate' => 'Sample Rate',
 			'performanceOverlay.pixelFormat' => 'Pixel Fmt',
@@ -9355,7 +9431,11 @@ extension on Translations {
 			'services.names.anilist' => 'AniList',
 			'services.names.simkl' => 'Simkl',
 			'services.names.seerr' => 'Seerr',
+			_ => null,
+		} ?? switch (path) {
 			'services.names.mdblist' => 'MDBList',
+			'services.simklReconnect.title' => 'Reconnect Simkl',
+			'services.simklReconnect.subtitle' => 'Simkl is retiring the sign-in method this connection uses. Reconnecting opens simkl.com to approve Plezy — Plezy never sees your password. Your watch history stays on Simkl.',
 			'services.deviceCode.title' => ({required Object service}) => 'Activate Plezy on ${service}',
 			'services.deviceCode.instructions' => 'Scan the QR code, or visit the address below and enter this code:',
 			'services.deviceCode.openToActivate' => ({required Object service}) => 'Open ${service} to activate',
@@ -9370,8 +9450,6 @@ extension on Translations {
 			'services.libraryFilter.title' => 'Library filter',
 			'services.libraryFilter.subtitleAllSyncing' => 'Syncing all libraries',
 			'services.libraryFilter.subtitleNoneSyncing' => 'Nothing syncing',
-			_ => null,
-		} ?? switch (path) {
 			'services.libraryFilter.subtitleBlocked' => ({required Object count}) => '${count} blocked',
 			'services.libraryFilter.subtitleAllowed' => ({required Object count}) => '${count} allowed',
 			'services.libraryFilter.mode' => 'Filter mode',

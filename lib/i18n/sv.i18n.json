@@ -372,6 +372,8 @@
     "dvConversionNativeDescription": "Tvinga inbyggd DV7 och förhindra nya försök med DV-konvertering",
     "dvConversionDv81Description": "Tvinga direkt RPU-konvertering till Dolby Vision-profil 8.1",
     "dvConversionHevcStripDescription": "Ta bort Dolby Visions RPU-/EL-lager och använd vanlig HEVC",
+    "disableDolbyVision": "Inaktivera Dolby Vision",
+    "disableDolbyVisionDescription": "Spela upp filens HDR10- eller HLG-lager i stället för Dolby Vision när det finns",
     "hdrSdrConversion": "HDR till SDR-konvertering",
     "hdrSdrConversionDescription": "Välj vad som konverterar HDR-video när skärmen inte kan visa HDR.",
     "hdrSdrConversionAuto": "Auto",
@@ -1766,6 +1768,9 @@
     "episodesQueued": "${count} avsnitt köade för nedladdning",
     "downloadDeleted": "Nedladdning borttagen",
     "deleteConfirm": "Ta bort \"${title}\" från den här enheten?",
+    "deleteCollectionDownloads": "",
+    "deleteCollectionDownloadsConfirm": "",
+    "collectionDownloadsDeleted": "",
     "cancelledDownloadTitle": "Avbruten nedladdning",
     "cancelledDownloadMessage": "Den här nedladdningen avbröts. Vad vill du göra?",
     "allEpisodesAlreadyDownloaded": "Alla avsnitt är redan nedladdade",
@@ -1783,6 +1788,8 @@
     "noDownloadsTree": "Inga nedladdningar",
     "pauseAll": "Pausa alla",
     "resumeAll": "Återuppta alla",
+    "retryAll": "",
+    "retryFailed": "",
     "deleteAll": "Ta bort alla",
     "selectVersion": "Välj version",
     "allEpisodes": "Alla avsnitt",
@@ -1853,7 +1860,8 @@
     },
     "options": "Alternativ för nedladdningar",
     "groupings": {
-      "library": "Bibliotek"
+      "library": "Bibliotek",
+      "collections": ""
     },
     "unknownLibrary": "Okänt bibliotek",
     "unknownShow": "Okänd serie",
@@ -2006,6 +2014,13 @@
     "rotation": "Rotation",
     "dvSource": "DV-källa",
     "dvPath": "DV-sökväg",
+    "dvRouteDecoder": "",
+    "dvRouteDecoderP81": "",
+    "dvRouteBaseLayer": "",
+    "dvRouteBaseLayerHdr10": "",
+    "dvRouteBaseLayerHlg": "",
+    "dvRouteBaseLayerSdr": "",
+    "dvRouteReshaped": "",
     "p7Conversion": "P7-konv.",
     "sampleRate": "Samplingsfrekvens",
     "pixelFormat": "Pixelformat",
@@ -2235,6 +2250,10 @@
       "simkl": "Simkl",
       "seerr": "Seerr",
       "mdblist": "MDBList"
+    },
+    "simklReconnect": {
+      "title": "",
+      "subtitle": ""
     },
     "deviceCode": {
       "title": "Aktivera Plezy på ${service}",
