@@ -2264,7 +2264,7 @@ class DownloadProvider extends ChangeNotifier with DisposableChangeNotifierMixin
 
   /// Refresh the downloads list from database and hydrate missing artwork
   Future<void> refresh({MediaServerClient? Function(String serverId)? clientResolver}) async {
-    // 1. Load the physical downloads into memory FIRST so we know what was imported
+    // 1. Load the physical downloads into memory FIRST
     await _loadPersistedDownloads();
 
     if (clientResolver == null) return;
@@ -2272,7 +2272,6 @@ class DownloadProvider extends ChangeNotifier with DisposableChangeNotifierMixin
     final ownership = _captureQueueOwnership();
     final context = _RelatedMetadataDownloadContext();
 
-    // 2. Loop over the metadata to fetch artwork and parent data for the imported items
     for (final entry in _metadata.entries) {
       if (!_ownsDownloadKey(entry.key)) continue;
 
@@ -2283,30 +2282,40 @@ class DownloadProvider extends ChangeNotifier with DisposableChangeNotifierMixin
       final client = clientResolver(serverIdStr);
       if (client == null) continue;
 
-      // Download the item's own artwork (e.g., Movie heroart, Episode thumb)
-      if (context.ensuredArtworkKeys.add(entry.key)) {
+      final serverId = ServerId(serverIdStr);
+
+      // 2. Skip item artwork if it already exists locally on disk
+      final hasLocalArt = getArtworkLocalPath(serverId, meta.thumbPath) != null;
+      if (!hasLocalArt && context.ensuredArtworkKeys.add(entry.key)) {
         await _downloadManager.downloadArtworkForMetadata(meta, client);
       }
 
-      // For episodes/tracks, fetch the Show/Season or Artist/Album heroart
+      // 3. Skip parent fetches if their metadata is already in our local memory dictionary
       if (meta.isEpisode || meta.kind == MediaKind.track) {
         if (meta.grandparentId != null) {
-          await _fetchAndStoreRelatedMetadata(
-            serverId: ServerId(serverIdStr),
-            ratingKey: meta.grandparentId,
-            client: client,
-            ownership: ownership,
-            context: context,
-          );
+          final grandparentKey = buildGlobalKey(serverId, meta.grandparentId!);
+          if (!_metadata.containsKey(grandparentKey)) {
+            await _fetchAndStoreRelatedMetadata(
+              serverId: serverId,
+              ratingKey: meta.grandparentId,
+              client: client,
+              ownership: ownership,
+              context: context,
+            );
+          }
         }
+        
         if (meta.parentId != null) {
-          await _fetchAndStoreRelatedMetadata(
-            serverId: ServerId(serverIdStr),
-            ratingKey: meta.parentId,
-            client: client,
-            ownership: ownership,
-            context: context,
-          );
+          final parentKey = buildGlobalKey(serverId, meta.parentId!);
+          if (!_metadata.containsKey(parentKey)) {
+            await _fetchAndStoreRelatedMetadata(
+              serverId: serverId,
+              ratingKey: meta.parentId,
+              client: client,
+              ownership: ownership,
+              context: context,
+            );
+          }
         }
       }
 
