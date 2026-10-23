@@ -345,7 +345,6 @@ class _Translations$settings$ru extends Translations$settings$en {
 	@override String get videoPlayerNavigation => 'Навигация видеоплеера';
 	@override String get videoPlayerNavigationDescription => 'Использовать клавиши стрелок для навигации по элементам управления плеером';
 	@override String get watchTogetherRelay => 'Сервер ретрансляции для совместного просмотра';
-	@override String get watchTogetherRelayDescription => 'Задайте свой сервер ретрансляции. Все участники должны использовать один сервер.';
 	@override String get watchTogetherRelayHint => 'https://my-relay.example.com';
 	@override String get watchTogetherRelayInvalid => 'Введите допустимый базовый HTTP- или HTTPS-адрес сервера ретрансляции.';
 	@override String get crashReporting => 'Отчёты об ошибках';
@@ -454,7 +453,7 @@ class _Translations$settings$ru extends Translations$settings$en {
 	@override String get tunneledPlaybackDescription => 'Использовать видеотуннелирование. Отключите, если при воспроизведении HDR отображается чёрный экран или движение прерывается.';
 	@override String get audioPassthrough => 'Сквозной вывод аудио';
 	@override String get audioPassthroughDescription => 'Передавать звук Dolby/DTS на ресивер или телевизор без перекодирования, сохраняя объёмный звук. Отключите, если нет звука.';
-	@override String get audioPassthroughDescriptionAppleTv => 'Использовать встроенный декодер Dolby от Apple для Dolby Digital Plus, включая Atmos. DTS и TrueHD по-прежнему воспроизводятся как многоканальный PCM. Отключите, если звук отсутствует.';
+	@override String get audioPassthroughDescriptionApple => 'Использовать встроенный декодер Dolby от Apple для Dolby Digital Plus, включая Atmos. DTS и TrueHD по-прежнему воспроизводятся как многоканальный PCM. Отключите, если звук отсутствует.';
 	@override String get audioPassthroughOverriddenByNormalization => 'Отключено при включённой нормализации громкости';
 	@override String get downmixCenterBoost => 'Усиление центрального канала';
 	@override String downmixCenterBoostValue({required Object db}) => '${db} дБ';
@@ -1710,79 +1709,24 @@ class _Translations$watchTogether$ru extends Translations$watchTogether$en {
 	// Translations
 	@override String get title => 'Смотреть вместе';
 	@override String get description => 'Смотрите контент синхронно с друзьями и семьёй';
-	@override String get createSession => 'Создать сессию';
-	@override String get creating => 'Создание...';
-	@override String get joinSession => 'Присоединиться к сессии';
-	@override String get joining => 'Подключение...';
-	@override String get controlMode => 'Режим управления';
-	@override String get controlModeQuestion => 'Кто может управлять воспроизведением?';
-	@override String get hostOnly => 'Только организатор';
-	@override String get anyone => 'Все';
-	@override String get hostingSession => 'Вы организатор';
-	@override String get inSession => 'В сессии';
-	@override String get sessionCode => 'Код сессии';
+	@override String get recentRooms => 'Недавние комнаты';
+	@override String get renameRoom => 'Переименовать комнату';
+	@override String get removeRoom => 'Удалить';
 	@override String get openSessionControls => 'Открыть управление сессией «Смотреть вместе»';
-	@override String get copySessionCode => 'Скопировать код сессии';
+	@override String get youAreHost => 'Вы — организатор';
 	@override String get hostControlsPlayback => 'Организатор управляет воспроизведением';
 	@override String get anyoneCanControl => 'Любой может управлять воспроизведением';
-	@override String get hostControls => 'Управляет организатор';
-	@override String get anyoneControls => 'Управляют все';
+	@override String get joinCurrentPlayback => 'Присоединиться к текущему воспроизведению';
+	@override String get joinCurrentPlaybackDescription => 'Вернуться к материалу, который сейчас смотрит организатор';
 	@override String get participants => 'Участники';
-	@override String get host => 'Организатор';
 	@override String get hostBadge => 'ОРГАНИЗАТОР';
-	@override String get youAreHost => 'Вы — организатор';
 	@override String get makeHost => 'Назначить организатором';
 	@override String get makeHostQuestion => 'Передать роль организатора?';
 	@override String makeHostConfirm({required Object name}) => '${name} будет управлять воспроизведением и вести сессию для всех.';
 	@override String get transfer => 'Передать';
-	@override String hostChangedTo({required Object name}) => '${name} теперь организатор';
-	@override String get youAreNowHost => 'Теперь вы — организатор';
-	@override String hostTransferFailed({required Object name}) => 'Не удалось назначить ${name} организатором';
-	@override String get watchingWithOthers => 'Совместный просмотр';
-	@override String get endSession => 'Завершить сессию';
-	@override String get leaveSession => 'Покинуть сессию';
-	@override String get endSessionQuestion => 'Завершить сессию?';
-	@override String get leaveSessionQuestion => 'Покинуть сессию?';
-	@override String get endSessionConfirm => 'Это завершит сессию для всех участников.';
-	@override String get leaveSessionConfirm => 'Вы будете удалены из сессии.';
-	@override String get endSessionConfirmOverlay => 'Это завершит сеанс просмотра для всех участников.';
-	@override String get leaveSessionConfirmOverlay => 'Вы будете отключены от сеанса просмотра.';
-	@override String get end => 'Завершить';
 	@override String get leave => 'Покинуть';
-	@override String get syncing => 'Синхронизация...';
-	@override String get joinWatchSession => 'Присоединиться к просмотру';
-	@override String get enterCodeHint => 'Введите 5-символьный код';
-	@override String get pasteFromClipboard => 'Вставить из буфера обмена';
-	@override String get pleaseEnterCode => 'Введите код сессии';
-	@override String get codeMustBe5Chars => 'Код сессии должен содержать 5 символов';
-	@override String get joinInstructions => 'Введите код сессии организатора, чтобы присоединиться.';
-	@override String get failedToCreate => 'Не удалось создать сессию';
-	@override String get failedToJoin => 'Не удалось присоединиться к сессии';
-	@override String get sessionCodeCopied => 'Код сессии скопирован в буфер обмена';
-	@override String get relayUnreachable => 'Сервер ретрансляции недоступен. Блокировка интернет-провайдером может помешать совместному просмотру.';
-	@override String get reconnectingToHost => 'Повторное подключение к организатору...';
-	@override String get currentPlayback => 'Текущее воспроизведение';
-	@override String get joinCurrentPlayback => 'Присоединиться к текущему воспроизведению';
-	@override String get joinCurrentPlaybackDescription => 'Вернуться к материалу, который сейчас смотрит организатор';
-	@override String get failedToOpenCurrentPlayback => 'Не удалось открыть текущее воспроизведение';
-	@override String participantJoined({required Object name}) => '${name} присоединился';
-	@override String participantLeft({required Object name}) => '${name} вышел';
-	@override String participantPaused({required Object name}) => '${name} поставил на паузу';
-	@override String participantResumed({required Object name}) => '${name} возобновил';
-	@override String participantSeeked({required Object name}) => '${name} перемотал';
-	@override String participantChangedSpeed({required Object name, required Object speed}) => '${name} установил скорость ${speed}';
-	@override String participantBuffering({required Object name}) => 'У ${name} идёт буферизация';
-	@override String participantNeedsUpdate({required Object name}) => '${name} использует старую версию приложения — синхронизация недоступна';
-	@override String resumingWithout({required Object name}) => 'Возобновление без ${name}';
-	@override String get waitingForParticipants => 'Ожидание загрузки у других...';
-	@override String waitingForName({required Object name}) => 'Ожидание ${name}...';
-	@override String get recentRooms => 'Недавние комнаты';
-	@override String get renameRoom => 'Переименовать комнату';
-	@override String get removeRoom => 'Удалить';
-	@override String get guestSwitchUnavailable => 'Не удалось переключиться — сервер недоступен для синхронизации';
-	@override String get guestSwitchFailed => 'Не удалось переключиться — содержимое не найдено на этом сервере';
-	@override String get defaultDisplayName => 'Пользователь';
-	@override late final _Translations$watchTogether$errors$ru errors = _Translations$watchTogether$errors$ru._(_root);
+	@override String get end => 'Завершить';
+	@override late final _Translations$watchTogether$notices$ru notices = _Translations$watchTogether$notices$ru._(_root);
 }
 
 // Path: downloads
@@ -1962,7 +1906,6 @@ class _Translations$videoSettings$ru extends Translations$videoSettings$en {
 	@override String get audioOutputStereo => 'Стерео';
 	@override String get audioNormalization => 'Нормализация громкости';
 	@override String get audioNormalizationDisablesPassthrough => 'Декодирует аудио в PCM; сквозной вывод отключён, пока эта опция включена';
-	@override String get audioNormalizationStereoMix => 'Декодирует аудио в стереомикс; сквозной вывод отключён, пока эта опция включена';
 }
 
 // Path: performanceOverlay
@@ -2337,6 +2280,8 @@ class _Translations$common$ratingSource$ru extends Translations$common$ratingSou
 	@override String get trakt => 'Trakt';
 	@override String get rottenTomatoesCritic => 'Критики Rotten Tomatoes';
 	@override String get rottenTomatoesAudience => 'Зрители Rotten Tomatoes';
+	@override String get metacritic => 'Metacritic';
+	@override String get letterboxd => 'Letterboxd';
 }
 
 // Path: common.mediaKind
@@ -2822,18 +2767,20 @@ class _Translations$music$discography$ru extends Translations$music$discography$
 	@override String get compilations => 'Сборники';
 }
 
-// Path: watchTogether.errors
-class _Translations$watchTogether$errors$ru extends Translations$watchTogether$errors$en {
-	_Translations$watchTogether$errors$ru._(TranslationsRu root) : this._root = root, super.internal(root);
+// Path: watchTogether.notices
+class _Translations$watchTogether$notices$ru extends Translations$watchTogether$notices$en {
+	_Translations$watchTogether$notices$ru._(TranslationsRu root) : this._root = root, super.internal(root);
 
 	final TranslationsRu _root; // ignore: unused_field
 
 	// Translations
-	@override String get timedOut => 'Сервер ретрансляции не ответил вовремя';
-	@override String get connectionLost => 'Соединение закрылось до того, как сессия была готова';
-	@override String get invalidRelayResponse => 'Сервер ретрансляции прислал неожиданный ответ';
-	@override String get sessionEnded => 'Организатор завершил сессию';
-	@override String get sessionUnavailable => 'Не удалось возобновить эту сессию. Присоединитесь к комнате или создайте её, чтобы продолжить.';
+	@override String paused({required Object name}) => '${name} поставил на паузу';
+	@override String changedSpeed({required Object name, required Object speed}) => '${name} установил скорость ${speed}';
+	@override String waitingFor({required Object name}) => 'Ожидание ${name}...';
+	@override String hostChangedTo({required Object name}) => '${name} теперь организатор';
+	@override String get youAreNowHost => 'Теперь вы — организатор';
+	@override String joined({required Object name}) => '${name} присоединился';
+	@override String left({required Object name}) => '${name} вышел';
 }
 
 // Path: downloads.backgroundWarning
@@ -3135,6 +3082,8 @@ extension on TranslationsRu {
 			'common.ratingSource.trakt' => 'Trakt',
 			'common.ratingSource.rottenTomatoesCritic' => 'Критики Rotten Tomatoes',
 			'common.ratingSource.rottenTomatoesAudience' => 'Зрители Rotten Tomatoes',
+			'common.ratingSource.metacritic' => 'Metacritic',
+			'common.ratingSource.letterboxd' => 'Letterboxd',
 			'common.notAvailable' => 'Н/Д',
 			'common.url' => 'URL',
 			'common.letterKeys' => 'АБВ',
@@ -3282,7 +3231,6 @@ extension on TranslationsRu {
 			'settings.videoPlayerNavigation' => 'Навигация видеоплеера',
 			'settings.videoPlayerNavigationDescription' => 'Использовать клавиши стрелок для навигации по элементам управления плеером',
 			'settings.watchTogetherRelay' => 'Сервер ретрансляции для совместного просмотра',
-			'settings.watchTogetherRelayDescription' => 'Задайте свой сервер ретрансляции. Все участники должны использовать один сервер.',
 			'settings.watchTogetherRelayHint' => 'https://my-relay.example.com',
 			'settings.watchTogetherRelayInvalid' => 'Введите допустимый базовый HTTP- или HTTPS-адрес сервера ретрансляции.',
 			'settings.crashReporting' => 'Отчёты об ошибках',
@@ -3391,7 +3339,7 @@ extension on TranslationsRu {
 			'settings.tunneledPlaybackDescription' => 'Использовать видеотуннелирование. Отключите, если при воспроизведении HDR отображается чёрный экран или движение прерывается.',
 			'settings.audioPassthrough' => 'Сквозной вывод аудио',
 			'settings.audioPassthroughDescription' => 'Передавать звук Dolby/DTS на ресивер или телевизор без перекодирования, сохраняя объёмный звук. Отключите, если нет звука.',
-			'settings.audioPassthroughDescriptionAppleTv' => 'Использовать встроенный декодер Dolby от Apple для Dolby Digital Plus, включая Atmos. DTS и TrueHD по-прежнему воспроизводятся как многоканальный PCM. Отключите, если звук отсутствует.',
+			'settings.audioPassthroughDescriptionApple' => 'Использовать встроенный декодер Dolby от Apple для Dolby Digital Plus, включая Atmos. DTS и TrueHD по-прежнему воспроизводятся как многоканальный PCM. Отключите, если звук отсутствует.',
 			'settings.audioPassthroughOverriddenByNormalization' => 'Отключено при включённой нормализации громкости',
 			'settings.downmixCenterBoost' => 'Усиление центрального канала',
 			'settings.downmixCenterBoostValue' => ({required Object db}) => '${db} дБ',
@@ -3571,9 +3519,9 @@ extension on TranslationsRu {
 			'fileInfo.streamIndex' => 'Индекс потока',
 			'fileInfo.streamId' => 'ID потока',
 			'fileInfo.language' => 'Язык',
-			'fileInfo.languageCode' => 'Код языка',
 			_ => null,
 		} ?? switch (path) {
+			'fileInfo.languageCode' => 'Код языка',
 			'fileInfo.streamTitle' => 'Название дорожки',
 			'fileInfo.channels' => 'Каналы',
 			'fileInfo.sampleRate' => 'Частота дискретизации',
@@ -4085,9 +4033,9 @@ extension on TranslationsRu {
 			'libraries.analyzeLibrary' => 'Анализировать библиотеку',
 			'libraries.refreshMetadata' => 'Обновить метаданные',
 			'libraries.emptyTrash' => 'Очистить корзину',
-			'libraries.emptyingTrash' => ({required Object title}) => 'Очистка корзины для "${title}"...',
 			_ => null,
 		} ?? switch (path) {
+			'libraries.emptyingTrash' => ({required Object title}) => 'Очистка корзины для "${title}"...',
 			'libraries.trashEmptied' => ({required Object title}) => 'Корзина очищена для "${title}"',
 			'libraries.failedToEmptyTrash' => ({required Object error}) => 'Не удалось очистить корзину: ${error}',
 			'libraries.analyzing' => ({required Object title}) => 'Анализ "${title}"...',
@@ -4530,85 +4478,30 @@ extension on TranslationsRu {
 			'music.discography.compilations' => 'Сборники',
 			'watchTogether.title' => 'Смотреть вместе',
 			'watchTogether.description' => 'Смотрите контент синхронно с друзьями и семьёй',
-			'watchTogether.createSession' => 'Создать сессию',
-			'watchTogether.creating' => 'Создание...',
-			'watchTogether.joinSession' => 'Присоединиться к сессии',
-			'watchTogether.joining' => 'Подключение...',
-			'watchTogether.controlMode' => 'Режим управления',
-			'watchTogether.controlModeQuestion' => 'Кто может управлять воспроизведением?',
-			'watchTogether.hostOnly' => 'Только организатор',
-			'watchTogether.anyone' => 'Все',
-			'watchTogether.hostingSession' => 'Вы организатор',
-			'watchTogether.inSession' => 'В сессии',
-			'watchTogether.sessionCode' => 'Код сессии',
+			'watchTogether.recentRooms' => 'Недавние комнаты',
+			'watchTogether.renameRoom' => 'Переименовать комнату',
+			'watchTogether.removeRoom' => 'Удалить',
 			'watchTogether.openSessionControls' => 'Открыть управление сессией «Смотреть вместе»',
-			'watchTogether.copySessionCode' => 'Скопировать код сессии',
+			'watchTogether.youAreHost' => 'Вы — организатор',
 			'watchTogether.hostControlsPlayback' => 'Организатор управляет воспроизведением',
 			'watchTogether.anyoneCanControl' => 'Любой может управлять воспроизведением',
-			'watchTogether.hostControls' => 'Управляет организатор',
-			'watchTogether.anyoneControls' => 'Управляют все',
+			'watchTogether.joinCurrentPlayback' => 'Присоединиться к текущему воспроизведению',
+			'watchTogether.joinCurrentPlaybackDescription' => 'Вернуться к материалу, который сейчас смотрит организатор',
 			'watchTogether.participants' => 'Участники',
-			'watchTogether.host' => 'Организатор',
 			'watchTogether.hostBadge' => 'ОРГАНИЗАТОР',
-			'watchTogether.youAreHost' => 'Вы — организатор',
 			'watchTogether.makeHost' => 'Назначить организатором',
 			'watchTogether.makeHostQuestion' => 'Передать роль организатора?',
 			'watchTogether.makeHostConfirm' => ({required Object name}) => '${name} будет управлять воспроизведением и вести сессию для всех.',
 			'watchTogether.transfer' => 'Передать',
-			'watchTogether.hostChangedTo' => ({required Object name}) => '${name} теперь организатор',
-			'watchTogether.youAreNowHost' => 'Теперь вы — организатор',
-			'watchTogether.hostTransferFailed' => ({required Object name}) => 'Не удалось назначить ${name} организатором',
-			'watchTogether.watchingWithOthers' => 'Совместный просмотр',
-			'watchTogether.endSession' => 'Завершить сессию',
-			'watchTogether.leaveSession' => 'Покинуть сессию',
-			'watchTogether.endSessionQuestion' => 'Завершить сессию?',
-			'watchTogether.leaveSessionQuestion' => 'Покинуть сессию?',
-			'watchTogether.endSessionConfirm' => 'Это завершит сессию для всех участников.',
-			'watchTogether.leaveSessionConfirm' => 'Вы будете удалены из сессии.',
-			'watchTogether.endSessionConfirmOverlay' => 'Это завершит сеанс просмотра для всех участников.',
-			'watchTogether.leaveSessionConfirmOverlay' => 'Вы будете отключены от сеанса просмотра.',
-			'watchTogether.end' => 'Завершить',
 			'watchTogether.leave' => 'Покинуть',
-			'watchTogether.syncing' => 'Синхронизация...',
-			'watchTogether.joinWatchSession' => 'Присоединиться к просмотру',
-			'watchTogether.enterCodeHint' => 'Введите 5-символьный код',
-			'watchTogether.pasteFromClipboard' => 'Вставить из буфера обмена',
-			'watchTogether.pleaseEnterCode' => 'Введите код сессии',
-			'watchTogether.codeMustBe5Chars' => 'Код сессии должен содержать 5 символов',
-			'watchTogether.joinInstructions' => 'Введите код сессии организатора, чтобы присоединиться.',
-			'watchTogether.failedToCreate' => 'Не удалось создать сессию',
-			'watchTogether.failedToJoin' => 'Не удалось присоединиться к сессии',
-			'watchTogether.sessionCodeCopied' => 'Код сессии скопирован в буфер обмена',
-			'watchTogether.relayUnreachable' => 'Сервер ретрансляции недоступен. Блокировка интернет-провайдером может помешать совместному просмотру.',
-			'watchTogether.reconnectingToHost' => 'Повторное подключение к организатору...',
-			'watchTogether.currentPlayback' => 'Текущее воспроизведение',
-			'watchTogether.joinCurrentPlayback' => 'Присоединиться к текущему воспроизведению',
-			'watchTogether.joinCurrentPlaybackDescription' => 'Вернуться к материалу, который сейчас смотрит организатор',
-			'watchTogether.failedToOpenCurrentPlayback' => 'Не удалось открыть текущее воспроизведение',
-			'watchTogether.participantJoined' => ({required Object name}) => '${name} присоединился',
-			'watchTogether.participantLeft' => ({required Object name}) => '${name} вышел',
-			'watchTogether.participantPaused' => ({required Object name}) => '${name} поставил на паузу',
-			'watchTogether.participantResumed' => ({required Object name}) => '${name} возобновил',
-			'watchTogether.participantSeeked' => ({required Object name}) => '${name} перемотал',
-			'watchTogether.participantChangedSpeed' => ({required Object name, required Object speed}) => '${name} установил скорость ${speed}',
-			'watchTogether.participantBuffering' => ({required Object name}) => 'У ${name} идёт буферизация',
-			'watchTogether.participantNeedsUpdate' => ({required Object name}) => '${name} использует старую версию приложения — синхронизация недоступна',
-			'watchTogether.resumingWithout' => ({required Object name}) => 'Возобновление без ${name}',
-			'watchTogether.waitingForParticipants' => 'Ожидание загрузки у других...',
-			'watchTogether.waitingForName' => ({required Object name}) => 'Ожидание ${name}...',
-			'watchTogether.recentRooms' => 'Недавние комнаты',
-			'watchTogether.renameRoom' => 'Переименовать комнату',
-			'watchTogether.removeRoom' => 'Удалить',
-			'watchTogether.guestSwitchUnavailable' => 'Не удалось переключиться — сервер недоступен для синхронизации',
-			_ => null,
-		} ?? switch (path) {
-			'watchTogether.guestSwitchFailed' => 'Не удалось переключиться — содержимое не найдено на этом сервере',
-			'watchTogether.defaultDisplayName' => 'Пользователь',
-			'watchTogether.errors.timedOut' => 'Сервер ретрансляции не ответил вовремя',
-			'watchTogether.errors.connectionLost' => 'Соединение закрылось до того, как сессия была готова',
-			'watchTogether.errors.invalidRelayResponse' => 'Сервер ретрансляции прислал неожиданный ответ',
-			'watchTogether.errors.sessionEnded' => 'Организатор завершил сессию',
-			'watchTogether.errors.sessionUnavailable' => 'Не удалось возобновить эту сессию. Присоединитесь к комнате или создайте её, чтобы продолжить.',
+			'watchTogether.end' => 'Завершить',
+			'watchTogether.notices.paused' => ({required Object name}) => '${name} поставил на паузу',
+			'watchTogether.notices.changedSpeed' => ({required Object name, required Object speed}) => '${name} установил скорость ${speed}',
+			'watchTogether.notices.waitingFor' => ({required Object name}) => 'Ожидание ${name}...',
+			'watchTogether.notices.hostChangedTo' => ({required Object name}) => '${name} теперь организатор',
+			'watchTogether.notices.youAreNowHost' => 'Теперь вы — организатор',
+			'watchTogether.notices.joined' => ({required Object name}) => '${name} присоединился',
+			'watchTogether.notices.left' => ({required Object name}) => '${name} вышел',
 			'downloads.title' => 'Загрузки',
 			'downloads.manage' => 'Управление',
 			'downloads.tvShows' => 'Сериалы',
@@ -4654,6 +4547,8 @@ extension on TranslationsRu {
 			'downloads.includeSpecials' => 'Включить спецвыпуски',
 			'downloads.howManyEpisodes' => 'Сколько эпизодов?',
 			'downloads.invalidEpisodeCount' => 'Введите допустимое количество эпизодов.',
+			_ => null,
+		} ?? switch (path) {
 			'downloads.keepSynced' => 'Синхронизировать',
 			'downloads.downloadOnce' => 'Скачать один раз',
 			'downloads.keepNUnwatched' => ({required Object count}) => 'Хранить ${count} непросмотренных',
@@ -4835,7 +4730,6 @@ extension on TranslationsRu {
 			'videoSettings.audioOutputStereo' => 'Стерео',
 			'videoSettings.audioNormalization' => 'Нормализация громкости',
 			'videoSettings.audioNormalizationDisablesPassthrough' => 'Декодирует аудио в PCM; сквозной вывод отключён, пока эта опция включена',
-			'videoSettings.audioNormalizationStereoMix' => 'Декодирует аудио в стереомикс; сквозной вывод отключён, пока эта опция включена',
 			'performanceOverlay.color' => 'Цвет',
 			'performanceOverlay.performance' => 'Производительность',
 			'performanceOverlay.buffer' => 'Буфер',
@@ -5114,8 +5008,6 @@ extension on TranslationsRu {
 			'addServer.borrowFromAnotherProfile' => 'Использовать подключение другого профиля',
 			'addServer.borrowFromAnotherProfileSubtitle' => 'Повторно используйте подключение другого профиля. Для защищённых профилей потребуется PIN.',
 			'addServer.invalidCredentials' => 'Неверное имя пользователя или пароль',
-			_ => null,
-		} ?? switch (path) {
 			'addServer.authResponseNotJson' => 'Ответ аутентификации не является допустимым JSON',
 			'addServer.authResponseIncomplete' => 'Ответ сервера при входе оказался неполным',
 			'addServer.quickConnectRejected' => 'Quick Connect был отклонён сервером',
