@@ -4496,7 +4496,7 @@ class DownloadManagerService {
       return;
     }
 
-    await _cachePlexItemForOffline(serverId, ratingKey, metadata);
+    await _cachePlexItemForOffline(serverId, ratingKey, metadata, activeProfileId);
 
     await _database.insertDownload(
       serverId: ServerId(serverId),
@@ -4529,17 +4529,29 @@ class DownloadManagerService {
   }
 
   /// Cache a minimal show/season stub so the TV Shows grid works offline.
-  Future<void> registerSyncedParentStub(MediaItem stub) async {
+  Future<void> registerSyncedParentStub(MediaItem stub, {required String activeProfileId}) async {
     final serverId = stub.serverId;
     final ratingKey = stub.id;
     if (serverId == null) return;
-    await _cachePlexItemForOffline(serverId, ratingKey, stub);
+    await _cachePlexItemForOffline(serverId, ratingKey, stub, activeProfileId);
   }
 
   /// Write a Plex-format MediaItem to the API cache and pin it for offline.
   /// Merges with any existing entry to preserve Chapter/Marker/Media arrays.
-  Future<void> _cachePlexItemForOffline(String serverId, String ratingKey, MediaItem m) async {
+  ///
+  /// Plex cache rows are namespaced per profile. [getAllPinnedMetadata] and the
+  /// offline hydration path only read the profile-scoped namespace, so writing
+  /// to the public server namespace makes the item invisible while offline
+  /// (it only appeared once an online refresh re-fetched it through a client).
+  Future<void> _cachePlexItemForOffline(
+    String serverId,
+    String ratingKey,
+    MediaItem m,
+    String activeProfileId,
+  ) async {
     final plexCache = PlexApiCache.instance;
+    final scope = buildPlexProfileScopeId(serverId: ServerId(serverId), profileId: activeProfileId);
+    final cacheId = scope.cacheServerId;
     final endpoint = '/library/metadata/$ratingKey';
 
     // Build Plex wire-format JSON from MediaItem fields.
@@ -4570,7 +4582,7 @@ class DownloadManagerService {
       if (m.serverName != null) 'serverName': m.serverName,
     };
 
-    final existing = await plexCache.get(ServerId(serverId), endpoint);
+    final existing = await plexCache.get(cacheId, endpoint);
     final existingMeta = PlexCacheParser.extractFirstMetadata(existing);
 
     final Map<String, dynamic> merged;
@@ -4583,12 +4595,12 @@ class DownloadManagerService {
       merged = newJson;
     }
 
-    await plexCache.put(ServerId(serverId), endpoint, {
+    await plexCache.put(cacheId, endpoint, {
       'MediaContainer': {
         'Metadata': [merged],
       },
     });
-    await plexCache.pinForOffline(ServerId(serverId), ratingKey);
+    await plexCache.pinForOffline(cacheId, ratingKey);
   }
 
   void dispose() {
