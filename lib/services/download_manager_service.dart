@@ -4496,6 +4496,7 @@ class DownloadManagerService {
       return;
     }
 
+    // PlexSyncer: pass activeProfileId so the cache write lands in the profile-scoped namespace.
     await _cachePlexItemForOffline(serverId, ratingKey, metadata, activeProfileId);
 
     await _database.insertDownload(
@@ -4529,17 +4530,19 @@ class DownloadManagerService {
   }
 
   /// Cache a minimal show/season stub so the TV Shows grid works offline.
+  // PlexSyncer: activeProfileId added so stubs are cached in the profile-scoped namespace (works offline).
   Future<void> registerSyncedParentStub(MediaItem stub, {required String activeProfileId}) async {
     final serverId = stub.serverId;
     final ratingKey = stub.id;
     if (serverId == null) return;
+    // PlexSyncer: scoped cache write (see _cachePlexItemForOffline).
     await _cachePlexItemForOffline(serverId, ratingKey, stub, activeProfileId);
   }
 
   /// Write a Plex-format MediaItem to the API cache and pin it for offline.
   /// Merges with any existing entry to preserve Chapter/Marker/Media arrays.
   ///
-  /// Plex cache rows are namespaced per profile. [getAllPinnedMetadata] and the
+  /// PlexSyncer: Plex cache rows are namespaced per profile. [getAllPinnedMetadata] and the
   /// offline hydration path only read the profile-scoped namespace, so writing
   /// to the public server namespace makes the item invisible while offline
   /// (it only appeared once an online refresh re-fetched it through a client).
@@ -4550,6 +4553,7 @@ class DownloadManagerService {
     String activeProfileId,
   ) async {
     final plexCache = PlexApiCache.instance;
+    // PlexSyncer: profile-scoped cache id; must match what getAllPinnedMetadata reads offline.
     final scope = buildPlexProfileScopeId(serverId: ServerId(serverId), profileId: activeProfileId);
     final cacheId = scope.cacheServerId;
     final endpoint = '/library/metadata/$ratingKey';

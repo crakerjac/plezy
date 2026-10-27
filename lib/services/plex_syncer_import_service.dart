@@ -127,7 +127,7 @@ class PlexSyncerImportService {
               serverId: serverId,
               serverName: serverName,
             ),
-            activeProfileId: activeProfileId,
+            activeProfileId: activeProfileId, // PlexSyncer: scoped offline cache write
           );
         }
         if (item.parentRatingKey?.isNotEmpty == true && stubbedParentKeys.add(item.parentRatingKey!)) {
@@ -143,7 +143,7 @@ class PlexSyncerImportService {
               serverId: serverId,
               serverName: serverName,
             ),
-            activeProfileId: activeProfileId,
+            activeProfileId: activeProfileId, // PlexSyncer: scoped offline cache write
           );
         }
       }
