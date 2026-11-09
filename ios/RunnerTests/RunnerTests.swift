@@ -224,7 +224,8 @@ final class MpvPlayerContractTests: XCTestCase {
 
   func testMpvContextsPreferAVFoundationOverAudioUnit() {
     // ao_audiounit remixes 5.1/7.1 to stereo on AirPods (#2264); both the
-    // video and the music core must probe AVFoundation first.
+    // video and the music core must probe AVFoundation first. From iOS 26,
+    // ao_spatial precedes it and refuses everything but TrueHD and DTS-HD.
     let core = MpvAudioPlayerCore()
     XCTAssertTrue(core.initialize())
     defer {
@@ -232,7 +233,13 @@ final class MpvPlayerContractTests: XCTestCase {
       core.queue.sync {}
     }
 
-    XCTAssertEqual(try awaitGetProperty(core, name: "options/ao").get(), "avfoundation,audiounit")
+    let expected: String
+    if #available(iOS 26, *) {
+      expected = "spatial,avfoundation,audiounit"
+    } else {
+      expected = "avfoundation,audiounit"
+    }
+    XCTAssertEqual(try awaitGetProperty(core, name: "options/ao").get(), expected)
   }
 
   func testPauseIntentUpdatesCacheBeforeAsyncWriteCompletes() {
@@ -267,6 +274,15 @@ final class MpvPlayerContractTests: XCTestCase {
   // ao_avfoundation queues seconds of audio filtered at the old speed. A Watch
   // Together room pauses, changes its rate and plays; playback must run at the
   // new rate from the paused position, not drift off while that queue drains.
+  //
+  // Unflushed, mpv's audio clock drops by that queue the moment the write
+  // lands, about 3 s on the iOS 26.5 simulator, and playback stays about 4 s
+  // behind. Each test checks the position right after the write, then the
+  // rate once output has restarted. One wall-clock span measured from before
+  // the restart kept failing CI even at 1.5 s: it also carries the restart
+  // itself, and the paused flush reads 0.5 s ahead until playback resumes.
+  private let speedWriteJumpTolerance: TimeInterval = 1
+
   func testSpeedWrittenWhilePausedTakesEffectOnPlay() throws {
     let (core, file) = try startSilentPlayback()
     defer { stopSilentPlayback(core, file: file) }
@@ -275,13 +291,10 @@ final class MpvPlayerContractTests: XCTestCase {
     pump(0.5)
     let pausedAt = try timePos(core)
     XCTAssertSuccess(awaitProperty(core, name: "speed", value: "2"))
+    XCTAssertEqual(try timePos(core), pausedAt, accuracy: speedWriteJumpTolerance)
     pump(0.5)
     XCTAssertSuccess(awaitProperty(core, name: "pause", value: "no"))
-    let playedAt = Date()
-    pump(3)
-
-    let expected = pausedAt + 2 * Date().timeIntervalSince(playedAt)
-    XCTAssertEqual(try timePos(core), expected, accuracy: 0.5)
+    try assertPlaysAtDoubleSpeed(core)
   }
 
   func testSpeedWrittenWhilePlayingTakesEffectAtOnce() throws {
@@ -289,12 +302,9 @@ final class MpvPlayerContractTests: XCTestCase {
     defer { stopSilentPlayback(core, file: file) }
 
     let changedFrom = try timePos(core)
-    let changedAt = Date()
     XCTAssertSuccess(awaitProperty(core, name: "speed", value: "2"))
-    pump(3)
-
-    let expected = changedFrom + 2 * Date().timeIntervalSince(changedAt)
-    XCTAssertEqual(try timePos(core), expected, accuracy: 0.5)
+    XCTAssertEqual(try timePos(core), changedFrom, accuracy: speedWriteJumpTolerance)
+    try assertPlaysAtDoubleSpeed(core)
   }
 
   func testOlderPauseReplyCannotOverwriteNewerUserIntent() {
@@ -842,6 +852,23 @@ final class MpvPlayerContractTests: XCTestCase {
     core.dispose()
     core.queue.sync {}
     try? FileManager.default.removeItem(at: file)
+  }
+
+  /// Measures from a second after the caller's write or resume, once output
+  /// has restarted, over three seconds: time-pos advances in steps of up to a
+  /// second at 2x, so a shorter span reads well off the rate. Playback left at
+  /// 1x reads about 1.
+  private func assertPlaysAtDoubleSpeed(
+    _ core: MpvPlayerCoreBase,
+    file: StaticString = #filePath,
+    line: UInt = #line
+  ) throws {
+    pump(1)
+    let startPosition = try timePos(core)
+    let startedAt = Date()
+    pump(3)
+    let rate = (try timePos(core) - startPosition) / Date().timeIntervalSince(startedAt)
+    XCTAssertEqual(rate, 2, accuracy: 0.5, "Playback rate after the speed write", file: file, line: line)
   }
 
   /// 48 kHz stereo 16-bit PCM silence.
